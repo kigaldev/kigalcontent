@@ -1,0 +1,44 @@
+{
+  "creator_id": "CR-001",
+  "name": "David",
+  "personal_brand_tagline": "Arquitectura de Negocios Unipersonales, Automatización con IA y Productividad Estratégica",
+  "niche": "Solopreneurship, automatización con sistemas no-code/IA y diseño de ecosistemas de contenido",
+  "ideal_customer_profile": "Fundadores, consultores y profesionales que buscan desvincular sus ingresos del tiempo",
+  "content_pillars": [
+    "Sistemas de Producción y Automatización de Contenido",
+    "Modelos de Negocio Unipersonales y Apalancamiento",
+    "Ingeniería Inversa de Grandes Creadores",
+    "Mentalidad de Soberanía y Productividad de Élite"
+  ],
+  "conversion_goals_catalog": {
+    "EMAIL_LEAD_CAPTURE": {
+      "objective": "Migrar audiencia alquilada a lista de correo propia mediante un recurso de alto valor.",
+      "lead_magnet_name": "Blueprint 6x6 de Automatización de Contenido con IA",
+      "lead_magnet_format": "Guía PDF accionable + plantillas de Notion",
+      "trigger_word": "BLUEPRINT",
+      "automation_backend": "ManyChat DM / Tali Form",
+      "preferred_cta_style": "Comenta [TRIGGER_WORD] y te envío el recurso completo por privado."
+    },
+    "B2B_INBOUND_CONVERSATION": {
+      "objective": "Iniciar conversaciones cualificadas 1 a 1 para servicios de consultoría o implementación.",
+      "trigger_word": "SISTEMAS",
+      "automation_backend": "LinkedIn / Instagram Inbound DMs",
+      "preferred_cta_style": "Si diriges una empresa de servicios y quieres auditar tus procesos, envíame un mensaje directo con la palabra [TRIGGER_WORD]."
+    },
+    "RELATIONAL_DISTRIBUTION_SHARES": {
+      "objective": "Maximizar distribución algorítmica y envíos por mensaje directo (Dark Social / Sends per Reach > 2%).",
+      "preferred_cta_style": "Envíale este video a ese socio o colega que todavía cree que trabajar 80 horas es la única forma de crecer."
+    },
+    "PLATFORM_RETENTION_LOOP": {
+      "objective": "Encadenar sesiones de reproducción en YouTube mediante tarjeta final o siguiente video.",
+      "preferred_cta_style": "Ahora que entiendes este principio, mira el video que aparece en pantalla donde te muestro la implementación técnica paso a paso."
+    }
+  },
+  "active_conversion_goal": "EMAIL_LEAD_CAPTURE",
+  "social_profiles": {
+    "youtube_channel_id": "UC_example_content_engine",
+    "instagram_username": "david_solopreneur",
+    "tiktok_username": "@davidsystems",
+    "linkedin_vanity_name": "david-sistemas-ia"
+  }
+}

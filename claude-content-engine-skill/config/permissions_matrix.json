@@ -1,0 +1,53 @@
+{
+  "permission_policy": {
+    "version": "1.0",
+    "mode": "controlled_autonomy",
+    "audit_log_path": "./.content_engine/logs/audit_trail.log"
+  },
+  "tier_classification": {
+    "tier_1_safe_autonomous": {
+      "requires_human_approval": false,
+      "description": "Acciones reversibles, operativas y de lectura/cómputo interno.",
+      "allowed_actions": [
+        "web_search",
+        "scrape_public_data",
+        "calculate_ice_score",
+        "generate_brief_markdown",
+        "transcribe_audio_whisper",
+        "detect_silences_ffmpeg",
+        "generate_dynamic_subtitles_srt",
+        "render_scratch_video",
+        "query_analytics_api",
+        "calculate_outlier_zscore",
+        "append_audit_log"
+      ]
+    },
+    "tier_2_sensitive_review": {
+      "requires_human_approval": true,
+      "approval_mechanism": "cli_prompt_and_token",
+      "timeout_seconds": 86400,
+      "description": "Acciones que alteran la estrategia creativa o cambian el estado del pipeline.",
+      "actions": [
+        "approve_script_for_production",
+        "finalize_ab_test_variants",
+        "modify_hook_vault_rules",
+        "mark_format_as_abandoned_rmta"
+      ]
+    },
+    "tier_3_critical_irreversible": {
+      "requires_human_approval": true,
+      "approval_mechanism": "explicit_two_factor_confirmation",
+      "timeout_seconds": 3600,
+      "description": "Acciones externas, financieras, públicas o destructivas.",
+      "actions": [
+        "publish_video_public_youtube",
+        "publish_reel_public_instagram",
+        "publish_tiktok_public",
+        "publish_post_linkedin",
+        "delete_raw_media_files",
+        "update_mcp_api_tokens",
+        "execute_paid_ad_campaign"
+      ]
+    }
+  }
+}

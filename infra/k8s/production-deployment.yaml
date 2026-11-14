@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autonomous-content-engine
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ace-backend-api
+  namespace: autonomous-content-engine
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ace-backend-api
+  template:
+    metadata:
+      labels:
+        app: ace-backend-api
+    spec:
+      nodeSelector:
+        workload-tier: general-cpu
+      containers:
+        - name: api
+          image: ghcr.io/kigalcontent/ace-backend:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ace-backend-api
+  namespace: autonomous-content-engine
+spec:
+  selector:
+    app: ace-backend-api
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ace-backend-api-hpa
+  namespace: autonomous-content-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ace-backend-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ace-media-gpu-worker
+  namespace: autonomous-content-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ace-media-gpu-worker
+  template:
+    metadata:
+      labels:
+        app: ace-media-gpu-worker
+    spec:
+      nodeSelector:
+        workload-tier: media-gpu
+        accelerator: nvidia-tesla-t4
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: gpu-worker
+          image: ghcr.io/kigalcontent/ace-media-gpu:latest
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              memory: "8Gi"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ace-media-gpu-keda
+  namespace: autonomous-content-engine
+spec:
+  scaleTargetRef:
+    name: ace-media-gpu-worker
+  minReplicaCount: 0
+  maxReplicaCount: 8
+  triggers:
+    - type: redis
+      metadata:
+        address: redis.autonomous-content-engine.svc.cluster.local:6379
+        listName: media_gpu
+        listLength: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ace-frontend-web
+  namespace: autonomous-content-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ace-frontend-web
+  template:
+    metadata:
+      labels:
+        app: ace-frontend-web
+    spec:
+      nodeSelector:
+        workload-tier: general-cpu
+      containers:
+        - name: web
+          image: ghcr.io/kigalcontent/ace-frontend:latest
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ace-frontend-web
+  namespace: autonomous-content-engine
+spec:
+  selector:
+    app: ace-frontend-web
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ace-ingress
+  namespace: autonomous-content-engine
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+    - host: engine.kigalcontent.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: ace-backend-api
+                port:
+                  number: 80
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: ace-backend-api
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ace-frontend-web
+                port:
+                  number: 80

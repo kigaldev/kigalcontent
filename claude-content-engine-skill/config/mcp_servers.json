@@ -1,0 +1,62 @@
+{
+  "mcpServers": {
+    "research_engine": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "description": "Búsqueda web primaria, validación de tendencias y descubrimiento de fuentes fidedignas."
+    },
+    "local_filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./.content_engine", "./media_workspace"],
+      "description": "Gestión local de activos, almacenamiento de estados FSM, briefs, transcripciones y logs."
+    },
+    "youtube_data": {
+      "command": "uvx",
+      "args": ["youtube-mcp-server"],
+      "env": {
+        "YOUTUBE_CLIENT_SECRET_FILE": "${YOUTUBE_CLIENT_SECRET_FILE}",
+        "YOUTUBE_API_KEY": "${YOUTUBE_API_KEY}"
+      },
+      "description": "Gestión de metadatos, carga de videos (draft/unlisted), configuración de A/B tests (Test & Compare) y extracción de YouTube Analytics."
+    },
+    "meta_graph": {
+      "command": "uvx",
+      "args": ["meta-content-mcp-server"],
+      "env": {
+        "INSTAGRAM_ACCESS_TOKEN": "${INSTAGRAM_ACCESS_TOKEN}",
+        "INSTAGRAM_BUSINESS_ACCOUNT_ID": "${INSTAGRAM_BUSINESS_ACCOUNT_ID}"
+      },
+      "description": "Publicación en Instagram Reels y extracción de métricas de retención (Hold Rate 3s, Sends per Reach, Completion Rate)."
+    },
+    "tiktok_marketing": {
+      "command": "uvx",
+      "args": ["tiktok-content-mcp-server"],
+      "env": {
+        "TIKTOK_ACCESS_TOKEN": "${TIKTOK_ACCESS_TOKEN}",
+        "TIKTOK_BUSINESS_ID": "${TIKTOK_BUSINESS_ID}"
+      },
+      "description": "Publicación en TikTok Content Posting API y analítica de retención, loop rate y engagement."
+    },
+    "linkedin_api": {
+      "command": "uvx",
+      "args": ["linkedin-mcp-server"],
+      "env": {
+        "LINKEDIN_ACCESS_TOKEN": "${LINKEDIN_ACCESS_TOKEN}",
+        "LINKEDIN_ORG_OR_PERSON_URN": "${LINKEDIN_ORG_OR_PERSON_URN}"
+      },
+      "description": "Publicación de carruseles PDF y textos enriquecidos, analítica de dwell time, guardados y comentarios calificados."
+    },
+    "av_production_ffmpeg": {
+      "command": "python3",
+      "args": ["-m", "mcp_ffmpeg_server"],
+      "env": {
+        "FFMPEG_PATH": "/usr/bin/ffmpeg",
+        "WHISPER_MODEL": "base"
+      },
+      "description": "Transcripción local Whisper, detección y corte de silencios, normalización de audio a -14 LUFS, re-encuadre vertical 9:16 y quemado de subtítulos .ass."
+    }
+  }
+}

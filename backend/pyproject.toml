@@ -1,0 +1,11 @@
+[project]
+name = "autonomous-content-engine-backend"
+version = "2.0.0"
+description = "Enterprise FastAPI + Temporal.io + FFmpeg/Whisper backend for Autonomous Content Engine"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

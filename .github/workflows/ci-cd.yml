@@ -1,0 +1,53 @@
+name: Autonomous Content Engine CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  skill-and-backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run Claude Content Engine Skill v2 Tests
+        run: python3 -m unittest discover -s claude-content-engine-skill/tests -p "test_*.py" -v
+      - name: Install Backend Dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run Backend Unit & Integration Suite
+        working-directory: backend
+        run: pytest tests -v
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm install --legacy-peer-deps
+      - name: TypeScript Strict Check
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: Production Build
+        working-directory: frontend
+        run: npm run build
+
+  docker-build:
+    needs: [skill-and-backend-tests, frontend-checks]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Backend API Image
+        run: docker build -t ace-backend:ci ./backend
+      - name: Build Frontend Web Image
+        run: docker build -t ace-frontend:ci ./frontend

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+*.db
+*.sqlite3
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+*.tsbuildinfo
+.DS_Store
+*.log
+
+# Local media scratch
+media_workspace/raw/*
+media_workspace/processed/*
+!media_workspace/raw/.gitkeep
+!media_workspace/processed/.gitkeep
+.env
