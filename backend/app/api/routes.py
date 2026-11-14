@@ -182,9 +182,14 @@ async def get_creator_profile(db: AsyncSession = Depends(get_db)) -> CreatorProf
     return CreatorProfileSchema(
         creator_id=row.creator_code,
         name=row.creator_name,
+        age=row.age,
         personal_brand_tagline=row.personal_brand_tagline,
         niche=row.niche,
         ideal_customer_profile=row.target_icp,
+        project_context=row.project_context,
+        strategic_goals=row.strategic_goals or [],
+        communication_style=row.communication_style,
+        visual_style=row.visual_style,
         content_pillars=row.content_pillars,
         conversion_goals_catalog=row.conversion_goals_catalog,
         active_conversion_goal=ConversionGoal(row.active_goal),
@@ -205,12 +210,22 @@ async def update_creator_profile(
 
     if body.name is not None:
         row.creator_name = body.name
+    if body.age is not None:
+        row.age = body.age
     if body.personal_brand_tagline is not None:
         row.personal_brand_tagline = body.personal_brand_tagline
     if body.niche is not None:
         row.niche = body.niche
     if body.ideal_customer_profile is not None:
         row.target_icp = body.ideal_customer_profile
+    if body.project_context is not None:
+        row.project_context = body.project_context
+    if body.strategic_goals is not None:
+        row.strategic_goals = body.strategic_goals
+    if body.communication_style is not None:
+        row.communication_style = body.communication_style
+    if body.visual_style is not None:
+        row.visual_style = body.visual_style
     if body.content_pillars is not None:
         row.content_pillars = body.content_pillars
     if body.active_conversion_goal is not None:
@@ -230,9 +245,14 @@ async def update_creator_profile(
     file_data.update(
         {
             "name": row.creator_name,
+            "age": row.age,
             "personal_brand_tagline": row.personal_brand_tagline,
             "niche": row.niche,
             "ideal_customer_profile": row.target_icp,
+            "project_context": row.project_context,
+            "strategic_goals": row.strategic_goals,
+            "communication_style": row.communication_style,
+            "visual_style": row.visual_style,
             "content_pillars": row.content_pillars,
             "active_conversion_goal": row.active_goal,
             "conversion_goals_catalog": row.conversion_goals_catalog,

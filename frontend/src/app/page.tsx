@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -16,6 +16,8 @@ import {
   Send,
   ShieldCheck,
   Smartphone,
+  Sparkles,
+  User,
   Wifi,
   WifiOff,
   X,
@@ -38,6 +40,8 @@ import { MobileSafeZoneSimulator } from "@/components/MobileSafeZoneSimulator";
 import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
+import { CreatorProfileModal } from "@/components/CreatorProfileModal";
+import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
 interface TabDefinition {
   id: ActiveStudioTab;
@@ -95,6 +99,15 @@ const STUDIO_TABS: TabDefinition[] = [
     summary: "Descubre qué videos retuvieron más tiempo para mejorar.",
     icon: BarChart3,
   },
+  {
+    id: "social-credentials",
+    stepNumber: 6,
+    label: "Conexiones Oficiales (APIs)",
+    shortLabel: "Conexiones",
+    stepName: "Conexiones y Redes Sociales",
+    summary: "Configura las claves de YouTube, Instagram, TikTok y LinkedIn con tutoriales paso a paso.",
+    icon: ShieldCheck,
+  },
 ];
 
 export default function AutonomousContentEnginePage() {
@@ -119,6 +132,7 @@ export default function AutonomousContentEnginePage() {
     clearToast,
   } = useEngineStore();
 
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const isBootstrappingRef = useRef(false);
 
@@ -388,6 +402,21 @@ export default function AutonomousContentEnginePage() {
 
               <button
                 type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/60 to-violet-950/60 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:border-cyan-400 hover:text-white transition shadow-sm"
+                title="Configurar información, audiencia y estilo del creador"
+              >
+                <div className="w-5 h-5 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-[10px] text-cyan-300 font-bold">
+                  {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
+                </div>
+                <span className="hidden sm:inline">
+                  {creatorProfile?.name || "Mi Perfil & Estilo"}
+                </span>
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              </button>
+
+              <button
+                type="button"
                 onClick={() => void loadWorkspaceData(selectedProjectId ?? undefined)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
                 title="Actualizar datos del proyecto"
@@ -554,6 +583,9 @@ export default function AutonomousContentEnginePage() {
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
             />
           )}
+          {activeTab === "social-credentials" && (
+            <SocialCredentialsSettings />
+          )}
         </section>
 
         {/* Step-by-Step Bottom Footer Navigation */}
@@ -599,6 +631,12 @@ export default function AutonomousContentEnginePage() {
       {/* Global HITL Approval Native Dialog */}
       <HITLApprovalDialog
         onSuccessRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
+      />
+
+      {/* Creator Context Engine Profile Modal */}
+      <CreatorProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
       />
 
       {/* Toast Notification Banner */}

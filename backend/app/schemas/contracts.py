@@ -66,9 +66,14 @@ class CreatorProfileSchema(BaseModel):
 
     creator_id: str = "CR-001"
     name: str
+    age: int | None = None
     personal_brand_tagline: str | None = None
     niche: str
     ideal_customer_profile: str
+    project_context: str | None = None
+    strategic_goals: list[str] = Field(default_factory=list)
+    communication_style: str | None = None
+    visual_style: str | None = None
     content_pillars: list[str] = Field(default_factory=list)
     conversion_goals_catalog: dict[str, ConversionGoalSpec] = Field(default_factory=dict)
     active_conversion_goal: ConversionGoal = ConversionGoal.EMAIL_LEAD_CAPTURE
@@ -78,9 +83,14 @@ class CreatorProfileSchema(BaseModel):
 
 class CreatorProfileUpdateRequest(BaseModel):
     name: str | None = None
+    age: int | None = None
     personal_brand_tagline: str | None = None
     niche: str | None = None
     ideal_customer_profile: str | None = None
+    project_context: str | None = None
+    strategic_goals: list[str] | None = None
+    communication_style: str | None = None
+    visual_style: str | None = None
     content_pillars: list[str] | None = None
     active_conversion_goal: ConversionGoal | None = None
     conversion_goals_catalog: dict[str, ConversionGoalSpec] | None = None

@@ -9,11 +9,20 @@ import type {
 export const FALLBACK_CREATOR_PROFILE: CreatorProfile = {
   creator_id: "CR-001",
   name: "David",
+  age: 32,
   personal_brand_tagline:
     "Arquitectura de Negocios Unipersonales, Automatización con IA y Productividad Estratégica",
   niche: "Solopreneurship, automatización con sistemas no-code/IA y ecosistemas de contenido",
   ideal_customer_profile:
     "Fundadores, consultores y profesionales que buscan desvincular sus ingresos del tiempo",
+  project_context:
+    "Desarrollo de ecosistemas de contenido y automatización con agentes de inteligencia artificial para creadores, fundadores y consultores B2B.",
+  strategic_goals: [
+    "Captar correos y leads cualificados (Lead Magnets)",
+    "Posicionar liderazgo de opinión y reconocimiento de marca",
+  ],
+  communication_style: "Educativo y Didáctico",
+  visual_style: "Tecnológico / Neón Dinámico",
   content_pillars: [
     "Sistemas de Producción y Automatización de Contenido",
     "Modelos de Negocio Unipersonales y Apalancamiento",

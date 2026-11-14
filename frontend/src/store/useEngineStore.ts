@@ -15,7 +15,8 @@ export type ActiveStudioTab =
   | "script-studio"
   | "mobile-simulator"
   | "publishing-hitl"
-  | "analytics-rmta";
+  | "analytics-rmta"
+  | "social-credentials";
 
 interface PendingHITLModal {
   open: boolean;

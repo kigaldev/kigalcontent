@@ -170,9 +170,14 @@ export interface ProjectDetail {
 export interface CreatorProfile {
   creator_id: string;
   name: string;
+  age?: number | null;
   personal_brand_tagline: string | null;
   niche: string;
   ideal_customer_profile: string;
+  project_context?: string | null;
+  strategic_goals?: string[];
+  communication_style?: string | null;
+  visual_style?: string | null;
   content_pillars: string[];
   active_conversion_goal: ConversionGoal;
   conversion_goals_catalog: Record<
