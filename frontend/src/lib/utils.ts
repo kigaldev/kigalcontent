@@ -24,36 +24,36 @@ export const DURATION_PRESET_META: Record<
   }
 > = {
   MICRO_SHORT: {
-    label: "Micro-Short (15–30s)",
-    shortLabel: "15–30s",
+    label: "Video Ultracorto (15–30 seg)",
+    shortLabel: "15–30 seg",
     durationRange: [15, 30],
     wordRange: [40, 75],
     cutInterval: [1.5, 2.5],
-    description: "Cortes cada 1.5–2.5s. Enfocado en Loop Rate y Sends per Reach.",
+    description: "Ritmo rápido (corte cada 1.5–2.5s). Ideal para que el usuario repita el video en bucle o lo comparta por mensaje directo.",
   },
   STANDARD_SHORT: {
-    label: "Standard Short (45–60s)",
-    shortLabel: "45–60s",
+    label: "Short Estándar (45–60 seg)",
+    shortLabel: "45–60 seg",
     durationRange: [45, 60],
     wordRange: [110, 150],
     cutInterval: [3.0, 5.0],
-    description: "Gancho 0–3s, conflicto, 2 argumentos con B-roll y CTA directa.",
+    description: "Gancho inicial en 3 segundos, conflicto, 2 argumentos con apoyo visual y llamada a la acción clara.",
   },
   EXTENDED_SHORT: {
-    label: "Extended Short (90–180s)",
-    shortLabel: "90–180s",
+    label: "Short Extendido (90–180 seg)",
+    shortLabel: "90–180 seg",
     durationRange: [90, 180],
     wordRange: [220, 380],
     cutInterval: [5.0, 8.0],
-    description: "Historia + marco de 3 pasos + CTA de cualificación.",
+    description: "Historia o tutorial en 3 pasos con mayor profundidad y llamado a la acción calificado.",
   },
   LONG_FORM: {
-    label: "Long-Form (8–12 min)",
-    shortLabel: "8–12m",
+    label: "Video Largo / YouTube (8–12 min)",
+    shortLabel: "8–12 min",
     durationRange: [480, 720],
     wordRange: [1200, 1700],
     cutInterval: [15.0, 30.0],
-    description: "Estructura STP en 5–7 bucles, timestamps y retención de catálogo.",
+    description: "Estructura completa en varios bloques temáticos con marcas de tiempo y retención sostenida.",
   },
 };
 
@@ -62,24 +62,24 @@ export const CONVERSION_GOAL_META: Record<
   { label: string; badge: string; triggerHint: string }
 > = {
   EMAIL_LEAD_CAPTURE: {
-    label: "Email Lead Capture (ManyChat / DM)",
-    badge: "Lead Magnet",
-    triggerHint: "Palabra clave automática (ej. BLUEPRINT)",
+    label: "Captación de Contactos / Email (vía Mensaje Privado)",
+    badge: "Guía o Regalo",
+    triggerHint: "Palabra clave para enviar recurso por mensaje (ej. GUIA)",
   },
   B2B_INBOUND_CONVERSATION: {
-    label: "B2B Inbound Conversation",
-    badge: "Diagnóstico 1:1",
-    triggerHint: "Solicitud de auditoría por DM (ej. SISTEMAS)",
+    label: "Generar Clientes B2B (Conversación Privada)",
+    badge: "Asesoría 1:1",
+    triggerHint: "Pedir que escriban por mensaje directo para una evaluación",
   },
   RELATIONAL_DISTRIBUTION_SHARES: {
-    label: "Relational Distribution (Sends/Reach)",
-    badge: "Dark Social >2%",
-    triggerHint: "Compartir por mensaje privado con socio/equipo",
+    label: "Contenido para Compartir (Viralidad Relacional)",
+    badge: "Compartir con Amigos",
+    triggerHint: "Incentiva enviar a un amigo, socio o compañero de equipo",
   },
   PLATFORM_RETENTION_LOOP: {
-    label: "Platform Retention Loop (YouTube)",
-    badge: "End Screen Loop",
-    triggerHint: "Encadenar sesión hacia siguiente video técnico",
+    label: "Retención en YouTube (Ver Siguiente Video)",
+    badge: "Siguiente Video",
+    triggerHint: "Llevar al espectador al siguiente video en pantalla final",
   },
 };
 
@@ -89,15 +89,29 @@ export const FSM_COLUMNS: Array<{
   tier: 1 | 2 | 3;
   colorClass: string;
 }> = [
-  { state: "CAPTURED", title: "Captured", tier: 1, colorClass: "border-slate-600/60" },
-  { state: "RESEARCHED_TRIAGED", title: "Researched (ICE ≥7)", tier: 1, colorClass: "border-sky-500/50" },
-  { state: "SCRIPTED_PACKAGED", title: "Scripted & Packaged", tier: 1, colorClass: "border-indigo-500/50" },
-  { state: "HITL_PENDING_PRODUCTION", title: "HITL Tier 2: Production", tier: 2, colorClass: "border-amber-500/60" },
-  { state: "PRODUCED_VALIDATED", title: "Produced (-14 LUFS QC)", tier: 1, colorClass: "border-teal-500/50" },
-  { state: "HITL_PENDING_PUBLISH", title: "HITL Tier 3: Publish Gate", tier: 3, colorClass: "border-rose-500/60" },
-  { state: "PUBLISHED_LIVE", title: "Published Live", tier: 3, colorClass: "border-emerald-500/60" },
-  { state: "AUDITED_CLOSED_LOOP", title: "Audited (RMT-A)", tier: 1, colorClass: "border-violet-500/60" },
+  { state: "CAPTURED", title: "1. Ideas Capturadas", tier: 1, colorClass: "border-slate-600/60" },
+  { state: "RESEARCHED_TRIAGED", title: "2. Ideas Priorizadas", tier: 1, colorClass: "border-sky-500/50" },
+  { state: "SCRIPTED_PACKAGED", title: "3. Guión Preparado", tier: 1, colorClass: "border-indigo-500/50" },
+  { state: "HITL_PENDING_PRODUCTION", title: "4. Listo para Grabar", tier: 2, colorClass: "border-amber-500/60" },
+  { state: "PRODUCED_VALIDATED", title: "5. Video Validado", tier: 1, colorClass: "border-teal-500/50" },
+  { state: "HITL_PENDING_PUBLISH", title: "6. Esperando Aprobación", tier: 3, colorClass: "border-rose-500/60" },
+  { state: "PUBLISHED_LIVE", title: "7. Publicado en Redes", tier: 3, colorClass: "border-emerald-500/60" },
+  { state: "AUDITED_CLOSED_LOOP", title: "8. Con Métricas", tier: 1, colorClass: "border-violet-500/60" },
 ];
+
+export const HUMAN_STATE_LABELS: Record<FSMState, string> = {
+  INIT: "Borrador inicial",
+  CAPTURED: "Idea capturada",
+  RESEARCHED_TRIAGED: "Priorizada para guión",
+  SCRIPTED_PACKAGED: "Guión listo",
+  HITL_PENDING_PRODUCTION: "Pendiente de aprobar guión",
+  PRODUCED_VALIDATED: "Video editado y validado",
+  HITL_PENDING_PUBLISH: "Esperando tu autorización para publicar",
+  PUBLISHED_LIVE: "Publicado en redes",
+  AUDITED_CLOSED_LOOP: "Analizado con resultados",
+  REJECTED_REVISION: "En revisión de cambios",
+  ARCHIVED: "Archivado",
+};
 
 export function computeLocalOralTiming(
   blocks: TwoColumnScriptBlock[],

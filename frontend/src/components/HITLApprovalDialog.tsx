@@ -4,6 +4,7 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import { KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
+import { HUMAN_STATE_LABELS } from "@/lib/utils";
 
 interface HITLApprovalDialogProps {
   onSuccessRefresh: () => Promise<void>;
@@ -13,7 +14,7 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
   const { hitlModal, closeHitlModal, showToast, backendOnline } = useEngineStore();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const [actor, setActor] = useState("creator");
+  const [actor, setActor] = useState("Creador");
   const [twoFactorCode, setTwoFactorCode] = useState("884210");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -53,7 +54,7 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
       if (!backendOnline) {
         showToast(
           "info",
-          `Modo offline: token simulado para ${hitlModal.assetCode} -> ${hitlModal.targetState}`
+          `Modo local: Aprobación registrada para ${hitlModal.assetCode}.`
         );
         dialogRef.current?.close();
         return;
@@ -71,17 +72,17 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
         target_state: hitlModal.targetState,
         agent_or_user: actor,
         hitl_token: issued.token,
-        reason: `HITL Tier ${hitlModal.tier} signed via web governance console`,
+        reason: `Autorización de seguridad de nivel ${hitlModal.tier} confirmada por el usuario`,
       });
 
       await onSuccessRefresh();
       showToast(
         "success",
-        `Firma HMAC verificada (${issued.token.slice(0, 28)}...). Transición completada.`
+        `Autorización verificada con éxito. El video avanzó a la siguiente fase.`
       );
       dialogRef.current?.close();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Error verificando token HITL");
+      setErrorMsg(err instanceof Error ? err.message : "Error al procesar la autorización");
     } finally {
       setSubmitting(false);
     }
@@ -102,35 +103,35 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div>
-              <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                Gobernanza HITL · Tier {hitlModal.tier}
+              <span className="text-xs uppercase font-bold tracking-wider text-slate-400">
+                {hitlModal.tier === 3
+                  ? "Paso Crítico: Publicación Definitiva"
+                  : "Revisión y Aprobación de Guión"}
               </span>
-              <h2 id={titleId} className="text-lg font-semibold text-white mt-0.5">
-                Confirmación Criptográfica Requerida ({hitlModal.assetCode})
+              <h2 id={titleId} className="text-lg font-bold text-white mt-0.5">
+                Confirmación de Seguridad Requerida
               </h2>
             </div>
           </div>
 
           <p className="text-sm text-slate-300 leading-relaxed">{hitlModal.description}</p>
 
-          <div className="grid gap-3 bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs font-mono">
+          <div className="rounded-lg border border-cyan-500/20 bg-slate-950 p-3 text-xs text-slate-300 space-y-1">
             <div className="flex justify-between">
-              <span className="text-slate-400">Destino FSM:</span>
-              <span className="text-cyan-300">{hitlModal.targetState}</span>
+              <span className="text-slate-400">Video:</span>
+              <span className="text-white font-semibold">{hitlModal.assetCode}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">Acción Auditada:</span>
-              <span className="text-slate-200">{hitlModal.action}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Formato Firma:</span>
-              <span className="text-emerald-300">HITL_AUTH_CREATOR_OK_[HMAC24]</span>
+              <span className="text-slate-400">Siguiente Fase:</span>
+              <span className="text-cyan-300 font-semibold">
+                {HUMAN_STATE_LABELS[hitlModal.targetState] ?? hitlModal.targetState}
+              </span>
             </div>
           </div>
 
           <div className="space-y-3">
-            <label className="block text-xs font-medium text-slate-300">
-              Identificador del Creador / Aprobador
+            <label className="block text-xs font-semibold text-slate-300">
+              Nombre de quien autoriza
               <input
                 type="text"
                 value={actor}
@@ -141,8 +142,8 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
             </label>
 
             {hitlModal.tier === 3 && (
-              <label className="block text-xs font-medium text-slate-300">
-                Código Doble Factor (2FA Tier 3 Irreversible)
+              <label className="block text-xs font-semibold text-slate-300">
+                Código de Confirmación del Creador
                 <div className="relative mt-1">
                   <KeyRound className="w-4 h-4 text-rose-400 absolute left-3 top-2.5" />
                   <input
@@ -154,6 +155,9 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
                     required
                   />
                 </div>
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Código de seguridad para autorizar la publicación pública en redes
+                </span>
               </label>
             )}
           </div>
@@ -169,21 +173,21 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
               type="button"
               autoFocus
               onClick={() => dialogRef.current?.close("cancel")}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+              className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition shadow-sm ${
                 hitlModal.tier === 3
                   ? "bg-rose-600 hover:bg-rose-500 text-white"
-                  : "bg-amber-500 hover:bg-amber-400 text-slate-950"
+                  : "bg-cyan-500 hover:bg-cyan-400 text-slate-950"
               }`}
             >
               <ShieldCheck className="w-4 h-4" />
-              {submitting ? "Firmando HMAC..." : `Firmar Token Tier ${hitlModal.tier}`}
+              {submitting ? "Confirmando..." : "Confirmar y Continuar"}
             </button>
           </div>
         </form>

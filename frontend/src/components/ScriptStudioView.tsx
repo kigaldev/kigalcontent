@@ -209,26 +209,31 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
   if (!selectedDetail?.project) {
     return (
       <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-10 text-center text-slate-400">
-        Selecciona un proyecto en el Kanban para abrir el Script Studio a dos columnas.
+        Selecciona un video en el Paso 1 para redactar y ajustar su guión a dos columnas.
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
-      {/* Parametric Selector & Context Engine Header */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-4">
+      {/* Step Header */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-xs font-bold text-slate-950">
+                2
+              </span>
               <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono text-xs font-bold">
                 {selectedDetail.project.asset_code}
               </span>
-              <h2 className="text-base font-semibold text-white">
-                {selectedDetail.project.working_title}
+              <h2 className="text-base font-bold text-white">
+                Paso 2: Taller de Guiones (Audio y Video)
               </h2>
             </div>
-            <p className="text-xs text-slate-400 mt-1">{spec.description}</p>
+            <p className="text-xs text-slate-400 mt-1">
+              Video: <strong className="text-slate-200">{selectedDetail.project.working_title}</strong> — {spec.description}
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -236,38 +241,39 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
               type="button"
               onClick={() => setShowContextDrawer((v) => !v)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 hover:border-violet-400 text-xs font-medium text-slate-200 transition"
+              title="Ajustar tono, nicho y audiencia del creador"
             >
               <UserCheck className="w-4 h-4 text-violet-400" />
-              Context Engine ({creatorProfile?.name ?? "David"})
+              Perfil y Audiencia ({creatorProfile?.name ?? "Creador"})
             </button>
 
             <button
               type="button"
               onClick={handleRegenerateScript}
               disabled={regenerating}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-xs font-medium text-cyan-200 transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-xs font-semibold text-cyan-200 transition"
             >
               <RefreshCw className={`w-4 h-4 ${regenerating ? "animate-spin" : ""}`} />
-              Adaptar Estructura
+              Adaptar a esta Duración
             </button>
 
             <button
               type="button"
               onClick={handleSaveScript}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition"
             >
               <Save className="w-4 h-4" />
-              {saving ? "Guardando..." : "Guardar Guión AV"}
+              {saving ? "Guardando..." : "Guardar Guión"}
             </button>
           </div>
         </div>
 
-        {/* 4 Duration Modes + Conversion Goal + 130-150 WPM Slider */}
+        {/* 4 Duration Modes + Conversion Goal + Speech Pace Slider */}
         <div className="grid gap-4 lg:grid-cols-12 pt-3 border-t border-slate-800">
           <div className="lg:col-span-5">
-            <span className="block text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-              1. Selector Paramétrico de Duración
+            <span className="block text-[11px] font-semibold text-slate-300 mb-1.5">
+              1. Duración del Video
             </span>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
               {(Object.keys(DURATION_PRESET_META) as DurationPreset[]).map((key) => {
@@ -288,7 +294,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                     </div>
                     <div className="text-[10px] opacity-80 truncate">
                       {DURATION_PRESET_META[key].wordRange[0]}–
-                      {DURATION_PRESET_META[key].wordRange[1]}w
+                      {DURATION_PRESET_META[key].wordRange[1]} pal.
                     </div>
                   </button>
                 );
@@ -297,8 +303,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           </div>
 
           <div className="lg:col-span-4">
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-              2. Meta Comercial &amp; Inyección CTA
+            <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">
+              2. Objetivo del Video (Llamada a la Acción)
               <select
                 value={goal}
                 onChange={(e) => setGoal(e.target.value as ConversionGoal)}
@@ -314,13 +320,13 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           </div>
 
           <div className="lg:col-span-3">
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">
               <div className="flex justify-between">
                 <span className="inline-flex items-center gap-1">
                   <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-                  Ritmo Oral (130–150 WPM)
+                  Velocidad al Hablar
                 </span>
-                <span className="text-cyan-300 font-bold">{wpm} WPM</span>
+                <span className="text-cyan-300 font-bold">{wpm} pal/min</span>
               </div>
               <input
                 type="range"
@@ -331,46 +337,49 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                 onChange={(e) => setWpm(Number(e.target.value))}
                 className="mt-2.5 w-full"
               />
+              <span className="text-[10px] text-slate-400 block mt-1">
+                140 palabras/minuto es la velocidad natural de conversación
+              </span>
             </label>
           </div>
         </div>
 
-        {/* Live Word Budget & Oral Duration Telemetry */}
+        {/* Live Word Budget & Duration Telemetry */}
         <div className="grid sm:grid-cols-4 gap-3 bg-slate-950/70 border border-slate-800 rounded-lg p-3 items-center">
           <div>
-            <span className="text-[11px] text-slate-400">Palabras Totales</span>
-            <div className="text-sm font-mono font-bold text-white">
+            <span className="text-[11px] text-slate-400">Palabras en el guión</span>
+            <div className="text-sm font-bold text-white">
               {timing.wordCount}{" "}
               <span className="text-xs font-normal text-slate-400">
-                / {spec.wordRange[0]}–{spec.wordRange[1]} obj.
+                (Recomendado: {spec.wordRange[0]}–{spec.wordRange[1]})
               </span>
             </div>
           </div>
           <div>
-            <span className="text-[11px] text-slate-400">Duración Oral Estimada</span>
-            <div className="text-sm font-mono font-bold text-cyan-300 inline-flex items-center gap-1.5">
+            <span className="text-[11px] text-slate-400">Tiempo de lectura estimado</span>
+            <div className="text-sm font-bold text-cyan-300 inline-flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5" />
-              {timing.estimatedDurationSec}s{" "}
+              {timing.estimatedDurationSec} seg{" "}
               <span className="text-xs font-normal text-slate-400">
-                (Meta {spec.durationRange[0]}–{spec.durationRange[1]}s)
+                (Meta: {spec.durationRange[0]}–{spec.durationRange[1]}s)
               </span>
             </div>
           </div>
           <div>
-            <span className="text-[11px] text-slate-400">Frecuencia de Cortes</span>
-            <div className="text-sm font-mono text-slate-200">
-              Cada {spec.cutInterval[0]}–{spec.cutInterval[1]}s
+            <span className="text-[11px] text-slate-400">Cambios de plano sugeridos</span>
+            <div className="text-sm text-slate-200 font-semibold">
+              Cada {spec.cutInterval[0]} a {spec.cutInterval[1]} seg
             </div>
           </div>
           <div>
             <div className="flex justify-between text-[11px] mb-1">
-              <span className="text-slate-400">Presupuesto Verbal</span>
+              <span className="text-slate-400">Duración del guión</span>
               <span
                 className={
                   timing.withinBudget ? "text-emerald-400 font-semibold" : "text-amber-400 font-semibold"
                 }
               >
-                {timing.withinBudget ? "En Rango Óptimo" : "Revisar Longitud"}
+                {timing.withinBudget ? "Longitud Óptima" : "Ajustar longitud"}
               </span>
             </div>
             <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -385,6 +394,14 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
         </div>
       </div>
 
+      {/* Explanatory Help Card */}
+      <div className="rounded-xl border border-cyan-500/20 bg-slate-900/60 p-3.5 text-xs text-slate-300 flex items-start gap-2.5">
+        <span className="text-cyan-400 text-sm mt-0.5">💡</span>
+        <p className="leading-relaxed">
+          <strong>¿Cómo usar el guión a dos columnas?</strong> La columna izquierda te indica qué poner en pantalla (planos, textos llamativos y capturas de apoyo), mientras que la columna derecha contiene las palabras exactas que dices con tu voz. Separarlas te permite grabar sin pausas y que el editor monte el video en la mitad de tiempo.
+        </p>
+      </div>
+
       {/* Collapsible Context Engine Editor */}
       {showContextDrawer && creatorProfile && (
         <form
@@ -394,16 +411,16 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-violet-200 flex items-center gap-2">
               <Sliders className="w-4 h-4" />
-              Context Engine del Creador (`creator_profile.json`)
+              Perfil Estratégico del Creador (Audiencia, Ofertas y Palabras Clave)
             </h3>
             <span className="text-xs font-mono text-slate-400">
-              Trigger Activo:{" "}
-              {creatorProfile.conversion_goals_catalog[goal]?.trigger_word ?? "BLUEPRINT"}
+              Palabra de Activación (DMs):{" "}
+              {creatorProfile.conversion_goals_catalog[goal]?.trigger_word ?? "GUIA"}
             </span>
           </div>
           <div className="grid md:grid-cols-2 gap-3">
             <label className="text-xs text-slate-300">
-              Nicho Estratégico
+              Nicho o Temática Principal
               <input
                 type="text"
                 value={nicheEdit}
@@ -412,7 +429,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
               />
             </label>
             <label className="text-xs text-slate-300">
-              Avatar / Ideal Customer Profile (ICP)
+              Audiencia Objetivo / Cliente Ideal (ICP)
               <input
                 type="text"
                 value={icpEdit}
@@ -426,7 +443,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
               type="submit"
               className="px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 text-xs font-semibold"
             >
-              Persistir Perfil &amp; Lead Magnets
+              Guardar Perfil y Regalos de Captación
             </button>
           </div>
         </form>
@@ -435,17 +452,17 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       {/* Two-Column AV Script Table (modern-web-guidance: responsive-table) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 id={captionId} className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+          <h3 id={captionId} className="text-sm font-bold text-slate-200 flex items-center gap-2">
             <FileText className="w-4 h-4 text-cyan-400" />
-            Guión Técnico Audiovisual a Dos Columnas (Visual vs. Sonoro)
+            Guión Audiovisual: Qué se ve en pantalla vs. Qué se dice con voz
           </h3>
           <button
             type="button"
             onClick={handleAddBlock}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
           >
             <Plus className="w-3.5 h-3.5" />
-            Añadir Bloque AV
+            Añadir Escena / Bloque
           </button>
         </div>
 
@@ -457,16 +474,16 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
         >
           <table>
             <caption className="sr-only">
-              Editor de Guión Audiovisual a Dos Columnas con cálculo en tiempo real
+              Editor de Guión Audiovisual a Dos Columnas con cálculo de tiempo
             </caption>
             <thead>
               <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                <th className="p-3 w-44 border-b border-slate-800">Bloque &amp; Tiempo</th>
+                <th className="p-3 w-44 border-b border-slate-800">Escena &amp; Tiempo</th>
                 <th className="p-3 border-b border-slate-800">
-                  Columna Visual (Planos, B-Roll, Texto en Pantalla)
+                  Qué se ve (Cámara, Pantalla y Textos)
                 </th>
                 <th className="p-3 border-b border-slate-800">
-                  Columna Sonora (Locución, SFX, Ritmo {wpm} WPM)
+                  Qué se dice (Locución de voz, música y efectos)
                 </th>
               </tr>
             </thead>
@@ -483,8 +500,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                       onChange={(e) =>
                         handleUpdateBlock(idx, "section_label", e.target.value)
                       }
-                      aria-label={`Nombre del bloque ${idx + 1}`}
-                      className="w-full bg-transparent text-xs font-semibold text-white focus:outline-none border-b border-transparent focus:border-cyan-400 pb-0.5"
+                      aria-label={`Nombre de la escena ${idx + 1}`}
+                      className="w-full bg-transparent text-xs font-bold text-white focus:outline-none border-b border-transparent focus:border-cyan-400 pb-0.5"
                     />
                     <input
                       type="text"
@@ -492,20 +509,20 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                       onChange={(e) =>
                         handleUpdateBlock(idx, "timecode", e.target.value)
                       }
-                      aria-label={`Código de tiempo del bloque ${idx + 1}`}
+                      aria-label={`Segundo inicial y final ${idx + 1}`}
                       className="mt-1 w-full bg-transparent text-[11px] font-mono text-cyan-300 focus:outline-none"
                     />
                     <div className="mt-2 flex items-center justify-between text-[11px] font-mono">
                       <span className="text-slate-400">
-                        {blk.word_count}w · {blk.estimated_seconds}s
+                        {blk.word_count} pal. · {blk.estimated_seconds}s
                       </span>
                       {blk.pacing_warning ? (
                         <span
-                          title="Excede ventana de dinamismo"
-                          className="inline-flex items-center gap-0.5 text-amber-400"
+                          title="Demasiado texto para una sola escena sin cambiar de plano"
+                          className="inline-flex items-center gap-0.5 text-amber-400 font-semibold"
                         >
                           <AlertTriangle className="w-3.5 h-3.5" />
-                          Lento
+                          Muy largo
                         </span>
                       ) : (
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -520,7 +537,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                         className="mt-2 text-[11px] text-slate-500 hover:text-rose-400 inline-flex items-center gap-1"
                       >
                         <Trash2 className="w-3 h-3" />
-                        Quitar
+                        Eliminar
                       </button>
                     )}
                   </th>
@@ -532,7 +549,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                       onChange={(e) =>
                         handleUpdateBlock(idx, "visual_direction", e.target.value)
                       }
-                      aria-label={`Dirección visual bloque ${idx + 1}`}
+                      placeholder="Ej. Mirando a cámara en plano medio. Gesticulación enérgica."
+                      aria-label={`Dirección visual escena ${idx + 1}`}
                       className="w-full rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
                     />
                     <div className="grid sm:grid-cols-2 gap-2">
@@ -542,8 +560,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                         onChange={(e) =>
                           handleUpdateBlock(idx, "b_roll_cue", e.target.value)
                         }
-                        placeholder="B-Roll"
-                        aria-label={`B-Roll bloque ${idx + 1}`}
+                        placeholder="Plano de apoyo / B-roll"
+                        aria-label={`Plano de apoyo escena ${idx + 1}`}
                         className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-slate-300"
                       />
                       <input
@@ -552,9 +570,9 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                         onChange={(e) =>
                           handleUpdateBlock(idx, "on_screen_text", e.target.value)
                         }
-                        placeholder="Texto en pantalla"
-                        aria-label={`Texto en pantalla bloque ${idx + 1}`}
-                        className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] font-mono text-amber-300"
+                        placeholder="Texto grande en pantalla"
+                        aria-label={`Texto en pantalla escena ${idx + 1}`}
+                        className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] font-bold text-amber-300"
                       />
                     </div>
                   </td>
@@ -566,7 +584,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                       onChange={(e) =>
                         handleUpdateBlock(idx, "audio_voiceover", e.target.value)
                       }
-                      aria-label={`Locución bloque ${idx + 1}`}
+                      placeholder="Escribe aquí exactamente lo que vas a decir ante la cámara..."
+                      aria-label={`Locución escena ${idx + 1}`}
                       className="w-full rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-white leading-relaxed focus:outline-none focus:border-cyan-400"
                     />
                     <div className="grid sm:grid-cols-2 gap-2">
@@ -576,8 +595,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                         onChange={(e) =>
                           handleUpdateBlock(idx, "sfx_cue", e.target.value)
                         }
-                        placeholder="SFX"
-                        aria-label={`SFX bloque ${idx + 1}`}
+                        placeholder="Efecto de sonido (ej. Pop, Campana)"
+                        aria-label={`Efecto de sonido escena ${idx + 1}`}
                         className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-cyan-200"
                       />
                       <input
@@ -586,8 +605,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                         onChange={(e) =>
                           handleUpdateBlock(idx, "music_cue", e.target.value)
                         }
-                        placeholder="Música / Ritmo"
-                        aria-label={`Música bloque ${idx + 1}`}
+                        placeholder="Música de fondo (ej. Beat suave)"
+                        aria-label={`Música escena ${idx + 1}`}
                         className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-violet-200"
                       />
                     </div>
@@ -600,32 +619,39 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       </div>
 
       {/* Packaging-First A/B Variants (1280x720) */}
-      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white">
-            Empaque A/B Packaging-First (Miniaturas 1280×720 px + Títulos Contrastantes)
-          </h3>
-          <span className="text-xs font-mono text-emerald-300">
-            CTA Activa: {selectedDetail.script?.cta_text}
-          </span>
+      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-white">
+              Miniaturas y Títulos Alternativos (Variantes A / B)
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              💡 Probar dos opciones contrastantes te permite ver cuál consigue más interés y retiene a la audiencia por más tiempo.
+            </p>
+          </div>
+          {selectedDetail.script?.cta_text && (
+            <span className="text-xs rounded bg-slate-950 border border-slate-800 px-2 py-1 text-emerald-300">
+              Llamada a la acción: {selectedDetail.script.cta_text}
+            </span>
+          )}
         </div>
-        <div className="grid md:grid-cols-2 gap-4">
+        <div className="grid md:grid-cols-2 gap-4 pt-1">
           {selectedDetail.project.ab_variants.map((variant) => (
             <div
               key={variant.variant_label}
               className="rounded-xl border border-slate-800 bg-slate-950/90 p-3.5 space-y-2"
             >
               <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono text-xs font-bold">
-                  Variante {variant.variant_label}
+                <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold text-xs">
+                  Opción {variant.variant_label}
                 </span>
-                <span className="text-[11px] font-mono text-slate-400">
-                  {variant.thumbnail_dimensions}
+                <span className="text-[11px] text-slate-400">
+                  {variant.thumbnail_dimensions} (YouTube / Horizontal)
                 </span>
               </div>
               <div className="aspect-video rounded-lg border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-cyan-950/40 p-4 flex flex-col justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400">
-                  Preview Miniatura Test &amp; Compare
+                <span className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
+                  Concepto de Miniatura
                 </span>
                 <p className="text-base font-bold text-white leading-tight">
                   {variant.title}

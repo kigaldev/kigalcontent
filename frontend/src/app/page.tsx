@@ -3,8 +3,11 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
 import {
   Activity,
+  ArrowLeft,
+  ArrowRight,
   BarChart3,
   CheckCircle2,
+  ChevronRight,
   Cpu,
   FileText,
   KanbanSquare,
@@ -17,6 +20,7 @@ import {
   WifiOff,
   X,
   AlertCircle,
+  HelpCircle,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import {
@@ -26,6 +30,7 @@ import {
   FALLBACK_DETAIL,
   FALLBACK_PROJECTS,
 } from "@/lib/fallbackSeed";
+import { HUMAN_STATE_LABELS } from "@/lib/utils";
 import { useEngineStore, type ActiveStudioTab } from "@/store/useEngineStore";
 import { KanbanPipelineBoard } from "@/components/KanbanPipelineBoard";
 import { ScriptStudioView } from "@/components/ScriptStudioView";
@@ -36,40 +41,58 @@ import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 
 interface TabDefinition {
   id: ActiveStudioTab;
+  stepNumber: number;
   label: string;
   shortLabel: string;
+  stepName: string;
+  summary: string;
   icon: typeof KanbanSquare;
 }
 
 const STUDIO_TABS: TabDefinition[] = [
   {
     id: "pipeline",
-    label: "Pipeline FSM & ICE",
-    shortLabel: "Pipeline",
+    stepNumber: 1,
+    label: "Paso 1: Ideas y Prioridades",
+    shortLabel: "1. Ideas",
+    stepName: "Ideas y Prioridades",
+    summary: "Evalúa y selecciona las mejores ideas antes de grabar.",
     icon: KanbanSquare,
   },
   {
     id: "script-studio",
-    label: "Script Studio AV",
-    shortLabel: "Guión AV",
+    stepNumber: 2,
+    label: "Paso 2: Taller de Guiones",
+    shortLabel: "2. Guión",
+    stepName: "Taller de Guiones",
+    summary: "Escribe y ajusta el guión calculando el tiempo de lectura.",
     icon: FileText,
   },
   {
     id: "mobile-simulator",
-    label: "Simulador 9:16 & QC",
-    shortLabel: "Simulador 9:16",
+    stepNumber: 3,
+    label: "Paso 3: Video y Audio (9:16)",
+    shortLabel: "3. Video 9:16",
+    stepName: "Revisión de Video y Audio",
+    summary: "Revisa subtítulos en el simulador móvil y limpia el audio.",
     icon: Smartphone,
   },
   {
     id: "publishing-hitl",
-    label: "Copycraft & HITL Tier 3",
-    shortLabel: "HITL & Social",
+    stepNumber: 4,
+    label: "Paso 4: Textos y Publicación",
+    shortLabel: "4. Publicar",
+    stepName: "Textos y Publicación",
+    summary: "Prepara los textos por red social y autoriza la publicación.",
     icon: Send,
   },
   {
     id: "analytics-rmta",
-    label: "Analítica RMT-A",
-    shortLabel: "RMT-A",
+    stepNumber: 5,
+    label: "Paso 5: Resultados y Aprendizaje",
+    shortLabel: "5. Resultados",
+    stepName: "Resultados y Aprendizaje",
+    summary: "Descubre qué videos retuvieron más tiempo para mejorar.",
     icon: BarChart3,
   },
 ];
@@ -98,6 +121,12 @@ export default function AutonomousContentEnginePage() {
 
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const isBootstrappingRef = useRef(false);
+
+  const currentTabIndex = STUDIO_TABS.findIndex((t) => t.id === activeTab);
+  const currentTab = STUDIO_TABS[currentTabIndex] ?? STUDIO_TABS[0];
+  const prevTab = currentTabIndex > 0 ? STUDIO_TABS[currentTabIndex - 1] : null;
+  const nextTab =
+    currentTabIndex < STUDIO_TABS.length - 1 ? STUDIO_TABS[currentTabIndex + 1] : null;
 
   const loadWorkspaceData = useCallback(
     async (explicitProjectId?: string) => {
@@ -176,7 +205,7 @@ export default function AutonomousContentEnginePage() {
     void loadWorkspaceData();
   }, [loadWorkspaceData]);
 
-  // Fetch selected project detail whenever selection changes and backend is online
+  // Sync selected project detail
   useEffect(() => {
     if (!selectedProjectId) return;
     let cancelled = false;
@@ -209,7 +238,7 @@ export default function AutonomousContentEnginePage() {
     };
   }, [selectedProjectId, backendOnline, projects, setSelectedDetail]);
 
-  // Live WebSocket feed when FastAPI backend is reachable
+  // WebSocket telemetry feed
   useEffect(() => {
     if (!backendOnline || typeof window === "undefined") return;
     const wsUrl = apiClient.apiBase.replace(/^http/, "ws") + "/ws/events";
@@ -224,7 +253,7 @@ export default function AutonomousContentEnginePage() {
             timestamp?: string;
             payload?: Record<string, unknown>;
           };
-          const eventName = parsed.event ?? "pipeline.event";
+          const eventName = parsed.event ?? "actividad";
           const summary =
             parsed.payload?.working_title
               ? `${String(parsed.payload.working_title)}`
@@ -242,7 +271,7 @@ export default function AutonomousContentEnginePage() {
         }
       };
     } catch {
-      // ignore ws handshake failures in offline/preview mode
+      // ignore ws handshake errors in local/fallback mode
     }
 
     return () => {
@@ -250,7 +279,7 @@ export default function AutonomousContentEnginePage() {
     };
   }, [backendOnline, pushLiveEvent]);
 
-  // Auto-dismiss toast notifications
+  // Auto-dismiss toast
   useEffect(() => {
     if (!toastMessage) return;
     const timer = setTimeout(() => {
@@ -286,11 +315,11 @@ export default function AutonomousContentEnginePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-      {/* Top Enterprise Operational Header */}
+      {/* Top Header */}
       <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-slate-950/90 backdrop-blur-md">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-4 py-3.5">
-            {/* Brand + Stack Badge */}
+            {/* Brand + Clean Subtitle */}
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 via-indigo-500/20 to-emerald-500/20 border border-cyan-500/30 shadow-inner">
                 <Cpu className="h-5 w-5 text-cyan-300" />
@@ -300,29 +329,29 @@ export default function AutonomousContentEnginePage() {
                   <h1 className="text-base font-bold tracking-tight text-white sm:text-lg">
                     Autonomous Content Engine
                   </h1>
-                  <span className="hidden rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300 sm:inline-block">
-                    Enterprise v2
+                  <span className="hidden rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-cyan-300 sm:inline-block">
+                    Estudio de Creación
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
                   {creatorProfile
                     ? `${creatorProfile.name} · ${creatorProfile.niche}`
-                    : "Multi-Agent Media Operating System · Temporal + FFmpeg + HITL"}
+                    : "Plataforma guiada paso a paso para crear, revisar y publicar videos de alto impacto"}
                 </p>
               </div>
             </div>
 
-            {/* Active Asset Selector & System Telemetry */}
+            {/* Project Selector & Status */}
             <div className="flex flex-wrap items-center gap-2.5">
               {projects.length > 0 && (
                 <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-xs">
                   <Layers className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                  <span className="text-slate-400 hidden md:inline">Activo:</span>
+                  <span className="text-slate-400 hidden md:inline">Video Activo:</span>
                   <select
-                    aria-label="Seleccionar proyecto activo"
+                    aria-label="Seleccionar video activo"
                     value={selectedProjectId ?? ""}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="max-w-[240px] truncate bg-transparent font-semibold text-slate-100 focus:outline-none"
+                    className="max-w-[260px] truncate bg-transparent font-semibold text-slate-100 focus:outline-none"
                   >
                     {projects.map((project) => (
                       <option
@@ -330,7 +359,7 @@ export default function AutonomousContentEnginePage() {
                         value={project.id}
                         className="bg-slate-900 text-slate-100"
                       >
-                        [{project.asset_code}] {project.working_title} ({project.current_state})
+                        [{project.asset_code}] {project.working_title} — {HUMAN_STATE_LABELS[project.current_state] ?? project.current_state}
                       </option>
                     ))}
                   </select>
@@ -345,8 +374,8 @@ export default function AutonomousContentEnginePage() {
                 }`}
                 title={
                   backendOnline
-                    ? `API conectada (${apiClient.apiBase})`
-                    : "API FastAPI sin conexión — operando con estado local resiliente"
+                    ? `Servidor conectado (${apiClient.apiBase})`
+                    : "Modo local: puedes redactar guiones y probar el simulador sin necesidad de servidor"
                 }
               >
                 {backendOnline ? (
@@ -354,25 +383,26 @@ export default function AutonomousContentEnginePage() {
                 ) : (
                   <WifiOff className="h-3.5 w-3.5" />
                 )}
-                <span>{backendOnline ? "API & WS Online" : "Modo Studio Local"}</span>
+                <span>{backendOnline ? "Servidor Online" : "Modo Local"}</span>
               </div>
 
               <button
                 type="button"
                 onClick={() => void loadWorkspaceData(selectedProjectId ?? undefined)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
+                title="Actualizar datos del proyecto"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Sincronizar</span>
+                <span className="hidden sm:inline">Actualizar</span>
               </button>
             </div>
           </div>
 
-          {/* Primary Navigation Tablist (WAI-ARIA Tabs + modern-web-guidance underline border) */}
+          {/* Stepper Navigation Tabs (5 Steps) */}
           <div className="flex items-center justify-between gap-4 border-t border-slate-900 pt-1">
             <div
               role="tablist"
-              aria-label="Módulos de Autonomous Content Engine"
+              aria-label="Pasos de creación de contenido"
               className="gap-1 sm:gap-2"
             >
               {STUDIO_TABS.map((tab, index) => {
@@ -398,7 +428,15 @@ export default function AutonomousContentEnginePage() {
                         : "text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                        isSelected
+                          ? "bg-cyan-400 text-slate-950"
+                          : "bg-slate-800 text-slate-300"
+                      }`}
+                    >
+                      {tab.stepNumber}
+                    </span>
                     <span className="hidden md:inline">{tab.label}</span>
                     <span className="md:hidden">{tab.shortLabel}</span>
                   </button>
@@ -409,14 +447,14 @@ export default function AutonomousContentEnginePage() {
             {activeProject && (
               <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pb-1">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Estado:</span>
-                <span className="rounded bg-slate-900 border border-slate-700 px-2 py-0.5 font-mono text-[11px] font-semibold text-cyan-300">
-                  {activeProject.current_state}
+                <span>Fase actual:</span>
+                <span className="rounded bg-slate-900 border border-slate-700 px-2 py-0.5 text-[11px] font-semibold text-cyan-300">
+                  {HUMAN_STATE_LABELS[activeProject.current_state] ?? activeProject.current_state}
                 </span>
                 <span className="text-slate-600">|</span>
-                <span>ICE:</span>
+                <span title="Prioridad calculada de 1 a 10">Prioridad:</span>
                 <span className="font-mono font-bold text-white">
-                  {activeProject.ice_score.toFixed(1)}
+                  {activeProject.ice_score.toFixed(1)}/10
                 </span>
               </div>
             )}
@@ -424,22 +462,59 @@ export default function AutonomousContentEnginePage() {
         </div>
       </header>
 
-      {/* Live Telemetry Ticker */}
+      {/* Visual Step-by-Step Flow Bar */}
+      <div className="border-b border-slate-800/80 bg-slate-900/60 py-2.5">
+        <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-slate-300">
+              <span className="rounded-md bg-cyan-500/20 px-2 py-0.5 font-bold text-cyan-300 text-[11px]">
+                {currentTab.label}
+              </span>
+              <span className="text-slate-400">—</span>
+              <span className="text-slate-300">{currentTab.summary}</span>
+            </div>
+
+            {/* Quick Next / Prev Actions */}
+            <div className="flex items-center gap-2">
+              {prevTab && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(prevTab.id)}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1 text-slate-400 transition hover:border-slate-700 hover:text-white"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Anterior: {prevTab.stepName}</span>
+                </button>
+              )}
+              {nextTab && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(nextTab.id)}
+                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 font-semibold text-cyan-200 transition hover:bg-cyan-500/20 hover:text-white"
+                >
+                  <span>Siguiente: {nextTab.stepName}</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Live Activity Ticker (if any) */}
       {liveEvents.length > 0 && (
-        <div className="border-b border-slate-800/70 bg-slate-900/50">
+        <div className="border-b border-slate-800/70 bg-slate-900/30">
           <div className="mx-auto flex max-w-[1600px] items-center gap-3 overflow-x-auto px-4 py-1.5 text-xs text-slate-300 sm:px-6">
             <span className="inline-flex items-center gap-1.5 font-semibold text-cyan-400 shrink-0">
               <Activity className="h-3.5 w-3.5 animate-pulse" />
-              Eventos WS:
+              Actividad en vivo:
             </span>
             {liveEvents.slice(0, 3).map((ev, idx) => (
               <span
                 key={`${ev.timestamp}-${idx}`}
-                className="inline-flex items-center gap-1.5 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 font-mono text-[11px] shrink-0"
+                className="inline-flex items-center gap-1.5 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-[11px] shrink-0"
               >
-                <span className="text-indigo-300">{ev.event}</span>
-                <span className="text-slate-500">·</span>
-                <span className="text-slate-300 truncate max-w-[220px]">{ev.summary}</span>
+                <span className="text-slate-300 truncate max-w-[280px]">{ev.summary}</span>
               </span>
             ))}
           </div>
@@ -480,9 +555,48 @@ export default function AutonomousContentEnginePage() {
             />
           )}
         </section>
+
+        {/* Step-by-Step Bottom Footer Navigation */}
+        <div className="mt-10 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <div>
+            <span className="text-xs font-semibold text-cyan-400">
+              {currentTab.label}
+            </span>
+            <p className="text-xs text-slate-400 mt-0.5">{currentTab.summary}</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {prevTab && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab(prevTab.id);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Paso Anterior: {prevTab.stepName}</span>
+              </button>
+            )}
+            {nextTab && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab(nextTab.id);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500 hover:bg-cyan-400 px-4 py-2 text-xs font-bold text-slate-950 transition"
+              >
+                <span>Siguiente Paso: {nextTab.stepName}</span>
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
       </main>
 
-      {/* Global HITL Tier 2 / Tier 3 Native <dialog> Modal */}
+      {/* Global HITL Approval Native Dialog */}
       <HITLApprovalDialog
         onSuccessRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
       />
