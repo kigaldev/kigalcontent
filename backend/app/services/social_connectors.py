@@ -210,6 +210,22 @@ def validate_preflight(channel: SocialChannel, post_data: dict[str, Any]) -> Pre
     title = post_data.get("title") or ""
     hashtags = post_data.get("hashtags") or []
 
+    # Validaciones técnicas de formato audiovisual (patrón adaptado de gitroomhq/postiz-app)
+    media = post_data.get("media_qc") or post_data.get("media_metadata") or {}
+    duration = float(media.get("duration_sec", 0.0))
+    res = str(media.get("resolution", ""))
+
+    if channel in (SocialChannel.TIKTOK, SocialChannel.INSTAGRAM):
+        if res and res != "1080x1920" and "x" in res:
+            try:
+                w, h = [int(p) for p in res.split("x")[:2]]
+                if w > h:
+                    blocking_errors.append(
+                        f"BLOQUEO PRE-VUELO [{channel.value}]: El video debe ser vertical 9:16 (detectado formato apaisado {res})."
+                    )
+            except Exception:
+                pass
+
     if channel == SocialChannel.LINKEDIN:
         if URL_PATTERN.search(body):
             blocking_errors.append(

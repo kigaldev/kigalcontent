@@ -132,7 +132,8 @@ def trim_dead_silences(
 
     keep_segments: list[tuple[float, float]] = []
     cursor = 0.0
-    pad = 0.04  # 40ms natural micro-breath padding
+    # 150ms natural speech & phoneme onset margin (adapted from WyattBlue/auto-editor production pattern)
+    pad = 0.15
 
     for s in silence_intervals:
         seg_end = min(total_duration, s["start"] + pad)
@@ -275,7 +276,13 @@ def transcribe_word_timestamps(
             settings = get_settings()
             compute_type = "float16" if settings.whisper_device == "cuda" else "int8"
             model = WhisperModel(settings.whisper_model, device=settings.whisper_device, compute_type=compute_type)
-            segments, _ = model.transcribe(tmp_wav.name, word_timestamps=True)
+            # Enable Silero VAD filtering to prevent hallucination loops and timing drift (faster-whisper pattern)
+            segments, _ = model.transcribe(
+                tmp_wav.name,
+                word_timestamps=True,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=400),
+            )
             words: list[WordTimestamp] = []
             for seg in segments:
                 for w in getattr(seg, "words", []) or []:

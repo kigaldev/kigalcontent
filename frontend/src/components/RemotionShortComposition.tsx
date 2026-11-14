@@ -148,7 +148,15 @@ export const RemotionShortComposition: React.FC<RemotionShortProps> = ({
                   fontWeight: 900,
                   textTransform: "uppercase",
                   color: isActive ? "#facc15" : "#ffffff",
-                  textShadow: "0 4px 14px rgba(0,0,0,0.95)",
+                  transform: isActive ? "scale(1.12)" : "scale(1.0)",
+                  display: "inline-block",
+                  padding: isActive ? "2px 10px" : "2px 4px",
+                  borderRadius: 12,
+                  backgroundColor: isActive ? "rgba(250, 204, 21, 0.16)" : "transparent",
+                  textShadow: isActive
+                    ? "0 0 24px rgba(250, 204, 21, 0.85), 0 4px 14px rgba(0,0,0,0.95)"
+                    : "0 4px 14px rgba(0,0,0,0.95)",
+                  transition: "transform 0.08s ease-out, color 0.08s ease-out",
                 }}
               >
                 {w.word}
