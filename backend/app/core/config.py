@@ -17,8 +17,14 @@ DEFAULT_SKILL_DIR = DEFAULT_REPO_ROOT / "claude-content-engine-skill"
 
 
 def _default_db_url() -> str:
-    if os.environ.get("DATABASE_URL"):
-        return os.environ["DATABASE_URL"]
+    raw = os.environ.get("DATABASE_URL")
+    if raw:
+        # Supabase and Heroku/Neon provide 'postgresql://' or 'postgres://'; SQLAlchemy 2.0 async requires 'postgresql+asyncpg://'
+        if raw.startswith("postgresql://"):
+            return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if raw.startswith("postgres://"):
+            return raw.replace("postgres://", "postgresql+asyncpg://", 1)
+        return raw
     if os.environ.get("VERCEL"):
         return "sqlite+aiosqlite:////tmp/ace_local.db"
     return f"sqlite+aiosqlite:///{(DEFAULT_REPO_ROOT / 'backend' / 'ace_local.db').as_posix()}"

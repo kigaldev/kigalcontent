@@ -6,12 +6,15 @@ import {
   AlertOctagon,
   CheckCircle2,
   Cpu,
+  DownloadCloud,
   Eye,
   Film,
+  FolderOpen,
   HelpCircle,
   Scissors,
   UploadCloud,
   Volume2,
+  X,
 } from "lucide-react";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
@@ -65,6 +68,45 @@ export function MobileSafeZoneSimulator({
     download_url: string;
   } | null>(null);
   const [liveQc, setLiveQc] = useState<MediaQCReport | null>(null);
+
+  const [showGDriveModal, setShowGDriveModal] = useState(false);
+  const [gdriveUrl, setGdriveUrl] = useState("");
+  const [isImportingGDrive, setIsImportingGDrive] = useState(false);
+
+  const handleImportGoogleDrive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProjectId || !gdriveUrl.trim()) return;
+    setIsImportingGDrive(true);
+    try {
+      const res = await fetch("/api/v1/media/google-drive/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: selectedProjectId,
+          file_url_or_id: gdriveUrl.trim(),
+          auto_process: true,
+        }),
+      });
+      if (res.ok) {
+        const report: MediaQCReport = await res.json();
+        setLiveQc(report);
+        setShowGDriveModal(false);
+        setGdriveUrl("");
+        showToast(
+          "success",
+          `Video importado desde Google Drive: ${report.silences_trimmed} pausas recortadas.`
+        );
+        await onRefresh();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast("error", err.detail || "Error al importar desde Google Drive.");
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Error al conectar con Google Drive.");
+    } finally {
+      setIsImportingGDrive(false);
+    }
+  };
 
   const videoQc = liveQc
     ? {
@@ -352,7 +394,16 @@ export function MobileSafeZoneSimulator({
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-xs font-semibold text-slate-200 transition"
               >
                 <UploadCloud className="w-4 h-4 text-cyan-400" />
-                1. Preparar Subida de Video
+                1. Subir Archivo Local (R2/S3)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowGDriveModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-indigo-500/40 bg-indigo-950/40 hover:bg-indigo-900/60 hover:border-indigo-400 text-xs font-semibold text-indigo-200 transition"
+              >
+                <FolderOpen className="w-4 h-4 text-indigo-400" />
+                Importar de Google Drive
               </button>
 
               <button
@@ -446,6 +497,76 @@ export function MobileSafeZoneSimulator({
           </div>
         </div>
       </div>
+
+      {/* Google Drive Import Dialog */}
+      {showGDriveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-indigo-500/40 bg-slate-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <FolderOpen className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-sm font-bold text-white">
+                  Importar Video desde Google Drive
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGDriveModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleImportGoogleDrive} className="space-y-4 text-xs">
+              <p className="text-slate-300 leading-relaxed">
+                Pega el enlace de <strong>Compartir de tu archivo o carpeta de Google Drive</strong>. El sistema descargará el clip y aplicará el recorte de pausas y subtitulado automáticamente.
+              </p>
+
+              <div>
+                <label className="block text-slate-200 font-medium mb-1">
+                  Enlace de Google Drive (Archivo o Carpeta)
+                </label>
+                <input
+                  type="url"
+                  required
+                  value={gdriveUrl}
+                  onChange={(e) => setGdriveUrl(e.target.value)}
+                  placeholder="https://drive.google.com/file/d/1A2B3C.../view?usp=sharing"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-400"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  💡 Asegúrate de que el archivo tenga permisos de acceso &quot;Cualquier persona con el enlace&quot;.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowGDriveModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isImportingGDrive || !gdriveUrl.trim()}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+                >
+                  {isImportingGDrive ? (
+                    "Descargando y Procesando..."
+                  ) : (
+                    <>
+                      <DownloadCloud className="w-4 h-4" />
+                      Importar y Procesar Video
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

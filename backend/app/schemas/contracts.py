@@ -423,3 +423,50 @@ class RMTADiagnosisResponse(BaseModel):
     sends_social_value_sufficient: bool
     four_layer_breakdown: dict[str, dict[str, Any]]
     learned_rule_statement: str
+
+
+# --- Google Drive & Infrastructure Connections ---
+
+class GoogleDriveScanRequest(BaseModel):
+    folder_url_or_id: str
+
+
+class GoogleDriveFileItem(BaseModel):
+    file_id: str
+    name: str
+    mime_type: str = "video/mp4"
+    size_bytes: int = 0
+    web_view_link: str
+    thumbnail_link: str | None = None
+    source: str = "google_drive"
+
+
+class GoogleDriveScanResponse(BaseModel):
+    folder_id: str
+    files: list[GoogleDriveFileItem]
+
+
+class GoogleDriveImportRequest(BaseModel):
+    project_id: UUID
+    file_url_or_id: str
+    script_text_hint: str | None = None
+    auto_process: bool = True
+
+
+class InfrastructureServiceStatus(BaseModel):
+    service_name: str
+    status: str  # "CONNECTED" | "SANDBOX_MOCK" | "MISSING_CREDENTIALS"
+    provider: str
+    details: str
+    action_required: str | None = None
+
+
+class SystemConnectionsStatusResponse(BaseModel):
+    all_ready_for_production: bool
+    database: InfrastructureServiceStatus
+    storage: InfrastructureServiceStatus
+    cache: InfrastructureServiceStatus
+    google_drive: InfrastructureServiceStatus
+    media_worker: InfrastructureServiceStatus
+    social_channels: dict[str, InfrastructureServiceStatus]
+

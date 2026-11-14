@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: autonomous-content-engine-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_BUCKET_NAME
+        value: ace-media-vault
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
