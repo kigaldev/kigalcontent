@@ -42,6 +42,7 @@ app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name, "version": "2.0.0"}
 

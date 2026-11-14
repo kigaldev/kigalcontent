@@ -16,13 +16,36 @@ import type {
   WatchTimeShareResponse,
 } from "@/types/engine";
 
-const API_BASE =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) ||
-  "http://localhost:8000";
-const V1 = `${API_BASE}/api/v1`;
+/**
+ * Resolves the API base URL depending on execution environment:
+ * 1. Server-side runtime (Vercel Server Functions): Uses the internal Vercel service binding
+ *    injected into `process.env.BACKEND_URL` (e.g. `http://backend.internal...`).
+ * 2. Client-side runtime in browser: When deployed on Vercel under one domain with `/api/(.*)` rewrites,
+ *    relative calls or `window.location.origin` route directly to the backend service.
+ * 3. Client/Server custom override: `process.env.NEXT_PUBLIC_API_URL` if explicitly set.
+ * 4. Local development fallback: `http://localhost:8000`.
+ */
+export function getApiBaseUrl(): string {
+  if (typeof process !== "undefined" && process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL.replace(/\/$/, "");
+  }
+  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "http://localhost:8000";
+}
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${V1}${path}`, {
+  const base = getApiBaseUrl();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const targetUrl = base.startsWith("http")
+    ? new URL(`api/v1${normalizedPath}`, `${base.replace(/\/$/, "")}/`).toString()
+    : `${base}/api/v1${normalizedPath}`;
+
+  const res = await fetch(targetUrl, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -44,12 +67,29 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient = {
-  apiBase: API_BASE,
+  get apiBase(): string {
+    return getApiBaseUrl();
+  },
 
   health: async (): Promise<{ status: string }> => {
-    const res = await fetch(`${API_BASE}/health`, { cache: "no-store" });
-    if (!res.ok) throw new Error("Backend offline");
-    return res.json();
+    const base = getApiBaseUrl();
+    const endpoint = base.startsWith("http")
+      ? new URL("api/health", `${base.replace(/\/$/, "")}/`).toString()
+      : `${base}/api/health`;
+
+    try {
+      const res = await fetch(endpoint, { cache: "no-store" });
+      if (res.ok) return res.json();
+    } catch {
+      // fallback to /health below
+    }
+
+    const fallbackEndpoint = base.startsWith("http")
+      ? new URL("health", `${base.replace(/\/$/, "")}/`).toString()
+      : `${base}/health`;
+    const fallbackRes = await fetch(fallbackEndpoint, { cache: "no-store" });
+    if (!fallbackRes.ok) throw new Error("Backend offline");
+    return fallbackRes.json();
   },
 
   listProjects: () => requestJson<ContentProject[]>("/projects"),

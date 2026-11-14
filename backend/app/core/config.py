@@ -16,6 +16,14 @@ DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SKILL_DIR = DEFAULT_REPO_ROOT / "claude-content-engine-skill"
 
 
+def _default_db_url() -> str:
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    if os.environ.get("VERCEL"):
+        return "sqlite+aiosqlite:////tmp/ace_local.db"
+    return f"sqlite+aiosqlite:///{(DEFAULT_REPO_ROOT / 'backend' / 'ace_local.db').as_posix()}"
+
+
 class Settings(BaseSettings):
     """Application settings with Pydantic v2 validation."""
 
@@ -35,9 +43,7 @@ class Settings(BaseSettings):
     hitl_token_ttl_seconds: int = Field(default=3600)
 
     # Database
-    database_url: str = Field(
-        default=f"sqlite+aiosqlite:///{(DEFAULT_REPO_ROOT / 'backend' / 'ace_local.db').as_posix()}"
-    )
+    database_url: str = Field(default_factory=_default_db_url)
 
     # Redis & Temporal
     redis_url: str = Field(default="redis://localhost:6379/0")
