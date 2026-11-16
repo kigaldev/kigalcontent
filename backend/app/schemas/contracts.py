@@ -544,3 +544,15 @@ class LLMTestConnectionResponse(BaseModel):
     message: str = ""
 
 
+class N8nWorkflowTemplateResponse(BaseModel):
+    workflow_id: str
+    filename: str
+    name: str
+    trigger_type: str
+    schedule_or_webhook: str
+    description: str
+    endpoints_used: list[str] = Field(default_factory=list)
+    workflow_json: dict[str, Any] = Field(default_factory=dict)
+
+
+

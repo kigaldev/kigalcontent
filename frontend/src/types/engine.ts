@@ -265,3 +265,14 @@ export interface AnalyticsOverview {
     observed_hold_rate: number;
   }>;
 }
+
+export interface N8nWorkflowTemplate {
+  workflow_id: string;
+  filename: string;
+  name: string;
+  trigger_type: string;
+  schedule_or_webhook: string;
+  description: string;
+  endpoints_used: string[];
+  workflow_json: Record<string, unknown>;
+}

@@ -339,3 +339,16 @@ class TestFastAPIEndToEnd:
             assert probe_resp.status_code == 200
             assert probe_resp.json()["fallback_used"] is True
 
+    def test_n8n_workflow_catalog_endpoint(self):
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/n8n/workflows")
+            assert resp.status_code == 200
+            workflows = resp.json()
+            assert len(workflows) == 5
+            filenames = {wf["filename"] for wf in workflows}
+            assert "01_radar_ideas_ice_matutino.json" in filenames
+            assert "05_auditoria_rmta_aprendizaje.json" in filenames
+            for wf in workflows:
+                assert wf["workflow_json"].get("nodes"), f"Empty nodes in {wf['filename']}"
+
+

@@ -1,0 +1,141 @@
+{
+  "name": "01 - Radar Matutino de Ideas ICE y Guionización IA",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "cron-matutino",
+      "name": "Cada Mañana 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/ideas/score-ice",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"source_origin\": \"n8n_cron\",\n  \"impact\": 9,\n  \"confidence\": 8,\n  \"ease\": 8,\n  \"tam_classification\": \"CORE_80\"\n}",
+        "options": {}
+      },
+      "id": "http-eval-ice",
+      "name": "Evaluar Idea (ICE Scorer)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.ice_score }}",
+              "operation": "largerEqual",
+              "value2": 7
+            }
+          ]
+        }
+      },
+      "id": "if-ice-alto",
+      "name": "¿ICE >= 7.0?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/projects",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"working_title\": \"{{ $json.concept_title || 'Idea Automática IA Local' }}\",\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\"\n}",
+        "options": {}
+      },
+      "id": "http-create-project",
+      "name": "Crear Proyecto en Studio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/scripts/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"project_id\": \"{{ $json.id }}\",\n  \"duration_preset\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"wpm_rate\": 140\n}",
+        "options": {}
+      },
+      "id": "http-generate-script",
+      "name": "Generar Guión AV con Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1140, 220]
+    }
+  ],
+  "connections": {
+    "Cada Mañana 08:00": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Idea (ICE Scorer)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Idea (ICE Scorer)": {
+      "main": [
+        [
+          {
+            "node": "¿ICE >= 7.0?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿ICE >= 7.0?": {
+      "main": [
+        [
+          {
+            "node": "Crear Proyecto en Studio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Proyecto en Studio": {
+      "main": [
+        [
+          {
+            "node": "Generar Guión AV con Ollama",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "Autonomous Content Engine"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Download,
   FileText,
   Gauge,
   Plus,
@@ -12,8 +13,12 @@ import {
   Save,
   Sliders,
   Trash2,
+  Tv,
   UserCheck,
 } from "lucide-react";
+import { TeleprompterModal } from "@/components/TeleprompterModal";
+import { ScriptExporterModal } from "@/components/ScriptExporterModal";
+import { ThumbnailCoverStudio } from "@/components/ThumbnailCoverStudio";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import {
@@ -50,6 +55,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [showContextDrawer, setShowContextDrawer] = useState(false);
+  const [showTeleprompter, setShowTeleprompter] = useState(false);
+  const [showExporter, setShowExporter] = useState(false);
   const [nicheEdit, setNicheEdit] = useState("");
   const [icpEdit, setIcpEdit] = useState("");
 
@@ -237,6 +244,26 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowTeleprompter(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 text-xs font-bold transition shadow-sm"
+              title="Abrir modo grabación a pantalla completa para móvil, tablet o monitor"
+            >
+              <Tv className="w-4 h-4" />
+              Modo Teleprompter
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowExporter(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-xs font-semibold text-slate-200 transition"
+              title="Exportar en PDF imprimible, Notion/Markdown o TXT/SRT"
+            >
+              <Download className="w-4 h-4 text-cyan-400" />
+              Exportar (3 Formatos)
+            </button>
+
             <button
               type="button"
               onClick={() => setShowContextDrawer((v) => !v)}
@@ -662,6 +689,47 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           ))}
         </div>
       </div>
+
+      {/* Interactive HD Canvas Cover & Thumbnail Studio (9:16 + 16:9) */}
+      <ThumbnailCoverStudio
+        assetCode={selectedDetail.project.asset_code}
+        projectTitle={selectedDetail.project.working_title}
+        abVariants={selectedDetail.project.ab_variants}
+      />
+
+      {/* Fullscreen Teleprompter Dialog */}
+      <TeleprompterModal
+        isOpen={showTeleprompter}
+        onClose={() => setShowTeleprompter(false)}
+        title={selectedDetail.project.working_title}
+        assetCode={selectedDetail.project.asset_code}
+        blocks={timing.blocks}
+        initialWpm={wpm}
+        selectedHookText={
+          selectedDetail.script?.hook_variants?.[
+            selectedDetail.script.selected_hook_index ?? 0
+          ]?.hook_text
+        }
+        ctaText={selectedDetail.script?.cta_text}
+      />
+
+      {/* 3-in-1 Script Exporter Dialog (PDF/HTML, Notion/MD, TXT+SRT) */}
+      <ScriptExporterModal
+        isOpen={showExporter}
+        onClose={() => setShowExporter(false)}
+        assetCode={selectedDetail.project.asset_code}
+        title={selectedDetail.project.working_title}
+        preset={preset}
+        wpm={wpm}
+        blocks={timing.blocks}
+        selectedHookText={
+          selectedDetail.script?.hook_variants?.[
+            selectedDetail.script.selected_hook_index ?? 0
+          ]?.hook_text
+        }
+        ctaText={selectedDetail.script?.cta_text}
+        abVariants={selectedDetail.project.ab_variants}
+      />
     </div>
   );
 }

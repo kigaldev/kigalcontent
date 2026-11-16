@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -54,6 +55,7 @@ from app.schemas.contracts import (
     LoadedSkillAgentSpec,
     MediaProcessRequest,
     MediaQCReport,
+    N8nWorkflowTemplateResponse,
     PreflightCheckResult,
     ProjectCreateRequest,
     ProjectSummaryResponse,
@@ -1582,5 +1584,117 @@ async def test_llm_connection(body: LLMTestConnectionRequest) -> LLMTestConnecti
 async def list_loaded_skills() -> list[LoadedSkillAgentSpec]:
     """List canonical Markdown agent Skills loaded from claude-content-engine-skill/."""
     return get_llm_router().loader.list_loaded_skills()
+
+
+# --- 9. n8n Automation Workflow Templates ---
+
+N8N_WORKFLOW_CATALOG: list[dict[str, Any]] = [
+    {
+        "workflow_id": "01-radar-ideas-ice",
+        "filename": "01_radar_ideas_ice_matutino.json",
+        "name": "01 - Radar Matutino de Ideas ICE y Guionización IA",
+        "trigger_type": "Schedule / Cron",
+        "schedule_or_webhook": "Todos los días 08:00 AM",
+        "description": "Evalúa propuestas con ICE Score. Si supera 7.0, crea el proyecto en el tablero Kanban y redacta el guión AV con Ollama.",
+        "endpoints_used": [
+            "POST /api/v1/ideas/score-ice",
+            "POST /api/v1/projects",
+            "POST /api/v1/scripts/generate",
+        ],
+    },
+    {
+        "workflow_id": "02-drive-ffmpeg",
+        "filename": "02_ingesta_google_drive_ffmpeg.json",
+        "name": "02 - Ingesta Google Drive y Procesado FFmpeg (-14 LUFS)",
+        "trigger_type": "Webhook",
+        "schedule_or_webhook": "POST /webhook/ace-drive-ingest",
+        "description": "Escanea nuevas grabaciones en Google Drive, recorta silencios, normaliza el audio a EBU R128 (-14 LUFS) y genera subtítulos con Whisper.",
+        "endpoints_used": [
+            "POST /api/v1/media/google-drive/scan",
+            "POST /api/v1/media/google-drive/import",
+        ],
+    },
+    {
+        "workflow_id": "03-hitl-alert",
+        "filename": "03_alerta_hitl_aprobacion_movil.json",
+        "name": "03 - Alerta HITL al Móvil (Revisión antes de Publicar)",
+        "trigger_type": "Webhook",
+        "schedule_or_webhook": "POST /webhook/ace-hitl-alert",
+        "description": "Cuando un vídeo queda listo para publicar, envía un aviso a Telegram con el resumen y enlace directo para tu aprobación humana (Nivel 3).",
+        "endpoints_used": [
+            "Telegram Bot API",
+        ],
+    },
+    {
+        "workflow_id": "04-publish-multichannel",
+        "filename": "04_publicacion_multicanal_escalonada.json",
+        "name": "04 - Publicación Multicanal Segura (Con Token HMAC)",
+        "trigger_type": "Webhook",
+        "schedule_or_webhook": "POST /webhook/ace-publish-approved",
+        "description": "Emite token criptográfico HITL Nivel 3 con verificación 2FA y publica simultáneamente en YouTube, Instagram, TikTok y LinkedIn.",
+        "endpoints_used": [
+            "POST /api/v1/hitl/issue-token",
+            "POST /api/v1/social/publish",
+        ],
+    },
+    {
+        "workflow_id": "05-rmta-weekly",
+        "filename": "05_auditoria_rmta_aprendizaje.json",
+        "name": "05 - Auditoría Semanal RMT-A y Memoria Episódica",
+        "trigger_type": "Schedule / Cron",
+        "schedule_or_webhook": "Lunes 09:00 AM",
+        "description": "Ejecuta diagnóstico de 4 capas (Hold Rate 3s, Retención, Envíos) y guarda las lecciones aprendidas en learned_rules.md para mejorar futuros guiones.",
+        "endpoints_used": [
+            "POST /api/v1/analytics/diagnose-rmta",
+        ],
+    },
+]
+
+
+def _resolve_n8n_workflows_dir() -> Path | None:
+    resolved = Path(__file__).resolve()
+    candidates = [
+        resolved.parents[3] / "infra" / "n8n" / "workflows",
+        resolved.parents[2] / "infra" / "n8n" / "workflows",
+        Path.cwd() / "infra" / "n8n" / "workflows",
+        Path.cwd().parent / "infra" / "n8n" / "workflows",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+@router.get("/n8n/workflows", response_model=list[N8nWorkflowTemplateResponse])
+async def list_n8n_workflows() -> list[N8nWorkflowTemplateResponse]:
+    """Return official n8n workflow templates ready to download/import into MiniPC n8n."""
+    workflows_dir = _resolve_n8n_workflows_dir()
+    results: list[N8nWorkflowTemplateResponse] = []
+
+    for meta in N8N_WORKFLOW_CATALOG:
+        parsed_json: dict[str, Any] = {}
+        if workflows_dir is not None:
+            file_path = workflows_dir / meta["filename"]
+            if file_path.is_file():
+                try:
+                    parsed_json = json.loads(file_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    parsed_json = {}
+
+        results.append(
+            N8nWorkflowTemplateResponse(
+                workflow_id=meta["workflow_id"],
+                filename=meta["filename"],
+                name=meta["name"],
+                trigger_type=meta["trigger_type"],
+                schedule_or_webhook=meta["schedule_or_webhook"],
+                description=meta["description"],
+                endpoints_used=meta["endpoints_used"],
+                workflow_json=parsed_json,
+            )
+        )
+
+    return results
+
 
 

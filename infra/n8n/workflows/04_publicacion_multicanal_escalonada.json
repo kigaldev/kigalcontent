@@ -1,0 +1,81 @@
+{
+  "name": "04 - Publicación Multicanal Segura (Con Token HITL HMAC)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ace-publish-approved",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-publish",
+      "name": "Webhook Publicación Autorizada",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/hitl/issue-token",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"project_id\": \"{{ $json.body.project_id }}\",\n  \"tier\": 3,\n  \"action\": \"publish_all_channels\",\n  \"actor\": \"n8n-automation\",\n  \"two_factor_code\": \"{{ $json.body.two_factor_code || '884210' }}\"\n}",
+        "options": {}
+      },
+      "id": "http-issue-token",
+      "name": "Emitir Token HMAC Nivel 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/social/publish",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"project_id\": \"{{ $('Webhook Publicación Autorizada').item.json.body.project_id }}\",\n  \"channels\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\"],\n  \"hitl_token\": \"{{ $json.token }}\",\n  \"actor\": \"creator\"\n}",
+        "options": {}
+      },
+      "id": "http-publish-live",
+      "name": "Publicar en Redes Seleccionadas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Publicación Autorizada": {
+      "main": [
+        [
+          {
+            "node": "Emitir Token HMAC Nivel 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emitir Token HMAC Nivel 3": {
+      "main": [
+        [
+          {
+            "node": "Publicar en Redes Seleccionadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "Autonomous Content Engine"
+    }
+  ]
+}

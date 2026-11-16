@@ -1,0 +1,85 @@
+{
+  "name": "03 - Alerta HITL al Móvil (Revisión antes de Publicar)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ace-hitl-alert",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook-hitl",
+      "name": "Webhook Estado HITL Pendiente",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "msg-text",
+              "name": "telegram_message",
+              "value": "=🎬 *Nuevo Video Listo para Revisión Final*\n\n📌 *Activo:* {{ $json.body.asset_code || 'ACE-VIDEO' }}\n📝 *Título:* {{ $json.body.working_title || 'Sin título' }}\n🔒 *Seguridad:* Esperando tu autorización humana (Nivel 3)\n\n👉 Abre tu panel Studio en http://localhost:3000 para revisar el guión, los copies y autorizar la publicación.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-hitl-msg",
+      "name": "Formatear Aviso Móvil",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID || 'TU_CHAT_ID' }}",
+        "text": "={{ $json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-send",
+      "name": "Notificar en Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [700, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Estado HITL Pendiente": {
+      "main": [
+        [
+          {
+            "node": "Formatear Aviso Móvil",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Aviso Móvil": {
+      "main": [
+        [
+          {
+            "node": "Notificar en Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "Autonomous Content Engine"
+    }
+  ]
+}

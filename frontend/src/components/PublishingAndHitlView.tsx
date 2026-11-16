@@ -15,6 +15,7 @@ import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import { runLocalPreflight } from "@/lib/utils";
 import type { SocialChannel, SocialPost } from "@/types/engine";
+import { N8nWorkflowsHub } from "@/components/N8nWorkflowsHub";
 
 interface PublishingAndHitlViewProps {
   onRefresh: () => Promise<void>;
@@ -465,6 +466,9 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
           </div>
         </div>
       </div>
+
+      {/* n8n MiniPC Workflow Templates */}
+      <N8nWorkflowsHub />
 
       {/* Audit History Table */}
       <div className="space-y-2">
