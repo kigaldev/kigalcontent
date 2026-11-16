@@ -17,9 +17,12 @@ class Base(DeclarativeBase):
 
 def _build_engine(database_url: str | None = None) -> AsyncEngine:
     url = database_url or get_settings().database_url
-    connect_args = {}
+    connect_args: dict[str, object] = {}
     if url.startswith("sqlite"):
         connect_args = {"check_same_thread": False}
+    elif "asyncpg" in url:
+        # Required for Supabase Supavisor transaction/session pooler & serverless functions
+        connect_args = {"statement_cache_size": 0}
     engine = create_async_engine(
         url,
         echo=False,

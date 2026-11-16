@@ -24,3 +24,7 @@ media_workspace/processed/*
 !media_workspace/raw/.gitkeep
 !media_workspace/processed/.gitkeep
 .env
+.env.*
+!.env.example
+backend/.env
+frontend/.env*

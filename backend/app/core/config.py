@@ -7,8 +7,9 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,15 +17,30 @@ DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SKILL_DIR = DEFAULT_REPO_ROOT / "claude-content-engine-skill"
 
 
+def _normalize_postgres_url(raw: str) -> str:
+    """Normalize postgresql:// URLs to postgresql+asyncpg:// and safely encode unescaped passwords."""
+    url = raw.strip()
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+    if url.startswith("postgresql+asyncpg://") and "@" in url:
+        scheme, rest = url.split("://", 1)
+        userinfo, hostpart = rest.rsplit("@", 1)
+        if ":" in userinfo:
+            user, password = userinfo.split(":", 1)
+            # Only encode if password has raw special chars not already percent-encoded
+            if unquote(password) == password and any(c in password for c in ":#{}[]/?@ "):
+                password = quote(password, safe="")
+                url = f"{scheme}://{user}:{password}@{hostpart}"
+    return url
+
+
 def _default_db_url() -> str:
     raw = os.environ.get("DATABASE_URL")
     if raw:
-        # Supabase and Heroku/Neon provide 'postgresql://' or 'postgres://'; SQLAlchemy 2.0 async requires 'postgresql+asyncpg://'
-        if raw.startswith("postgresql://"):
-            return raw.replace("postgresql://", "postgresql+asyncpg://", 1)
-        if raw.startswith("postgres://"):
-            return raw.replace("postgres://", "postgresql+asyncpg://", 1)
-        return raw
+        return _normalize_postgres_url(raw)
     if os.environ.get("VERCEL"):
         return "sqlite+aiosqlite:////tmp/ace_local.db"
     return f"sqlite+aiosqlite:///{(DEFAULT_REPO_ROOT / 'backend' / 'ace_local.db').as_posix()}"
@@ -34,7 +50,7 @@ class Settings(BaseSettings):
     """Application settings with Pydantic v2 validation."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(DEFAULT_REPO_ROOT / ".env"), ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -48,8 +64,17 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(default="ace-dev-jwt-secret-key")
     hitl_token_ttl_seconds: int = Field(default=3600)
 
-    # Database
+    # Database & Supabase
     database_url: str = Field(default_factory=_default_db_url)
+    supabase_project_url: str = Field(default="")
+    google_drive_api_key: str = Field(default="")
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _validate_database_url(cls, v: Any) -> str:
+        if not v:
+            return _default_db_url()
+        return _normalize_postgres_url(str(v))
 
     # Redis & Temporal
     redis_url: str = Field(default="redis://localhost:6379/0")
