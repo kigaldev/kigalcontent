@@ -23,19 +23,26 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     environment:
-      - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_KEEP_ALIVE=15m
       - OLLAMA_NUM_PARALLEL=2
     networks:
       - ace-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   ace-backend:
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: ace-backend
     restart: unless-stopped
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     ports:
       - "8000:8000"
     env_file:
@@ -46,15 +53,18 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:14b}
       - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-bge-m3}
+      - SKILL_BASE_DIR=/app/claude-content-engine-skill
     volumes:
       - ./media_workspace:/app/media_workspace
+      - ./claude-content-engine-skill:/app/claude-content-engine-skill:ro
     networks:
       - ace-net
 
   ace-frontend:
-    image: node:20-alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: ace-frontend
-    working_dir: /app/frontend
     restart: unless-stopped
     depends_on:
       - ace-backend
@@ -63,9 +73,6 @@ services:
     environment:
       - BACKEND_URL=http://ace-backend:8000
       - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
-    volumes:
-      - .:/app
-    command: sh -c "npm install && npm run build && npm run start"
     networks:
       - ace-net
 

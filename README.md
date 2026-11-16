@@ -47,6 +47,20 @@ El frontend está desarrollado con **Next.js 15 (App Router, React 19)**, **Tail
 
 ---
 
+## 🖥️ Despliegue Local en MiniPC (24GB / 48GB RAM — Coste 0€)
+
+Para ejecutar la plataforma en tu propio MiniPC como servidor 24/7 sin pagar cuotas por token a OpenAI ni Claude:
+
+```bash
+# Instalador automático en 1 comando (detecta RAM, Docker y descarga modelos Qwen + BGE-M3):
+chmod +x setup-minipc.sh
+./setup-minipc.sh
+```
+
+- **Guía completa paso a paso:** Consulta [`docs/GUIA_INSTALACION_MINIPC.md`](docs/GUIA_INSTALACION_MINIPC.md) para ver la arquitectura, conexión remota con Vercel vía Cloudflare Tunnel y flujos de n8n.
+
+---
+
 ## 🧪 Verificación Local
 
 - **Tests de Frontend:** `cd frontend && npm run build`
