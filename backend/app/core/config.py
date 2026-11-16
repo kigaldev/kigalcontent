@@ -156,6 +156,16 @@ class Settings(BaseSettings):
     linkedin_access_token: str = Field(default="")
     linkedin_person_urn: str = Field(default="urn:li:person:creator-001")
 
+    # Hybrid Skill-Aware LLM Router (Ollama MiniPC + Anthropic Prompt Caching + OpenAI Compatible)
+    llm_provider: str = Field(default="auto")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_model: str = Field(default="qwen3:14b")
+    ollama_embedding_model: str = Field(default="bge-m3")
+    anthropic_model: str = Field(default="claude-3-5-sonnet-latest")
+    openai_compatible_base_url: str = Field(default="https://openrouter.ai/api/v1")
+    openai_compatible_api_key: str = Field(default="")
+    openai_compatible_model: str = Field(default="qwen/qwen-2.5-72b-instruct")
+
     @property
     def creator_profile_path(self) -> Path:
         return self.skill_base_dir / "config" / "creator_profile.json"

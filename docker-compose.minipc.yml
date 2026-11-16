@@ -1,0 +1,95 @@
+# ==============================================================================
+# AUTONOMOUS CONTENT ENGINE — STACK DE PRODUCCIÓN LOCAL EN MINIPC (24GB / 48GB)
+# ==============================================================================
+# Levanta:
+#   1. Ollama (Motor LLM Local coste 0€: qwen3:14b en 24GB o qwen3:32b en 48GB)
+#   2. Backend FastAPI + Worker FFmpeg 7.x / Whisper (conectado a Supabase + R2 + Upstash)
+#   3. Frontend Next.js 15 (puerto 3000)
+#   4. n8n Automation Server (puerto 5678, conectado en red interna con ace-backend)
+#
+# Uso en MiniPC:
+#   docker compose -f docker-compose.minipc.yml up -d
+#   docker exec -it ace-ollama ollama pull qwen3:14b   # (o qwen3:32b tras ampliar a 48GB)
+#   docker exec -it ace-ollama ollama pull bge-m3      # Embeddings locales pgvector
+# ==============================================================================
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ace-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_NUM_PARALLEL=2
+    networks:
+      - ace-net
+
+  ace-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ace-backend
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+      - LLM_PROVIDER=auto
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:14b}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-bge-m3}
+    volumes:
+      - ./media_workspace:/app/media_workspace
+    networks:
+      - ace-net
+
+  ace-frontend:
+    image: node:20-alpine
+    container_name: ace-frontend
+    working_dir: /app/frontend
+    restart: unless-stopped
+    depends_on:
+      - ace-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://ace-backend:8000
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+    volumes:
+      - .:/app
+    command: sh -c "npm install && npm run build && npm run start"
+    networks:
+      - ace-net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: ace-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - GENERIC_TIMEZONE=Europe/Madrid
+      - ACE_BACKEND_API=http://ace-backend:8000/api/v1
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - ace-net
+
+volumes:
+  ollama_models:
+  n8n_data:
+
+networks:
+  ace-net:
+    driver: bridge

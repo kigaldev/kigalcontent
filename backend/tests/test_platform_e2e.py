@@ -303,3 +303,39 @@ class TestFastAPIEndToEnd:
             statuses = {a["operation_status"] for a in audits}
             assert "BLOCKED_HITL_REQUIRED" in statuses
             assert "SUCCESS" in statuses
+
+    def test_skill_loader_and_hybrid_llm_router(self):
+        with TestClient(app) as client:
+            skills_resp = client.get("/api/v1/llm/skills")
+            assert skills_resp.status_code == 200
+            skills = skills_resp.json()
+            agent_ids = {s["agent_id"] for s in skills}
+            assert "director_scriptwriter" in agent_ids
+            assert "researcher_strategist" in agent_ids
+            assert all(s["char_count"] > 100 for s in skills)
+
+            cfg_resp = client.get("/api/v1/llm/config")
+            assert cfg_resp.status_code == 200
+            cfg = cfg_resp.json()
+            assert cfg["anthropic_prompt_caching_enabled"] is True
+            assert len(cfg["recommended_local_models"]) >= 4
+
+            upd_resp = client.put(
+                "/api/v1/llm/config",
+                json={"active_provider": "auto", "ollama_model": "qwen3:14b"},
+            )
+            assert upd_resp.status_code == 200
+            assert upd_resp.json()["ollama_model"] == "qwen3:14b"
+
+            # Probing an unreachable local Ollama endpoint must cleanly fall back without crashing
+            probe_resp = client.post(
+                "/api/v1/llm/test-connection",
+                json={
+                    "provider": "ollama",
+                    "ollama_base_url": "http://127.0.0.1:59999",
+                    "ollama_model": "qwen3:14b",
+                },
+            )
+            assert probe_resp.status_code == 200
+            assert probe_resp.json()["fallback_used"] is True
+

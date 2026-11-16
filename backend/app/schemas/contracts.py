@@ -470,3 +470,77 @@ class SystemConnectionsStatusResponse(BaseModel):
     media_worker: InfrastructureServiceStatus
     social_channels: dict[str, InfrastructureServiceStatus]
 
+
+# --- Hybrid Skill-Aware LLM Router ---
+
+class LLMProviderMode(str, Enum):
+    AUTO = "auto"
+    OLLAMA = "ollama"
+    ANTHROPIC = "anthropic"
+    OPENAI_COMPATIBLE = "openai_compatible"
+    DETERMINISTIC = "deterministic"
+
+
+class LoadedSkillAgentSpec(BaseModel):
+    agent_id: str
+    filename: str
+    title: str
+    char_count: int
+    estimated_tokens: int
+
+
+class RecommendedLocalModel(BaseModel):
+    tier_ram: str  # "24GB" | "48GB"
+    model_id: str
+    pull_command: str
+    ram_usage_gb: str
+    role: str
+    spanish_quality: str
+    recommended: bool = False
+
+
+class LLMConfigResponse(BaseModel):
+    active_provider: LLMProviderMode
+    effective_provider: str
+    ollama_base_url: str
+    ollama_model: str
+    ollama_embedding_model: str
+    anthropic_model: str
+    anthropic_prompt_caching_enabled: bool = True
+    anthropic_key_configured: bool = False
+    openai_compatible_base_url: str
+    openai_compatible_model: str
+    openai_compatible_key_configured: bool = False
+    loaded_skills: list[LoadedSkillAgentSpec] = Field(default_factory=list)
+    recommended_local_models: list[RecommendedLocalModel] = Field(default_factory=list)
+
+
+class LLMConfigUpdateRequest(BaseModel):
+    active_provider: LLMProviderMode | None = None
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
+    ollama_embedding_model: str | None = None
+    anthropic_model: str | None = None
+    anthropic_api_key: str | None = None
+    openai_compatible_base_url: str | None = None
+    openai_compatible_model: str | None = None
+    openai_compatible_api_key: str | None = None
+
+
+class LLMTestConnectionRequest(BaseModel):
+    provider: LLMProviderMode | None = None
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
+
+
+class LLMTestConnectionResponse(BaseModel):
+    reachable: bool
+    provider: str
+    active_model: str
+    installed_models: list[str] = Field(default_factory=list)
+    latency_ms: float = 0.0
+    sample_output: str = ""
+    fallback_used: bool = False
+    message: str = ""
+
+

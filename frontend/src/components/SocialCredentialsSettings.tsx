@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Youtube,
   Instagram,
@@ -14,6 +14,12 @@ import {
   Copy,
   ChevronDown,
   ChevronUp,
+  Cpu,
+  Server,
+  Cloud,
+  Sparkles,
+  Zap,
+  Save,
 } from "lucide-react";
 
 interface SocialChannelGuide {
@@ -193,6 +199,83 @@ const CHANNELS_GUIDE: SocialChannelGuide[] = [
   },
 ];
 
+type LLMProviderMode = "auto" | "ollama" | "anthropic" | "openai_compatible" | "deterministic";
+
+interface RecommendedLocalModel {
+  tier_ram: string;
+  model_id: string;
+  pull_command: string;
+  ram_usage_gb: string;
+  role: string;
+  spanish_quality: string;
+  recommended: boolean;
+}
+
+interface LoadedSkillSpec {
+  agent_id: string;
+  filename: string;
+  title: string;
+  char_count: number;
+  estimated_tokens: number;
+}
+
+const DEFAULT_LOCAL_MODELS: RecommendedLocalModel[] = [
+  {
+    tier_ram: "24GB",
+    model_id: "qwen3:14b",
+    pull_command: "ollama pull qwen3:14b",
+    ram_usage_gb: "~9.5 GB",
+    role: "Equilibrio ideal hoy: español natural, modo razonamiento y JSON estricto",
+    spanish_quality: "Excelente",
+    recommended: true,
+  },
+  {
+    tier_ram: "24GB",
+    model_id: "gemma3:12b",
+    pull_command: "ollama pull gemma3:12b",
+    ram_usage_gb: "~8.1 GB",
+    role: "Ultraligero y veloz para ganchos virales cortos",
+    spanish_quality: "Muy Buena",
+    recommended: false,
+  },
+  {
+    tier_ram: "24GB",
+    model_id: "mistral-small3.1:24b",
+    pull_command: "ollama pull mistral-small3.1:24b",
+    ram_usage_gb: "~14.5 GB",
+    role: "Especialista en agentes y JSON sin roturas (justo en 24 GB)",
+    spanish_quality: "Muy Buena",
+    recommended: false,
+  },
+  {
+    tier_ram: "48GB",
+    model_id: "qwen3:32b",
+    pull_command: "ollama pull qwen3:32b",
+    ram_usage_gb: "~22.0 GB",
+    role: "Estrella en 48 GB: calidad narrativa nivel API comercial",
+    spanish_quality: "Sobresaliente",
+    recommended: true,
+  },
+  {
+    tier_ram: "48GB",
+    model_id: "mistral-small3.1:24b-instruct-2503-q8_0",
+    pull_command: "ollama pull mistral-small3.1:24b-instruct-2503-q8_0",
+    ram_usage_gb: "~25.0 GB",
+    role: "Fidelidad Q8 casi sin compresión para cumplir reglas estrictas",
+    spanish_quality: "Excelente",
+    recommended: false,
+  },
+  {
+    tier_ram: "48GB",
+    model_id: "bge-m3",
+    pull_command: "ollama pull bge-m3",
+    ram_usage_gb: "~1.2 GB",
+    role: "Embeddings locales gratuitos para la Bóveda de Ganchos",
+    spanish_quality: "Nativo",
+    recommended: true,
+  },
+];
+
 export const SocialCredentialsSettings: React.FC = () => {
   const [activeChannelId, setActiveChannelId] = useState<"youtube" | "instagram" | "tiktok" | "linkedin">("youtube");
   const [tokens, setTokens] = useState<Record<string, string>>({
@@ -205,6 +288,114 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [showTutorial, setShowTutorial] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Hybrid Skill-Aware LLM Router state
+  const [llmProvider, setLlmProvider] = useState<LLMProviderMode>("auto");
+  const [ramTier, setRamTier] = useState<"24GB" | "48GB">("24GB");
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://localhost:11434");
+  const [ollamaModel, setOllamaModel] = useState("qwen3:14b");
+  const [anthropicApiKey, setAnthropicApiKey] = useState("");
+  const [anthropicKeyConfigured, setAnthropicKeyConfigured] = useState(false);
+  const [openAiBaseUrl, setOpenAiBaseUrl] = useState("https://openrouter.ai/api/v1");
+  const [openAiModel, setOpenAiModel] = useState("qwen/qwen-2.5-72b-instruct");
+  const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [loadedSkills, setLoadedSkills] = useState<LoadedSkillSpec[]>([]);
+  const [localModels, setLocalModels] = useState<RecommendedLocalModel[]>(DEFAULT_LOCAL_MODELS);
+  const [llmSaving, setLlmSaving] = useState(false);
+  const [llmTesting, setLlmTesting] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState<{
+    reachable: boolean;
+    provider: string;
+    message: string;
+    installed_models: string[];
+    fallback_used: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/llm/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        if (data.active_provider) setLlmProvider(data.active_provider);
+        if (data.ollama_base_url) setOllamaBaseUrl(data.ollama_base_url);
+        if (data.ollama_model) setOllamaModel(data.ollama_model);
+        if (typeof data.anthropic_key_configured === "boolean") {
+          setAnthropicKeyConfigured(data.anthropic_key_configured);
+        }
+        if (data.openai_compatible_base_url) setOpenAiBaseUrl(data.openai_compatible_base_url);
+        if (data.openai_compatible_model) setOpenAiModel(data.openai_compatible_model);
+        if (Array.isArray(data.loaded_skills)) setLoadedSkills(data.loaded_skills);
+        if (Array.isArray(data.recommended_local_models) && data.recommended_local_models.length > 0) {
+          setLocalModels(data.recommended_local_models);
+        }
+      })
+      .catch(() => {
+        // Fallback silently when running offline
+      });
+  }, []);
+
+  const handleSaveLlmConfig = async () => {
+    setLlmSaving(true);
+    try {
+      const res = await fetch("/api/v1/llm/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          active_provider: llmProvider,
+          ollama_base_url: ollamaBaseUrl.trim(),
+          ollama_model: ollamaModel.trim(),
+          anthropic_api_key: anthropicApiKey.trim() || undefined,
+          openai_compatible_base_url: openAiBaseUrl.trim(),
+          openai_compatible_model: openAiModel.trim(),
+          openai_compatible_api_key: openAiApiKey.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setAnthropicKeyConfigured(Boolean(updated.anthropic_key_configured));
+        setAnthropicApiKey("");
+        setOpenAiApiKey("");
+        setLlmTestResult({
+          reachable: true,
+          provider: updated.effective_provider,
+          message: "Configuración de motor IA y Skills guardada correctamente.",
+          installed_models: [],
+          fallback_used: false,
+        });
+      }
+    } finally {
+      setLlmSaving(false);
+    }
+  };
+
+  const handleTestLlmConnection = async () => {
+    setLlmTesting(true);
+    try {
+      const res = await fetch("/api/v1/llm/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: llmProvider,
+          ollama_base_url: ollamaBaseUrl.trim(),
+          ollama_model: ollamaModel.trim(),
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setLlmTestResult(result);
+      }
+    } catch {
+      setLlmTestResult({
+        reachable: false,
+        provider: llmProvider,
+        message: "Backend local no alcanzable desde el navegador. Se usará el fallback determinista.",
+        installed_models: [],
+        fallback_used: true,
+      });
+    } finally {
+      setLlmTesting(false);
+    }
+  };
+
   const activeGuide = CHANNELS_GUIDE.find((c) => c.id === activeChannelId)!;
 
   const handleCopyScope = (scope: string) => {
@@ -215,6 +406,273 @@ export const SocialCredentialsSettings: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Hybrid Skill-Aware LLM Router Card (MiniPC Local Ollama vs Claude Prompt Caching) */}
+      <div className="rounded-2xl border border-violet-500/30 bg-slate-900/90 p-5 shadow-xl space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300 shrink-0">
+              <Cpu className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                Motor de Inteligencia Artificial y Skills (MiniPC Local vs Cloud API)
+                <span className="text-[10px] font-semibold bg-violet-500/20 text-violet-200 border border-violet-500/30 px-2 py-0.5 rounded-full">
+                  {loadedSkills.length || 6} Skills Activas
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Inyecta automáticamente las reglas de los 6 agentes especialistas en modelos locales de tu MiniPC (coste 0,00 €) o en Claude API con Prompt Caching (-90% coste).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleTestLlmConnection}
+              disabled={llmTesting}
+              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-xs font-semibold text-cyan-300 transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              {llmTesting ? "Probando..." : "Probar Conexión"}
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveLlmConfig}
+              disabled={llmSaving}
+              className="px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Save className="w-3.5 h-3.5" />
+              {llmSaving ? "Guardando..." : "Guardar Motor IA"}
+            </button>
+          </div>
+        </div>
+
+        {/* 1-Click Provider Mode Selector */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {[
+            {
+              id: "auto" as const,
+              title: "Híbrido Inteligente (Auto)",
+              sub: "Intenta MiniPC -> Cloud -> Instantáneo",
+              icon: <Sparkles className="w-4 h-4 text-cyan-400" />,
+            },
+            {
+              id: "ollama" as const,
+              title: "MiniPC Local (Ollama)",
+              sub: "Coste 0,00 € · Privacidad total",
+              icon: <Server className="w-4 h-4 text-emerald-400" />,
+            },
+            {
+              id: "anthropic" as const,
+              title: "Claude API (-90% Caché)",
+              sub: "Prompt Caching activado en Skills",
+              icon: <Cloud className="w-4 h-4 text-violet-400" />,
+            },
+            {
+              id: "deterministic" as const,
+              title: "Paramétrico Instantáneo",
+              sub: "Sin llamadas LLM · 0 ms latencia",
+              icon: <Zap className="w-4 h-4 text-amber-400" />,
+            },
+          ].map((opt) => (
+            <button
+              type="button"
+              key={opt.id}
+              onClick={() => setLlmProvider(opt.id)}
+              className={`p-3 rounded-xl border text-left transition ${
+                llmProvider === opt.id
+                  ? "bg-slate-800/90 border-cyan-400 shadow-lg"
+                  : "bg-slate-950/60 border-slate-800 hover:border-slate-700"
+              }`}
+            >
+              <div className="flex items-center gap-2 font-bold text-xs text-white">
+                {opt.icon}
+                <span>{opt.title}</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">{opt.sub}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Configuration Fields + MiniPC Hardware Tier Selector */}
+        <div className="grid lg:grid-cols-2 gap-4 text-xs">
+          {/* Left: Endpoint & Keys */}
+          <div className="space-y-3 bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+            <div className="font-bold text-slate-200 flex items-center justify-between">
+              <span>Conexión a Ollama (MiniPC) o APIs Cloud</span>
+              <span className="text-[10px] font-mono text-slate-400">
+                {anthropicKeyConfigured ? "Claude Key guardada" : "Fallback seguro activo"}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-slate-400 mb-1">
+                URL de Ollama (Local o Túnel Cloudflare hacia tu MiniPC)
+              </label>
+              <input
+                type="url"
+                value={ollamaBaseUrl}
+                onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                placeholder="http://localhost:11434 o https://ollama.tudominio.com"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-slate-400 mb-1">Modelo Activo en Ollama</label>
+                <input
+                  type="text"
+                  value={ollamaModel}
+                  onChange={(e) => setOllamaModel(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Claude API Key (Opcional · Prompt Caching)
+                </label>
+                <input
+                  type="password"
+                  value={anthropicApiKey}
+                  onChange={(e) => setAnthropicApiKey(e.target.value)}
+                  placeholder={anthropicKeyConfigured ? "•••••••• (guardada)" : "sk-ant-api03-..."}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-violet-400"
+                />
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-2.5 pt-1 border-t border-slate-800/80">
+              <div>
+                <label className="block text-slate-400 mb-1">OpenRouter / Compatible URL</label>
+                <input
+                  type="url"
+                  value={openAiBaseUrl}
+                  onChange={(e) => setOpenAiBaseUrl(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1">OpenRouter API Key (Opcional)</label>
+                <input
+                  type="password"
+                  value={openAiApiKey}
+                  onChange={(e) => setOpenAiApiKey(e.target.value)}
+                  placeholder="sk-or-v1-..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Recommended Local Models by MiniPC RAM */}
+          <div className="space-y-3 bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-200">
+                Modelos Recomendados para tu MiniPC
+              </span>
+              <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+                {(["24GB", "48GB"] as const).map((tier) => (
+                  <button
+                    type="button"
+                    key={tier}
+                    onClick={() => setRamTier(tier)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                      ramTier === tier
+                        ? "bg-emerald-500 text-slate-950"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {tier} RAM
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+              {localModels
+                .filter((m) => m.tier_ram === ramTier)
+                .map((m) => (
+                  <div
+                    key={m.model_id}
+                    className={`p-2.5 rounded-lg border transition flex items-start justify-between gap-2 ${
+                      ollamaModel === m.model_id
+                        ? "bg-emerald-950/30 border-emerald-500/60"
+                        : "bg-slate-900/70 border-slate-800"
+                    }`}
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setOllamaModel(m.model_id)}
+                          className="font-mono font-bold text-cyan-300 hover:underline text-left"
+                        >
+                          {m.model_id}
+                        </button>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                          {m.ram_usage_gb}
+                        </span>
+                        {m.recommended && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">{m.role}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyScope(m.pull_command)}
+                      title={`Copiar comando: ${m.pull_command}`}
+                      className="px-2 py-1 rounded bg-slate-950 border border-slate-700 font-mono text-[10px] text-slate-300 hover:border-cyan-400 flex items-center gap-1 shrink-0"
+                    >
+                      <Copy className="w-3 h-3" />
+                      {copiedKey === m.pull_command ? "Copiado" : "pull"}
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Connection Probe Output & Active Skills Badges */}
+        {llmTestResult && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 ${
+              llmTestResult.reachable && !llmTestResult.fallback_used
+                ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-200"
+                : "bg-amber-950/30 border-amber-500/40 text-amber-200"
+            }`}
+          >
+            <span>
+              <strong>Estado ({llmTestResult.provider}):</strong> {llmTestResult.message}
+            </span>
+            {llmTestResult.installed_models.length > 0 && (
+              <span className="font-mono text-[11px] text-emerald-300">
+                Instalados: {llmTestResult.installed_models.slice(0, 4).join(", ")}
+              </span>
+            )}
+          </div>
+        )}
+
+        {loadedSkills.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
+            <span className="text-slate-400 font-semibold mr-1">Skills cargadas:</span>
+            {loadedSkills.map((sk) => (
+              <span
+                key={sk.agent_id}
+                title={`${sk.filename} (~${sk.estimated_tokens} tokens)`}
+                className="px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-slate-300 font-mono"
+              >
+                {sk.agent_id} ({sk.estimated_tokens}t)
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Header Banner with Sandbox / Production Toggle */}
       <div className="rounded-2xl border border-slate-700/80 bg-slate-900/80 p-5 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

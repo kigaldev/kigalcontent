@@ -47,6 +47,11 @@ from app.schemas.contracts import (
     ICEScoreRequest,
     ICEScoreResponse,
     InfrastructureServiceStatus,
+    LLMConfigResponse,
+    LLMConfigUpdateRequest,
+    LLMTestConnectionRequest,
+    LLMTestConnectionResponse,
+    LoadedSkillAgentSpec,
     MediaProcessRequest,
     MediaQCReport,
     PreflightCheckResult,
@@ -88,6 +93,7 @@ from app.services.social_connectors import (
 )
 from app.services.storage_s3 import ObjectStorageService
 from app.services.google_drive import GoogleDriveService
+from app.services.skill_llm_router import get_llm_router
 from app.workers.media_pipeline import run_full_media_pipeline
 
 
@@ -804,6 +810,25 @@ async def generate_script_endpoint(
     ).scalar_one_or_none() or 0
 
     topic = body.topic_override or project.working_title
+    llm_router = get_llm_router()
+    creator_row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    profile_dict = (
+        {
+            "name": creator_row.creator_name,
+            "niche": creator_row.niche,
+            "ideal_customer_profile": creator_row.target_icp,
+            "project_context": creator_row.project_context,
+            "strategic_goals": creator_row.strategic_goals,
+            "communication_style": creator_row.communication_style,
+            "visual_style": creator_row.visual_style,
+            "content_pillars": creator_row.content_pillars,
+            "active_conversion_goal": creator_row.active_goal,
+            "conversion_goals_catalog": creator_row.conversion_goals_catalog,
+        }
+        if creator_row
+        else None
+    )
+
     if body.custom_blocks:
         computed_blocks, wc, est_sec, _ = compute_block_metrics(
             body.custom_blocks, body.wpm_rate, body.duration_preset
@@ -815,15 +840,18 @@ async def generate_script_endpoint(
             wpm_rate=body.wpm_rate,
         )
     else:
-        computed_blocks, ab_variants, cta_text = generate_parametric_script(
+        computed_blocks, ab_variants, cta_text, _provider = await llm_router.generate_structured_script(
             topic=topic,
             preset=body.duration_preset,
             goal=body.conversion_goal,
             wpm_rate=body.wpm_rate,
+            creator_profile=profile_dict,
         )
         _, wc, est_sec, _ = compute_block_metrics(computed_blocks, body.wpm_rate, body.duration_preset)
 
-    ice_info = calculate_ice_and_hooks(topic, 8.5, 8.0, 8.0)
+    ice_info, _ = await llm_router.generate_hooks_with_skill(
+        topic, 8.5, 8.0, 8.0, creator_profile=profile_dict
+    )
 
     project.target_duration = body.duration_preset.value
     project.conversion_goal = body.conversion_goal.value
@@ -1524,4 +1552,35 @@ async def get_system_connections_status(
         media_worker=media_worker_status,
         social_channels=social_channels,
     )
+
+
+# --- 8. Hybrid Skill-Aware LLM Router (Ollama MiniPC + Claude Prompt Caching) ---
+
+@router.get("/llm/config", response_model=LLMConfigResponse)
+async def get_llm_config() -> LLMConfigResponse:
+    """Return active LLM router configuration, hardware RAM presets, and loaded Skill specs."""
+    return get_llm_router().get_config_response()
+
+
+@router.put("/llm/config", response_model=LLMConfigResponse)
+async def update_llm_config(body: LLMConfigUpdateRequest) -> LLMConfigResponse:
+    """Hot-update active LLM provider (Ollama local, Claude with Prompt Caching, OpenRouter, Deterministic)."""
+    return get_llm_router().update_config(body)
+
+
+@router.post("/llm/test-connection", response_model=LLMTestConnectionResponse)
+async def test_llm_connection(body: LLMTestConnectionRequest) -> LLMTestConnectionResponse:
+    """Probe Ollama (MiniPC/Tunnel), Anthropic Claude API, or deterministic engine."""
+    return await get_llm_router().test_connection(
+        provider_override=body.provider,
+        ollama_base_url=body.ollama_base_url,
+        ollama_model=body.ollama_model,
+    )
+
+
+@router.get("/llm/skills", response_model=list[LoadedSkillAgentSpec])
+async def list_loaded_skills() -> list[LoadedSkillAgentSpec]:
+    """List canonical Markdown agent Skills loaded from claude-content-engine-skill/."""
+    return get_llm_router().loader.list_loaded_skills()
+
 
