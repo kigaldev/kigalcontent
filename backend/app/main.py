@@ -16,9 +16,13 @@ from app.services.seed import seed_initial_data
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    await init_db()
-    async with AsyncSessionLocal() as db:
-        await seed_initial_data(db)
+    try:
+        await init_db()
+        async with AsyncSessionLocal() as db:
+            await seed_initial_data(db)
+    except Exception as exc:
+        import logging
+        logging.getLogger("uvicorn.error").warning("DB init deferred/failed on cold-start: %s", exc)
     yield
 
 
