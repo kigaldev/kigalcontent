@@ -351,4 +351,13 @@ class TestFastAPIEndToEnd:
             for wf in workflows:
                 assert wf["workflow_json"].get("nodes"), f"Empty nodes in {wf['filename']}"
 
+    def test_creator_profile_github_import_validation(self):
+        with TestClient(app) as client:
+            bad_resp = client.post(
+                "/api/v1/creator-profile/import-github",
+                json={"repo_url_or_slug": "invalid-single-word"},
+            )
+            assert bad_resp.status_code == 400
+
+
 

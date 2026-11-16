@@ -98,6 +98,25 @@ class CreatorProfileUpdateRequest(BaseModel):
     voice_guidelines: str | None = None
 
 
+class GitHubImportRequest(BaseModel):
+    repo_url_or_slug: str = Field(..., min_length=3, max_length=300)
+    github_token: str | None = None
+
+
+class GitHubImportResponse(BaseModel):
+    repo_full_name: str
+    repo_url: str
+    description: str
+    primary_language: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    readme_excerpt: str = ""
+    suggested_niche: str = ""
+    suggested_project_context: str = ""
+    suggested_content_pillars: list[str] = Field(default_factory=list)
+    suggested_tagline: str = ""
+
+
+
 # --- ICE Scorer & Research ---
 
 class ICEScoreRequest(BaseModel):

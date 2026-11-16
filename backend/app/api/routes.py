@@ -39,6 +39,8 @@ from app.schemas.contracts import (
     DurationPreset,
     FSMState,
     FSMTransitionRequest,
+    GitHubImportRequest,
+    GitHubImportResponse,
     GoogleDriveFileItem,
     GoogleDriveImportRequest,
     GoogleDriveScanRequest,
@@ -289,6 +291,103 @@ async def update_creator_profile(
     )
     await db.commit()
     return await get_creator_profile(db)
+
+
+def _parse_github_slug(raw: str) -> tuple[str, str]:
+    cleaned = raw.strip().rstrip("/")
+    if cleaned.endswith(".git"):
+        cleaned = cleaned[:-4]
+    if "github.com/" in cleaned:
+        cleaned = cleaned.split("github.com/", 1)[1]
+    parts = [p for p in cleaned.split("/") if p]
+    if len(parts) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de repositorio inválido. Usa 'usuario/repositorio' o 'https://github.com/usuario/repositorio'.",
+        )
+    return parts[0], parts[1]
+
+
+@router.post("/creator-profile/import-github", response_model=GitHubImportResponse)
+async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportResponse:
+    """Fetch repository metadata and README from GitHub to enrich Creator Context."""
+    import httpx
+
+    owner, repo = _parse_github_slug(body.repo_url_or_slug)
+    headers: dict[str, str] = {
+        "User-Agent": "AutonomousContentEngine/2.0",
+        "Accept": "application/vnd.github+json",
+    }
+    if body.github_token and body.github_token.strip():
+        headers["Authorization"] = f"Bearer {body.github_token.strip()}"
+
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        meta_resp = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers=headers,
+        )
+        if meta_resp.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repositorio '{owner}/{repo}' no encontrado (si es privado, añade un GitHub Token).",
+            )
+        if meta_resp.status_code >= 400:
+            raise HTTPException(
+                status_code=meta_resp.status_code,
+                detail=f"Error al consultar GitHub ({meta_resp.status_code}).",
+            )
+        meta = meta_resp.json()
+
+        readme_text = ""
+        readme_headers = {**headers, "Accept": "application/vnd.github.raw+json"}
+        readme_resp = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/readme",
+            headers=readme_headers,
+        )
+        if readme_resp.status_code == 200:
+            readme_text = readme_resp.text[:2500]
+
+    description = meta.get("description") or ""
+    language = meta.get("language") or ""
+    topics: list[str] = meta.get("topics") or []
+    repo_full_name = meta.get("full_name") or f"{owner}/{repo}"
+    repo_url = meta.get("html_url") or f"https://github.com/{owner}/{repo}"
+
+    excerpt_lines = [
+        line.strip()
+        for line in readme_text.splitlines()
+        if line.strip() and not line.strip().startswith("<!--")
+    ][:12]
+    readme_excerpt = "\n".join(excerpt_lines)[:900]
+
+    pillars = list(dict.fromkeys(([language] if language else []) + topics[:5]))
+    if not pillars:
+        pillars = ["Desarrollo de Producto", "Build in Public", "Automatización"]
+
+    suggested_niche = (
+        f"Tecnología, {language} y {topics[0]}"
+        if language and topics
+        else f"Desarrollo y Producto Digital ({language or repo})"
+    )
+    suggested_context = (
+        f"Proyecto principal en GitHub: {repo_full_name} ({repo_url}).\n"
+        f"Descripción: {description or 'Sin descripción breve en GitHub.'}\n"
+        f"Stack / Temas: {', '.join(pillars)}.\n\n"
+        f"Resumen técnico del README:\n{readme_excerpt}"
+    ).strip()
+
+    return GitHubImportResponse(
+        repo_full_name=repo_full_name,
+        repo_url=repo_url,
+        description=description,
+        primary_language=language or None,
+        topics=topics,
+        readme_excerpt=readme_excerpt,
+        suggested_niche=suggested_niche,
+        suggested_project_context=suggested_context,
+        suggested_content_pillars=pillars,
+        suggested_tagline=description[:120] if description else f"Construyendo {repo_full_name} en público",
+    )
 
 
 # --- 3. Ideas, ICE Scorer & Hook Vault ---

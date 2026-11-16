@@ -13,6 +13,10 @@ import {
   Check,
   HelpCircle,
   Save,
+  Copy,
+  GitBranch,
+  Wand2,
+  AlertCircle,
 } from "lucide-react";
 import type { CreatorProfile } from "@/types/engine";
 import { useEngineStore } from "@/store/useEngineStore";
@@ -87,6 +91,37 @@ const STRATEGIC_GOALS_OPTIONS = [
   "Posicionar liderazgo de opinión y reconocimiento de marca",
 ];
 
+const CONTEXT_EXTRACTOR_PROMPT = `Analiza TODO el historial, documentos, notas y contexto de este proyecto (en Claude, Codex/ChatGPT, Gemini o NotebookLM) y extrae mi perfil completo para configurar mi motor de creación de contenido.
+
+Devuelve ÚNICAMENTE un bloque JSON válido (sin texto adicional fuera del bloque) con exactamente esta estructura y rellenando todos los campos con el mayor detalle real posible:
+
+\`\`\`json
+{
+  "name": "Mi nombre o nombre de mi marca/proyecto",
+  "personal_brand_tagline": "Frase corta de posicionamiento / propuesta de valor en 1 línea",
+  "niche": "Mi nicho o especialidad concreta",
+  "ideal_customer_profile": "Descripción exacta de mi cliente o audiencia ideal, sus dolores y deseos",
+  "project_context": "Resumen profundo de qué trata mi proyecto, producto o servicio, diferenciadores y casos de éxito",
+  "strategic_goals": [
+    "Captar correos y leads cualificados (Lead Magnets)",
+    "Posicionar liderazgo de opinión y reconocimiento de marca"
+  ],
+  "communication_style": "Educativo y Didáctico | Directo y con Autoridad | Cercano y Conversacional | Storytelling Narrativo | Provocador y Witty",
+  "visual_style": "Estudio Oscuro Minimalista | Tecnológico / Neón Dinámico | Editorial Blanco / Clean | Cinematográfico Grano 35mm",
+  "content_pillars": ["Pilar temático 1", "Pilar temático 2", "Pilar temático 3"],
+  "voice_guidelines": "Reglas de tono, palabras que uso o evito, y cómo hablo a mi audiencia",
+  "trigger_word": "GUIA",
+  "social_profiles": {
+    "youtube": "",
+    "instagram": "",
+    "tiktok": "",
+    "linkedin": "",
+    "website": "",
+    "github": ""
+  }
+}
+\`\`\``;
+
 export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
   isOpen,
   onClose,
@@ -103,16 +138,28 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
   const [communicationStyle, setCommunicationStyle] = useState("");
   const [visualStyle, setVisualStyle] = useState("");
+  const [contentPillars, setContentPillars] = useState<string[]>([]);
+  const [voiceGuidelines, setVoiceGuidelines] = useState("");
   const [ytUrl, setYtUrl] = useState("");
   const [igUrl, setIgUrl] = useState("");
   const [tkUrl, setTkUrl] = useState("");
   const [liUrl, setLiUrl] = useState("");
   const [webUrl, setWebUrl] = useState("");
+  const [githubUrl, setGithubUrl] = useState("");
   const [triggerWord, setTriggerWord] = useState("GUIA");
 
-  const [activeSubTab, setActiveSubTab] = useState<"general" | "estilo" | "redes">("general");
+  const [activeSubTab, setActiveSubTab] = useState<"general" | "estilo" | "redes" | "importar">("general");
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Import state (Claude/Gemini/NotebookLM JSON + GitHub Repo)
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [extractorJsonInput, setExtractorJsonInput] = useState("");
+  const [repoInput, setRepoInput] = useState("");
+  const [githubTokenInput, setGithubTokenInput] = useState("");
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [importStatusMessage, setImportStatusMessage] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // Sync state with store on open
   useEffect(() => {
@@ -138,6 +185,9 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
       setTkUrl(creatorProfile.social_profiles?.tiktok || "");
       setLiUrl(creatorProfile.social_profiles?.linkedin || "");
       setWebUrl(creatorProfile.social_profiles?.website || "");
+      setGithubUrl(creatorProfile.social_profiles?.github || "");
+      setContentPillars(creatorProfile.content_pillars || []);
+      setVoiceGuidelines(creatorProfile.voice_guidelines || "");
 
       const activeGoalKey = creatorProfile.active_conversion_goal || "EMAIL_LEAD_CAPTURE";
       const cat = creatorProfile.conversion_goals_catalog?.[activeGoalKey];
@@ -195,12 +245,15 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
       strategic_goals: selectedGoals,
       communication_style: communicationStyle,
       visual_style: visualStyle,
+      content_pillars: contentPillars,
+      voice_guidelines: voiceGuidelines || null,
       social_profiles: {
         youtube: ytUrl,
         instagram: igUrl,
         tiktok: tkUrl,
         linkedin: liUrl,
         website: webUrl,
+        github: githubUrl,
       },
       conversion_goals_catalog: updatedCatalog,
     };
@@ -244,11 +297,204 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
     }
   };
 
+  const handleCopyExtractorPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(CONTEXT_EXTRACTOR_PROMPT);
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 2200);
+    } catch {
+      setImportError("No se pudo copiar automáticamente; selecciona el texto del prompt y cópialo manualmente.");
+    }
+  };
+
+  const handleApplyExtractedJson = () => {
+    setImportError(null);
+    setImportStatusMessage(null);
+    const raw = extractorJsonInput.trim();
+    if (!raw) {
+      setImportError("Pega primero la respuesta JSON generada por Claude, Codex/ChatGPT, Gemini o NotebookLM.");
+      return;
+    }
+
+    try {
+      // Extract JSON object even if wrapped in markdown ```json fences or prose
+      const firstBrace = raw.indexOf("{");
+      const lastBrace = raw.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+        throw new Error("No se encontró un bloque JSON válido { ... } en el texto pegado.");
+      }
+      const parsed = JSON.parse(raw.slice(firstBrace, lastBrace + 1)) as Record<string, unknown>;
+
+      const appliedFields: string[] = [];
+      if (typeof parsed.name === "string" && parsed.name.trim()) {
+        setName(parsed.name.trim());
+        appliedFields.push("Nombre");
+      }
+      if (typeof parsed.age === "number" || typeof parsed.age === "string") {
+        const ageNum = parseInt(String(parsed.age), 10);
+        if (!Number.isNaN(ageNum) && ageNum >= 14 && ageNum <= 100) {
+          setAge(String(ageNum));
+        }
+      }
+      if (typeof parsed.personal_brand_tagline === "string" && parsed.personal_brand_tagline.trim()) {
+        setTagline(parsed.personal_brand_tagline.trim());
+        appliedFields.push("Titular");
+      }
+      if (typeof parsed.niche === "string" && parsed.niche.trim()) {
+        setNiche(parsed.niche.trim());
+        appliedFields.push("Nicho");
+      }
+      if (typeof parsed.ideal_customer_profile === "string" && parsed.ideal_customer_profile.trim()) {
+        setTargetIcp(parsed.ideal_customer_profile.trim());
+        appliedFields.push("Audiencia ICP");
+      }
+      if (typeof parsed.project_context === "string" && parsed.project_context.trim()) {
+        setProjectContext(parsed.project_context.trim());
+        appliedFields.push("Contexto del Proyecto");
+      }
+      if (Array.isArray(parsed.strategic_goals) && parsed.strategic_goals.length > 0) {
+        setSelectedGoals(parsed.strategic_goals.map((g) => String(g)));
+        appliedFields.push("Objetivos");
+      }
+      if (typeof parsed.communication_style === "string" && parsed.communication_style.trim()) {
+        const matched = COMMUNICATION_PRESETS.find((p) =>
+          parsed.communication_style!.toString().toLowerCase().includes(p.label.toLowerCase().split(" ")[0])
+        );
+        setCommunicationStyle(matched ? matched.label : parsed.communication_style.trim());
+        appliedFields.push("Tono");
+      }
+      if (typeof parsed.visual_style === "string" && parsed.visual_style.trim()) {
+        const matched = VISUAL_STYLE_PRESETS.find((v) =>
+          parsed.visual_style!.toString().toLowerCase().includes(v.label.toLowerCase().split(" ")[0])
+        );
+        setVisualStyle(matched ? matched.label : parsed.visual_style.trim());
+        appliedFields.push("Estilo Visual");
+      }
+      if (Array.isArray(parsed.content_pillars) && parsed.content_pillars.length > 0) {
+        setContentPillars(parsed.content_pillars.map((p) => String(p)));
+        appliedFields.push("Pilares");
+      }
+      if (typeof parsed.voice_guidelines === "string" && parsed.voice_guidelines.trim()) {
+        setVoiceGuidelines(parsed.voice_guidelines.trim());
+        appliedFields.push("Reglas de Voz");
+      }
+      if (typeof parsed.trigger_word === "string" && parsed.trigger_word.trim()) {
+        setTriggerWord(parsed.trigger_word.trim().toUpperCase());
+        appliedFields.push("Palabra Clave");
+      }
+      if (parsed.social_profiles && typeof parsed.social_profiles === "object") {
+        const sp = parsed.social_profiles as Record<string, unknown>;
+        if (typeof sp.youtube === "string" && sp.youtube) setYtUrl(sp.youtube);
+        if (typeof sp.instagram === "string" && sp.instagram) setIgUrl(sp.instagram);
+        if (typeof sp.tiktok === "string" && sp.tiktok) setTkUrl(sp.tiktok);
+        if (typeof sp.linkedin === "string" && sp.linkedin) setLiUrl(sp.linkedin);
+        if (typeof sp.website === "string" && sp.website) setWebUrl(sp.website);
+        if (typeof sp.github === "string" && sp.github) setGithubUrl(sp.github);
+      }
+
+      if (appliedFields.length === 0) {
+        setImportError("El JSON no contenía campos reconocibles del perfil.");
+        return;
+      }
+
+      setImportStatusMessage(
+        `¡Contexto importado con éxito! Se han rellenado: ${appliedFields.join(", ")}. Revisa las pestañas 1-3 y pulsa "Guardar Perfil de Contexto".`
+      );
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Error al leer el JSON pegado.");
+    }
+  };
+
+  const handleImportGithub = async () => {
+    setImportError(null);
+    setImportStatusMessage(null);
+    const slugRaw = repoInput.trim();
+    if (!slugRaw) {
+      setImportError("Introduce la URL o el slug de tu repositorio (ej: kigaldev/kigalcontent).");
+      return;
+    }
+    setGithubLoading(true);
+    try {
+      const res = await fetch("/api/v1/creator-profile/import-github", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo_url_or_slug: slugRaw,
+          github_token: githubTokenInput.trim() || null,
+        }),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          repo_full_name: string;
+          repo_url: string;
+          suggested_niche: string;
+          suggested_project_context: string;
+          suggested_content_pillars: string[];
+          suggested_tagline: string;
+        };
+        if (data.suggested_niche) setNiche(data.suggested_niche);
+        if (data.suggested_project_context) setProjectContext(data.suggested_project_context);
+        if (data.suggested_content_pillars?.length) setContentPillars(data.suggested_content_pillars);
+        if (data.suggested_tagline && !tagline) setTagline(data.suggested_tagline);
+        setGithubUrl(data.repo_url);
+        setImportStatusMessage(
+          `Repositorio "${data.repo_full_name}" conectado y analizado. Contexto técnico y pilares cargados en el perfil.`
+        );
+        return;
+      }
+
+      // Direct public GitHub API fallback when backend is offline in Studio Local Mode
+      let cleanSlug = slugRaw.replace(/\/$/, "").replace(/\.git$/, "");
+      if (cleanSlug.includes("github.com/")) {
+        cleanSlug = cleanSlug.split("github.com/")[1];
+      }
+      const ghRes = await fetch(`https://api.github.com/repos/${cleanSlug}`);
+      if (!ghRes.ok) {
+        const errPayload = await res.json().catch(() => null);
+        throw new Error(
+          errPayload?.detail ||
+            `No se pudo acceder al repositorio "${cleanSlug}" (código ${ghRes.status}).`
+        );
+      }
+      const ghMeta = (await ghRes.json()) as {
+        full_name: string;
+        html_url: string;
+        description?: string;
+        language?: string;
+        topics?: string[];
+      };
+      const pillars = Array.from(
+        new Set([...(ghMeta.language ? [ghMeta.language] : []), ...(ghMeta.topics || []).slice(0, 5)])
+      );
+      setNiche(
+        ghMeta.language
+          ? `Tecnología, ${ghMeta.language} y Producto Digital`
+          : "Tecnología y Desarrollo de Producto"
+      );
+      setProjectContext(
+        `Proyecto en GitHub: ${ghMeta.full_name} (${ghMeta.html_url}).\nDescripción: ${
+          ghMeta.description || "Proyecto de software y automatización."
+        }\nTemas: ${pillars.join(", ")}.`
+      );
+      if (pillars.length > 0) setContentPillars(pillars);
+      if (ghMeta.description && !tagline) setTagline(ghMeta.description.slice(0, 120));
+      setGithubUrl(ghMeta.html_url);
+      setImportStatusMessage(
+        `Repositorio "${ghMeta.full_name}" importado directamente vía API pública de GitHub.`
+      );
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Error conectando con GitHub.");
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
   return (
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="backdrop:bg-slate-950/80 backdrop:backdrop-blur-sm bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl p-0 w-full max-w-3xl shadow-2xl focus:outline-none overflow-hidden m-auto"
+      className="wide-dialog backdrop:bg-slate-950/80 backdrop:backdrop-blur-sm bg-slate-900 border border-slate-700/80 text-slate-100 rounded-2xl p-0 w-full max-w-4xl shadow-2xl focus:outline-none overflow-hidden m-auto"
       aria-labelledby="profile-modal-title"
     >
       <div className="flex flex-col max-h-[90vh]">
@@ -281,7 +527,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
         </div>
 
         {/* Subtabs Navigation */}
-        <div className="px-5 pt-3 border-b border-slate-800/80 flex gap-2 bg-slate-900/60">
+        <div className="px-5 pt-3 border-b border-slate-800/80 flex flex-wrap gap-2 bg-slate-900/60">
           <button
             type="button"
             onClick={() => setActiveSubTab("general")}
@@ -292,7 +538,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
             }`}
           >
             <Briefcase className="w-3.5 h-3.5" />
-            1. Negocio, Audiencia y Metas
+            1. Negocio y Metas
           </button>
           <button
             type="button"
@@ -304,7 +550,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
             }`}
           >
             <Palette className="w-3.5 h-3.5" />
-            2. Tono y Estilo Visual
+            2. Tono y Estilo
           </button>
           <button
             type="button"
@@ -316,7 +562,19 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
             }`}
           >
             <LinkIcon className="w-3.5 h-3.5" />
-            3. Enlaces y Redes Sociales
+            3. Redes y Links
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("importar")}
+            className={`pb-2.5 px-3 text-xs font-semibold border-b-2 transition flex items-center gap-1.5 ${
+              activeSubTab === "importar"
+                ? "border-emerald-400 text-emerald-300"
+                : "border-transparent text-emerald-400/80 hover:text-emerald-200"
+            }`}
+          >
+            <Wand2 className="w-3.5 h-3.5" />
+            4. Importar (Claude / Gemini / GitHub)
           </button>
         </div>
 
@@ -606,6 +864,139 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
                     placeholder="https://tudominio.com"
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-400"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
+                    <span className="text-emerald-300 font-bold">GitHub (Proyecto / Portfolio):</span>
+                    <span>Repositorio principal</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={githubUrl}
+                    onChange={(e) => setGithubUrl(e.target.value)}
+                    placeholder="https://github.com/tu-usuario/tu-repo"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeSubTab === "importar" && (
+            <div className="space-y-5">
+              {importStatusMessage && (
+                <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/30 p-3 text-xs text-emerald-200 flex items-start gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>{importStatusMessage}</span>
+                </div>
+              )}
+
+              {importError && (
+                <div className="rounded-xl border border-rose-500/40 bg-rose-950/30 p-3 text-xs text-rose-200 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {/* Section A: Prompt Extractor for Claude / ChatGPT (Codex) / Gemini / NotebookLM */}
+              <div className="rounded-xl border border-cyan-500/30 bg-slate-950/70 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      1. Extraer Contexto desde Claude, ChatGPT (Codex), Gemini o NotebookLM
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Copia este prompt, pégalo en el proyecto donde ya trabajas tu negocio/contenido y pega aquí debajo el JSON que te devuelva.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopyExtractorPrompt}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition"
+                  >
+                    {copiedPrompt ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedPrompt ? "¡Prompt Copiado!" : "Copiar Prompt Extractor"}
+                  </button>
+                </div>
+
+                <pre className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 text-[11px] font-mono text-cyan-100/90 max-h-36 overflow-y-auto whitespace-pre-wrap">
+                  {CONTEXT_EXTRACTOR_PROMPT}
+                </pre>
+
+                <div className="space-y-2 pt-1">
+                  <label className="block text-slate-300 font-semibold">
+                    Pega aquí la respuesta JSON de tu IA externa:
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={extractorJsonInput}
+                    onChange={(e) => setExtractorJsonInput(e.target.value)}
+                    placeholder='Pega aquí el bloque { "name": "...", "niche": "...", ... } generado por Claude, Codex, Gemini o NotebookLM'
+                    className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleApplyExtractedJson}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition"
+                    >
+                      <Wand2 className="w-3.5 h-3.5" />
+                      Rellenar Perfil Automáticamente
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section B: Direct GitHub Repository Connector */}
+              <div className="rounded-xl border border-violet-500/30 bg-slate-950/70 p-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-violet-400" />
+                    2. Conectar Repositorio de GitHub (Código, README y Pilares)
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Analiza automáticamente la descripción, lenguajes, temas y README de un repositorio para nutrir el contexto técnico de tus guiones.
+                  </p>
+                </div>
+
+                <div className="grid sm:grid-cols-12 gap-2.5 items-end">
+                  <div className="sm:col-span-6">
+                    <label className="block text-slate-300 font-medium mb-1">
+                      URL o usuario/repositorio
+                    </label>
+                    <input
+                      type="text"
+                      value={repoInput}
+                      onChange={(e) => setRepoInput(e.target.value)}
+                      placeholder="Ej. kigaldev/kigalcontent o https://github.com/..."
+                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-slate-300 font-medium mb-1">
+                      Token (solo si es privado)
+                    </label>
+                    <input
+                      type="password"
+                      value={githubTokenInput}
+                      onChange={(e) => setGithubTokenInput(e.target.value)}
+                      placeholder="ghp_... (opcional)"
+                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <button
+                      type="button"
+                      onClick={handleImportGithub}
+                      disabled={githubLoading}
+                      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-violet-500 hover:bg-violet-400 text-slate-950 font-bold text-xs transition disabled:opacity-50"
+                    >
+                      <GitBranch className="w-3.5 h-3.5" />
+                      {githubLoading ? "Analizando..." : "Importar GitHub"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
