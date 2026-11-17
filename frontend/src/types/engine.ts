@@ -167,6 +167,44 @@ export interface ProjectDetail {
   social_posts: SocialPost[];
 }
 
+export interface SocialAccountItem {
+  id: string;
+  platform: string;
+  label: string;
+  url: string;
+}
+
+export interface GitHubRepoItem {
+  repo_full_name: string;
+  repo_url: string;
+  description: string;
+  primary_language?: string | null;
+  topics: string[];
+  homepage?: string | null;
+  added_at?: string | null;
+}
+
+export interface LeadMagnetItem {
+  id: string;
+  title: string;
+  description: string;
+  format: string;
+  delivery_url: string;
+  source: string;
+  created_at?: string | null;
+}
+
+export interface ManyChatTriggerRule {
+  id: string;
+  keyword: string;
+  lead_magnet_id?: string | null;
+  platform: string;
+  dm_reply_template: string;
+  manychat_flow_id?: string | null;
+  active: boolean;
+  triggers_count: number;
+}
+
 export interface CreatorProfile {
   creator_id: string;
   name: string;
@@ -191,6 +229,10 @@ export interface CreatorProfile {
     }
   >;
   social_profiles: Record<string, string>;
+  social_accounts?: SocialAccountItem[];
+  github_repos?: GitHubRepoItem[];
+  lead_magnets?: LeadMagnetItem[];
+  manychat_triggers?: ManyChatTriggerRule[];
   voice_guidelines?: string | null;
 }
 

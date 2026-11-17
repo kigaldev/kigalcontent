@@ -6,11 +6,14 @@ import type {
   CreatorProfile,
   DurationPreset,
   FSMState,
+  GitHubRepoItem,
+  LeadMagnetItem,
   MediaQCReport,
   N8nWorkflowTemplate,
   ProjectDetail,
   RMTADiagnosisResponse,
   ScriptDocument,
+  SocialAccountItem,
   SocialChannel,
   SocialPost,
   TwoColumnScriptBlock,
@@ -208,7 +211,57 @@ export const apiClient = {
       suggested_project_context: string;
       suggested_content_pillars: string[];
       suggested_tagline: string;
+      suggested_name?: string;
+      suggested_icp?: string;
+      suggested_strategic_goals?: string[];
+      suggested_communication_style?: string;
+      suggested_visual_style?: string;
+      suggested_voice_guidelines?: string;
+      homepage?: string | null;
+      extracted_lead_magnets?: LeadMagnetItem[];
     }>("/creator-profile/import-github", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  importGitHubReposBatch: (payload: {
+    repos: Array<{ repo_url_or_slug: string; github_token?: string | null }>;
+  }) =>
+    requestJson<{
+      imported_repos: GitHubRepoItem[];
+      suggested_name: string;
+      suggested_tagline: string;
+      suggested_niche: string;
+      suggested_icp: string;
+      suggested_project_context: string;
+      suggested_strategic_goals: string[];
+      suggested_communication_style: string;
+      suggested_visual_style: string;
+      suggested_content_pillars: string[];
+      suggested_voice_guidelines: string;
+      suggested_social_accounts: SocialAccountItem[];
+      extracted_lead_magnets: LeadMagnetItem[];
+    }>("/creator-profile/import-github-batch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  triggerManyChatKeyword: (payload: {
+    keyword: string;
+    platform?: string;
+    username?: string;
+    comment_text?: string;
+  }) =>
+    requestJson<{
+      matched: boolean;
+      keyword: string;
+      platform: string;
+      lead_magnet: LeadMagnetItem | null;
+      dm_reply_text: string;
+      delivery_url: string;
+      manychat_flow_id?: string | null;
+      triggers_count: number;
+    }>("/manychat/trigger", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

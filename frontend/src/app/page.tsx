@@ -41,7 +41,7 @@ import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
-import { CreatorProfileView } from "@/components/CreatorProfileView";
+import { ProfileBubbleMenu, type CreatorModalTab } from "@/components/ProfileBubbleMenu";
 import { BackendStatusModal } from "@/components/BackendStatusModal";
 import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
@@ -57,66 +57,57 @@ interface TabDefinition {
 
 const STUDIO_TABS: TabDefinition[] = [
   {
-    id: "creator-profile",
-    stepNumber: 0,
-    label: "Paso 0: Perfil de Creador",
-    shortLabel: "0. Perfil",
-    stepName: "Perfil de Creador y Contexto",
-    summary: "Define tu identidad, nicho, audiencia y extrae contexto de Claude, Codex, Gemini o GitHub.",
-    icon: Sparkles,
-  },
-  {
     id: "pipeline",
     stepNumber: 1,
-    label: "Paso 1: Ideas y Prioridades",
-    shortLabel: "1. Ideas",
-    stepName: "Ideas y Prioridades",
-    summary: "Evalúa y selecciona las mejores ideas antes de grabar.",
+    label: "Ideas",
+    shortLabel: "Ideas",
+    stepName: "Ideas",
+    summary: "Evalúa y prioriza las mejores ideas antes de grabar.",
     icon: KanbanSquare,
   },
   {
     id: "script-studio",
     stepNumber: 2,
-    label: "Paso 2: Taller de Guiones",
-    shortLabel: "2. Guión",
-    stepName: "Taller de Guiones",
-    summary: "Escribe y ajusta el guión calculando el tiempo de lectura.",
+    label: "Guiones",
+    shortLabel: "Guión",
+    stepName: "Guiones",
+    summary: "Escribe el guión, calcula el tiempo y usa el teleprompter.",
     icon: FileText,
   },
   {
     id: "mobile-simulator",
     stepNumber: 3,
-    label: "Paso 3: Video y Audio (9:16)",
-    shortLabel: "3. Video 9:16",
-    stepName: "Revisión de Video y Audio",
-    summary: "Revisa subtítulos en el simulador móvil y limpia el audio.",
+    label: "Video 9:16",
+    shortLabel: "Video",
+    stepName: "Video 9:16",
+    summary: "Revisa subtítulos, audio y crea tu portada o miniatura.",
     icon: Smartphone,
   },
   {
     id: "publishing-hitl",
     stepNumber: 4,
-    label: "Paso 4: Textos y Publicación",
-    shortLabel: "4. Publicar",
-    stepName: "Textos y Publicación",
+    label: "Publicar",
+    shortLabel: "Publicar",
+    stepName: "Publicar",
     summary: "Prepara los textos por red social y autoriza la publicación.",
     icon: Send,
   },
   {
     id: "analytics-rmta",
     stepNumber: 5,
-    label: "Paso 5: Resultados y Aprendizaje",
-    shortLabel: "5. Resultados",
-    stepName: "Resultados y Aprendizaje",
-    summary: "Descubre qué videos retuvieron más tiempo para mejorar.",
+    label: "Resultados",
+    shortLabel: "Métricas",
+    stepName: "Resultados",
+    summary: "Analiza la retención y el aprendizaje de tus videos.",
     icon: BarChart3,
   },
   {
     id: "social-credentials",
     stepNumber: 6,
-    label: "Conexiones Oficiales (APIs)",
-    shortLabel: "Conexiones",
-    stepName: "Conexiones y Redes Sociales",
-    summary: "Configura las claves de YouTube, Instagram, TikTok y LinkedIn con tutoriales paso a paso.",
+    label: "Conexiones",
+    shortLabel: "APIs",
+    stepName: "Conexiones",
+    summary: "Configura las claves oficiales de YouTube, Instagram, TikTok y LinkedIn.",
     icon: ShieldCheck,
   },
 ];
@@ -144,6 +135,8 @@ export default function AutonomousContentEnginePage() {
   } = useEngineStore();
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isProfileBubbleOpen, setIsProfileBubbleOpen] = useState(false);
+  const [profileModalTab, setProfileModalTab] = useState<CreatorModalTab>("general");
   const [isBackendModalOpen, setIsBackendModalOpen] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const isBootstrappingRef = useRef(false);
@@ -414,20 +407,37 @@ export default function AutonomousContentEnginePage() {
                 <span>{backendOnline ? "Servidor Online" : "Modo Local"}</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setActiveTab("creator-profile")}
-                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/60 to-violet-950/60 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:border-cyan-400 hover:text-white transition shadow-sm"
-                title="Ir al Paso 0: Perfil y Contexto del Creador"
-              >
-                <div className="w-5 h-5 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-[10px] text-cyan-300 font-bold">
-                  {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
-                </div>
-                <span className="hidden sm:inline">
-                  {creatorProfile?.name || "Mi Perfil & Estilo"}
-                </span>
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              </button>
+              {/* Top-Right Profile Bubble (Paso 0) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsProfileBubbleOpen((prev) => !prev)}
+                  aria-expanded={isProfileBubbleOpen}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-500/50 bg-gradient-to-r from-cyan-950/70 to-violet-950/70 pl-1.5 pr-3 py-1 text-xs font-semibold text-cyan-200 hover:border-cyan-400 hover:text-white transition shadow-sm shadow-cyan-500/10"
+                  title="Paso 0: Perfil, Repos GitHub, Lead Magnets y ManyChat"
+                >
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center text-[11px] text-white font-bold">
+                    {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
+                  </div>
+                  <span className="hidden sm:inline">
+                    {creatorProfile?.name || "Perfil"}
+                  </span>
+                  <span className="rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">
+                    Paso 0
+                  </span>
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                </button>
+
+                <ProfileBubbleMenu
+                  isOpen={isProfileBubbleOpen}
+                  onClose={() => setIsProfileBubbleOpen(false)}
+                  creatorProfile={creatorProfile}
+                  onOpenPaso0={(tab = "general") => {
+                    setProfileModalTab(tab);
+                    setIsProfileModalOpen(true);
+                  }}
+                />
+              </div>
 
               <button
                 type="button"
@@ -441,12 +451,12 @@ export default function AutonomousContentEnginePage() {
             </div>
           </div>
 
-          {/* Stepper Navigation Tabs (5 Steps) */}
+          {/* Stepper Navigation Tabs (Clean & Simplified) */}
           <div className="flex items-center justify-between gap-4 border-t border-slate-900 pt-1">
             <div
               role="tablist"
               aria-label="Pasos de creación de contenido"
-              className="gap-1 sm:gap-2"
+              className="flex flex-wrap items-center gap-1 sm:gap-2"
             >
               {STUDIO_TABS.map((tab, index) => {
                 const Icon = tab.icon;
@@ -572,15 +582,6 @@ export default function AutonomousContentEnginePage() {
           aria-labelledby={`tab-${activeTab}`}
           className="space-y-6"
         >
-          {activeTab === "creator-profile" && (
-            <CreatorProfileView
-              onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
-              onProceedToNextStep={() => {
-                setActiveTab("pipeline");
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-            />
-          )}
           {activeTab === "pipeline" && (
             <KanbanPipelineBoard
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
@@ -656,10 +657,11 @@ export default function AutonomousContentEnginePage() {
         onSuccessRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
       />
 
-      {/* Creator Context Engine Profile Modal */}
+      {/* Creator Context Engine Profile Modal (Paso 0) */}
       <CreatorProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
+        initialTab={profileModalTab}
       />
 
       {/* Backend Connection Diagnostics & Custom URL Modal */}

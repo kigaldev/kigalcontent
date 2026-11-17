@@ -11,7 +11,6 @@ import type {
 } from "@/types/engine";
 
 export type ActiveStudioTab =
-  | "creator-profile"
   | "pipeline"
   | "script-studio"
   | "mobile-simulator"

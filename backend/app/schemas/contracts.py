@@ -61,6 +61,44 @@ class ConversionGoalSpec(BaseModel):
     preferred_cta_style: str
 
 
+class SocialAccountItem(BaseModel):
+    id: str
+    platform: str  # youtube, instagram, tiktok, linkedin, website, github, x, other
+    label: str = ""
+    url: str
+
+
+class GitHubRepoItem(BaseModel):
+    repo_full_name: str
+    repo_url: str
+    description: str = ""
+    primary_language: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    homepage: str | None = None
+    added_at: str | None = None
+
+
+class LeadMagnetItem(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    format: str = "Guía PDF"
+    delivery_url: str = ""
+    source: str = "manual"  # manual or github:<repo>
+    created_at: str | None = None
+
+
+class ManyChatTriggerRule(BaseModel):
+    id: str
+    keyword: str
+    lead_magnet_id: str | None = None
+    platform: str = "all"  # all, instagram, tiktok, youtube, linkedin
+    dm_reply_template: str = ""
+    manychat_flow_id: str | None = None
+    active: bool = True
+    triggers_count: int = 0
+
+
 class CreatorProfileSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,6 +116,10 @@ class CreatorProfileSchema(BaseModel):
     conversion_goals_catalog: dict[str, ConversionGoalSpec] = Field(default_factory=dict)
     active_conversion_goal: ConversionGoal = ConversionGoal.EMAIL_LEAD_CAPTURE
     social_profiles: dict[str, str] = Field(default_factory=dict)
+    social_accounts: list[SocialAccountItem] = Field(default_factory=list)
+    github_repos: list[GitHubRepoItem] = Field(default_factory=list)
+    lead_magnets: list[LeadMagnetItem] = Field(default_factory=list)
+    manychat_triggers: list[ManyChatTriggerRule] = Field(default_factory=list)
     voice_guidelines: str | None = None
 
 
@@ -95,6 +137,10 @@ class CreatorProfileUpdateRequest(BaseModel):
     active_conversion_goal: ConversionGoal | None = None
     conversion_goals_catalog: dict[str, ConversionGoalSpec] | None = None
     social_profiles: dict[str, str] | None = None
+    social_accounts: list[SocialAccountItem] | None = None
+    github_repos: list[GitHubRepoItem] | None = None
+    lead_magnets: list[LeadMagnetItem] | None = None
+    manychat_triggers: list[ManyChatTriggerRule] | None = None
     voice_guidelines: str | None = None
 
 
@@ -114,6 +160,52 @@ class GitHubImportResponse(BaseModel):
     suggested_project_context: str = ""
     suggested_content_pillars: list[str] = Field(default_factory=list)
     suggested_tagline: str = ""
+    suggested_name: str = ""
+    suggested_icp: str = ""
+    suggested_strategic_goals: list[str] = Field(default_factory=list)
+    suggested_communication_style: str = "Educativo y Didáctico"
+    suggested_visual_style: str = "Tecnológico / Neón Dinámico"
+    suggested_voice_guidelines: str = ""
+    homepage: str | None = None
+    extracted_lead_magnets: list[LeadMagnetItem] = Field(default_factory=list)
+
+
+class GitHubBatchImportRequest(BaseModel):
+    repos: list[GitHubImportRequest] = Field(..., min_length=1, max_length=5)
+
+
+class GitHubBatchImportResponse(BaseModel):
+    imported_repos: list[GitHubRepoItem] = Field(default_factory=list)
+    suggested_name: str = ""
+    suggested_tagline: str = ""
+    suggested_niche: str = ""
+    suggested_icp: str = ""
+    suggested_project_context: str = ""
+    suggested_strategic_goals: list[str] = Field(default_factory=list)
+    suggested_communication_style: str = "Educativo y Didáctico"
+    suggested_visual_style: str = "Tecnológico / Neón Dinámico"
+    suggested_content_pillars: list[str] = Field(default_factory=list)
+    suggested_voice_guidelines: str = ""
+    suggested_social_accounts: list[SocialAccountItem] = Field(default_factory=list)
+    extracted_lead_magnets: list[LeadMagnetItem] = Field(default_factory=list)
+
+
+class ManyChatTriggerRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=100)
+    platform: str = Field(default="instagram")
+    username: str = Field(default="@usuario")
+    comment_text: str | None = None
+
+
+class ManyChatTriggerResponse(BaseModel):
+    matched: bool
+    keyword: str
+    platform: str
+    lead_magnet: LeadMagnetItem | None = None
+    dm_reply_text: str
+    delivery_url: str = ""
+    manychat_flow_id: str | None = None
+    triggers_count: int = 0
 
 
 

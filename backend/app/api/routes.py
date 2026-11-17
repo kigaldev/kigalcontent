@@ -39,8 +39,11 @@ from app.schemas.contracts import (
     DurationPreset,
     FSMState,
     FSMTransitionRequest,
+    GitHubBatchImportRequest,
+    GitHubBatchImportResponse,
     GitHubImportRequest,
     GitHubImportResponse,
+    GitHubRepoItem,
     GoogleDriveFileItem,
     GoogleDriveImportRequest,
     GoogleDriveScanRequest,
@@ -50,11 +53,15 @@ from app.schemas.contracts import (
     ICEScoreRequest,
     ICEScoreResponse,
     InfrastructureServiceStatus,
+    LeadMagnetItem,
     LLMConfigResponse,
     LLMConfigUpdateRequest,
     LLMTestConnectionRequest,
     LLMTestConnectionResponse,
     LoadedSkillAgentSpec,
+    ManyChatTriggerRequest,
+    ManyChatTriggerResponse,
+    ManyChatTriggerRule,
     MediaProcessRequest,
     MediaQCReport,
     N8nWorkflowTemplateResponse,
@@ -68,6 +75,7 @@ from app.schemas.contracts import (
     ScriptGenerateRequest,
     ScriptResponse,
     ScriptUpdateRequest,
+    SocialAccountItem,
     SocialChannel,
     SocialCopyGenerateRequest,
     SocialPostResponse,
@@ -196,12 +204,81 @@ async def mcp_jsonrpc_preview(server_name: str, tool_name: str, arguments: dict[
 
 # --- 2. Creator Context Engine ---
 
-@router.get("/creator-profile", response_model=CreatorProfileSchema)
-async def get_creator_profile(db: AsyncSession = Depends(get_db)) -> CreatorProfileSchema:
-    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
-    if not row:
-        raw = get_settings().load_creator_profile_file()
-        return CreatorProfileSchema(**raw)
+def _serialize_creator_profile(row: CreatorProfile) -> CreatorProfileSchema:
+    raw_social = dict(row.social_profiles or {})
+    flat_social: dict[str, str] = {
+        k: str(v) for k, v in raw_social.items() if not k.startswith("_") and isinstance(v, str)
+    }
+    raw_accounts = raw_social.get("_accounts")
+    social_accounts: list[SocialAccountItem] = []
+    if isinstance(raw_accounts, list):
+        for idx, acc in enumerate(raw_accounts):
+            if isinstance(acc, dict) and acc.get("url"):
+                social_accounts.append(
+                    SocialAccountItem(
+                        id=str(acc.get("id") or f"acc-{idx}"),
+                        platform=str(acc.get("platform") or "other"),
+                        label=str(acc.get("label") or ""),
+                        url=str(acc.get("url")),
+                    )
+                )
+    if not social_accounts and flat_social:
+        for plat, url_val in flat_social.items():
+            if url_val.strip():
+                social_accounts.append(
+                    SocialAccountItem(
+                        id=f"legacy-{plat}",
+                        platform=plat,
+                        label="Principal",
+                        url=url_val.strip(),
+                    )
+                )
+
+    raw_repos = raw_social.get("_github_repos")
+    github_repos: list[GitHubRepoItem] = []
+    if isinstance(raw_repos, list):
+        for repo in raw_repos[:5]:
+            if isinstance(repo, dict) and repo.get("repo_full_name"):
+                github_repos.append(GitHubRepoItem(**repo))
+
+    raw_catalog = dict(row.conversion_goals_catalog or {})
+    raw_triggers = raw_catalog.pop("_manychat_triggers", [])
+    clean_catalog = {k: v for k, v in raw_catalog.items() if not k.startswith("_") and isinstance(v, dict)}
+
+    manychat_triggers: list[ManyChatTriggerRule] = []
+    if isinstance(raw_triggers, list):
+        for t in raw_triggers:
+            if isinstance(t, dict) and t.get("keyword"):
+                manychat_triggers.append(ManyChatTriggerRule(**t))
+    elif "EMAIL_LEAD_CAPTURE" in clean_catalog and isinstance(clean_catalog["EMAIL_LEAD_CAPTURE"], dict):
+        kw = clean_catalog["EMAIL_LEAD_CAPTURE"].get("trigger_word")
+        if kw:
+            manychat_triggers.append(
+                ManyChatTriggerRule(
+                    id="trig-default",
+                    keyword=str(kw).upper(),
+                    lead_magnet_id=None,
+                    platform="all",
+                    dm_reply_template=f"¡Gracias por comentar {str(kw).upper()}! Aquí tienes tu recurso:",
+                    active=True,
+                )
+            )
+
+    lead_magnets: list[LeadMagnetItem] = []
+    for idx, lm in enumerate(row.lead_magnets or []):
+        if isinstance(lm, dict) and lm.get("title"):
+            lead_magnets.append(
+                LeadMagnetItem(
+                    id=str(lm.get("id") or f"lm-{idx}"),
+                    title=str(lm.get("title")),
+                    description=str(lm.get("description") or ""),
+                    format=str(lm.get("format") or "Guía PDF"),
+                    delivery_url=str(lm.get("delivery_url") or ""),
+                    source=str(lm.get("source") or "manual"),
+                    created_at=lm.get("created_at"),
+                )
+            )
+
     return CreatorProfileSchema(
         creator_id=row.creator_code,
         name=row.creator_name,
@@ -214,11 +291,24 @@ async def get_creator_profile(db: AsyncSession = Depends(get_db)) -> CreatorProf
         communication_style=row.communication_style,
         visual_style=row.visual_style,
         content_pillars=row.content_pillars,
-        conversion_goals_catalog=row.conversion_goals_catalog,
+        conversion_goals_catalog=clean_catalog,
         active_conversion_goal=ConversionGoal(row.active_goal),
-        social_profiles=row.social_profiles,
+        social_profiles=flat_social,
+        social_accounts=social_accounts,
+        github_repos=github_repos,
+        lead_magnets=lead_magnets,
+        manychat_triggers=manychat_triggers,
         voice_guidelines=row.voice_guidelines,
     )
+
+
+@router.get("/creator-profile", response_model=CreatorProfileSchema)
+async def get_creator_profile(db: AsyncSession = Depends(get_db)) -> CreatorProfileSchema:
+    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    if not row:
+        raw = get_settings().load_creator_profile_file()
+        return CreatorProfileSchema(**raw)
+    return _serialize_creator_profile(row)
 
 
 @router.put("/creator-profile", response_model=CreatorProfileSchema)
@@ -253,35 +343,52 @@ async def update_creator_profile(
         row.content_pillars = body.content_pillars
     if body.active_conversion_goal is not None:
         row.active_goal = body.active_conversion_goal.value
+
+    current_catalog = dict(row.conversion_goals_catalog or {})
     if body.conversion_goals_catalog is not None:
-        row.conversion_goals_catalog = {
+        preserved_triggers = current_catalog.get("_manychat_triggers")
+        current_catalog = {
             k: v.model_dump(mode="json") for k, v in body.conversion_goals_catalog.items()
         }
+        if preserved_triggers is not None:
+            current_catalog["_manychat_triggers"] = preserved_triggers
+    if body.manychat_triggers is not None:
+        current_catalog["_manychat_triggers"] = [
+            t.model_dump(mode="json") for t in body.manychat_triggers
+        ]
+    row.conversion_goals_catalog = current_catalog
+
+    current_social = dict(row.social_profiles or {})
     if body.social_profiles is not None:
-        row.social_profiles = body.social_profiles
+        preserved_acc = current_social.get("_accounts")
+        preserved_repos = current_social.get("_github_repos")
+        current_social = dict(body.social_profiles)
+        if preserved_acc is not None:
+            current_social["_accounts"] = preserved_acc
+        if preserved_repos is not None:
+            current_social["_github_repos"] = preserved_repos
+    if body.social_accounts is not None:
+        current_social["_accounts"] = [a.model_dump(mode="json") for a in body.social_accounts]
+        # Sync primary URL per platform to flat social_profiles for backwards compatibility
+        for plat in ("youtube", "instagram", "tiktok", "linkedin", "website", "github"):
+            first_match = next((a.url for a in body.social_accounts if a.platform == plat and a.url), None)
+            if first_match:
+                current_social[plat] = first_match
+    if body.github_repos is not None:
+        current_social["_github_repos"] = [r.model_dump(mode="json") for r in body.github_repos[:5]]
+    row.social_profiles = current_social
+
+    if body.lead_magnets is not None:
+        row.lead_magnets = [lm.model_dump(mode="json") for lm in body.lead_magnets]
+
     if body.voice_guidelines is not None:
         row.voice_guidelines = body.voice_guidelines
 
     # Sync back to canonical creator_profile.json
     settings = get_settings()
     file_data = settings.load_creator_profile_file()
-    file_data.update(
-        {
-            "name": row.creator_name,
-            "age": row.age,
-            "personal_brand_tagline": row.personal_brand_tagline,
-            "niche": row.niche,
-            "ideal_customer_profile": row.target_icp,
-            "project_context": row.project_context,
-            "strategic_goals": row.strategic_goals,
-            "communication_style": row.communication_style,
-            "visual_style": row.visual_style,
-            "content_pillars": row.content_pillars,
-            "active_conversion_goal": row.active_goal,
-            "conversion_goals_catalog": row.conversion_goals_catalog,
-            "social_profiles": row.social_profiles,
-        }
-    )
+    serialized = _serialize_creator_profile(row)
+    file_data.update(serialized.model_dump(mode="json"))
     settings.save_creator_profile_file(file_data)
 
     await _record_audit(
@@ -291,7 +398,13 @@ async def update_creator_profile(
         agent_or_user_id="Creator",
         security_tier=1,
         operation_status="SUCCESS",
-        payload={"active_goal": row.active_goal, "niche": row.niche},
+        payload={
+            "active_goal": row.active_goal,
+            "niche": row.niche,
+            "github_repos_count": len(serialized.github_repos),
+            "lead_magnets_count": len(serialized.lead_magnets),
+            "manychat_triggers_count": len(serialized.manychat_triggers),
+        },
         ip_source=request.client.host if request.client else "127.0.0.1",
     )
     await db.commit()
@@ -313,9 +426,11 @@ def _parse_github_slug(raw: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-@router.post("/creator-profile/import-github", response_model=GitHubImportResponse)
-async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportResponse:
-    """Fetch repository metadata and README from GitHub to enrich Creator Context."""
+async def _fetch_single_github_repo(
+    body: GitHubImportRequest,
+) -> tuple[GitHubImportResponse, GitHubRepoItem, str]:
+    """Fetch metadata, README and lead magnet candidates for a single GitHub repository."""
+    import re
     import httpx
 
     owner, repo = _parse_github_slug(body.repo_url_or_slug)
@@ -350,13 +465,23 @@ async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportR
             headers=readme_headers,
         )
         if readme_resp.status_code == 200:
-            readme_text = readme_resp.text[:2500]
+            readme_text = readme_resp.text[:3500]
+
+        root_items: list[dict[str, Any]] = []
+        contents_resp = await client.get(
+            f"https://api.github.com/repos/{owner}/{repo}/contents",
+            headers=headers,
+        )
+        if contents_resp.status_code == 200 and isinstance(contents_resp.json(), list):
+            root_items = contents_resp.json()
 
     description = meta.get("description") or ""
     language = meta.get("language") or ""
     topics: list[str] = meta.get("topics") or []
+    homepage = (meta.get("homepage") or "").strip() or None
     repo_full_name = meta.get("full_name") or f"{owner}/{repo}"
     repo_url = meta.get("html_url") or f"https://github.com/{owner}/{repo}"
+    owner_login = (meta.get("owner") or {}).get("login") or owner
 
     excerpt_lines = [
         line.strip()
@@ -375,13 +500,74 @@ async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportR
         else f"Desarrollo y Producto Digital ({language or repo})"
     )
     suggested_context = (
-        f"Proyecto principal en GitHub: {repo_full_name} ({repo_url}).\n"
+        f"Proyecto en GitHub: {repo_full_name} ({repo_url}).\n"
         f"Descripción: {description or 'Sin descripción breve en GitHub.'}\n"
         f"Stack / Temas: {', '.join(pillars)}.\n\n"
         f"Resumen técnico del README:\n{readme_excerpt}"
     ).strip()
 
-    return GitHubImportResponse(
+    # Extract Lead Magnets from repo + root files/docs/templates + README links
+    now_iso = datetime.now(timezone.utc).isoformat()
+    extracted_lms: list[LeadMagnetItem] = [
+        LeadMagnetItem(
+            id=f"lm-gh-{owner}-{repo}".lower(),
+            title=f"Repositorio & Kit: {repo}",
+            description=description or f"Código fuente, arquitectura y documentación de {repo_full_name}.",
+            format="Repo GitHub / Open Source",
+            delivery_url=repo_url,
+            source=f"github:{repo_full_name}",
+            created_at=now_iso,
+        )
+    ]
+
+    resource_keywords = ("guide", "guia", "template", "plantilla", "checklist", "prompt", "workflow", "docs", "starter", "example", "demo")
+    for item in root_items:
+        item_name = str(item.get("name") or "")
+        item_url = str(item.get("html_url") or "")
+        if item_url and any(kw in item_name.lower() for kw in resource_keywords):
+            extracted_lms.append(
+                LeadMagnetItem(
+                    id=f"lm-gh-{repo}-{item_name}".lower()[:64],
+                    title=f"Recurso {repo}: {item_name}",
+                    description=f"Carpeta o archivo extraído automáticamente de {repo_full_name}.",
+                    format="Plantilla / Docs" if item.get("type") == "dir" else "Archivo / Guía",
+                    delivery_url=item_url,
+                    source=f"github:{repo_full_name}",
+                    created_at=now_iso,
+                )
+            )
+
+    for match in re.finditer(r"\[([^\]]{4,80})\]\((https?://[^\)]+)\)", readme_text):
+        link_title, link_url = match.group(1).strip(), match.group(2).strip()
+        if any(kw in link_title.lower() or kw in link_url.lower() for kw in resource_keywords):
+            if len(extracted_lms) < 6:
+                extracted_lms.append(
+                    LeadMagnetItem(
+                        id=f"lm-gh-link-{uuid.uuid4().hex[:8]}",
+                        title=link_title,
+                        description=f"Recurso enlazado en el README de {repo_full_name}.",
+                        format="Enlace / Guía",
+                        delivery_url=link_url,
+                        source=f"github:{repo_full_name}",
+                        created_at=now_iso,
+                    )
+                )
+
+    suggested_icp = (
+        f"Desarrolladores, founders y profesionales técnicos interesados en {', '.join(pillars[:3])} "
+        f"que buscan soluciones prácticas basadas en {repo}."
+    )
+    suggested_goals = [
+        "Captar correos y leads cualificados (Lead Magnets)",
+        "Posicionar liderazgo de opinión y reconocimiento de marca",
+        "Generar conversaciones y respuestas por Mensaje Directo (DMs)",
+    ]
+    suggested_voice = (
+        f"Directo, técnico pero accesible. Muestra demos reales de {repo}, comparte aprendizajes de código y arquitectura, "
+        "y evita el humo corporativo."
+    )
+
+    resp = GitHubImportResponse(
         repo_full_name=repo_full_name,
         repo_url=repo_url,
         description=description,
@@ -392,6 +578,209 @@ async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportR
         suggested_project_context=suggested_context,
         suggested_content_pillars=pillars,
         suggested_tagline=description[:120] if description else f"Construyendo {repo_full_name} en público",
+        suggested_name=owner_login,
+        suggested_icp=suggested_icp,
+        suggested_strategic_goals=suggested_goals,
+        suggested_communication_style="Directo y con Autoridad",
+        suggested_visual_style="Tecnológico / Neón Dinámico",
+        suggested_voice_guidelines=suggested_voice,
+        homepage=homepage,
+        extracted_lead_magnets=extracted_lms,
+    )
+    repo_item = GitHubRepoItem(
+        repo_full_name=repo_full_name,
+        repo_url=repo_url,
+        description=description,
+        primary_language=language or None,
+        topics=topics,
+        homepage=homepage,
+        added_at=now_iso,
+    )
+    return resp, repo_item, owner_login
+
+
+@router.post("/creator-profile/import-github", response_model=GitHubImportResponse)
+async def import_github_repo_context(body: GitHubImportRequest) -> GitHubImportResponse:
+    """Fetch repository metadata, README and Lead Magnets from GitHub to enrich Creator Context."""
+    resp, _, _ = await _fetch_single_github_repo(body)
+    return resp
+
+
+@router.post("/creator-profile/import-github-batch", response_model=GitHubBatchImportResponse)
+async def import_github_repos_batch(body: GitHubBatchImportRequest) -> GitHubBatchImportResponse:
+    """Fetch up to 5 GitHub repositories and autocomplete the full Creator Profile + Lead Magnets."""
+    imported_repos: list[GitHubRepoItem] = []
+    all_pillars: list[str] = []
+    context_sections: list[str] = []
+    social_accounts: list[SocialAccountItem] = []
+    extracted_lms: list[LeadMagnetItem] = []
+    seen_lm_urls: set[str] = set()
+    first_resp: GitHubImportResponse | None = None
+    owner_name = ""
+
+    for req in body.repos[:5]:
+        resp, repo_item, owner_login = await _fetch_single_github_repo(req)
+        if first_resp is None:
+            first_resp = resp
+            owner_name = owner_login
+        imported_repos.append(repo_item)
+        all_pillars.extend(resp.suggested_content_pillars)
+        context_sections.append(resp.suggested_project_context)
+
+        social_accounts.append(
+            SocialAccountItem(
+                id=f"gh-{repo_item.repo_full_name.replace('/', '-')}",
+                platform="github",
+                label=repo_item.repo_full_name,
+                url=repo_item.repo_url,
+            )
+        )
+        if repo_item.homepage:
+            social_accounts.append(
+                SocialAccountItem(
+                    id=f"web-{repo_item.repo_full_name.replace('/', '-')}",
+                    platform="website",
+                    label=f"Web {repo_item.repo_full_name.split('/')[-1]}",
+                    url=repo_item.homepage,
+                )
+            )
+        for lm in resp.extracted_lead_magnets:
+            if lm.delivery_url not in seen_lm_urls:
+                seen_lm_urls.add(lm.delivery_url)
+                extracted_lms.append(lm)
+
+    unique_pillars = list(dict.fromkeys(all_pillars))[:8]
+    repo_names = ", ".join(r.repo_full_name for r in imported_repos)
+    merged_context = "\n\n---\n\n".join(context_sections)
+
+    return GitHubBatchImportResponse(
+        imported_repos=imported_repos,
+        suggested_name=owner_name,
+        suggested_tagline=(
+            first_resp.suggested_tagline
+            if first_resp
+            else f"Creador de {repo_names}"
+        ),
+        suggested_niche=(
+            first_resp.suggested_niche
+            if first_resp
+            else "Tecnología, Software y Automatización"
+        ),
+        suggested_icp=(
+            f"Founders, desarrolladores y equipos técnicos interesados en {', '.join(unique_pillars[:4])}."
+        ),
+        suggested_project_context=merged_context,
+        suggested_strategic_goals=[
+            "Captar correos y leads cualificados (Lead Magnets)",
+            "Posicionar liderazgo de opinión y reconocimiento de marca",
+            "Generar conversaciones y respuestas por Mensaje Directo (DMs)",
+        ],
+        suggested_communication_style="Directo y con Autoridad",
+        suggested_visual_style="Tecnológico / Neón Dinámico",
+        suggested_content_pillars=unique_pillars,
+        suggested_voice_guidelines=(
+            f"Tono práctico y transparente (Build in Public). Comparte aprendizajes reales de {repo_names}, "
+            "ejemplos concretos de código/sistema y evita el relleno teórico."
+        ),
+        suggested_social_accounts=social_accounts,
+        extracted_lead_magnets=extracted_lms,
+    )
+
+
+@router.post("/manychat/trigger", response_model=ManyChatTriggerResponse)
+@router.post("/manychat/webhook", response_model=ManyChatTriggerResponse)
+async def execute_manychat_keyword_trigger(
+    body: ManyChatTriggerRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ManyChatTriggerResponse:
+    """Match an incoming keyword (ManyChat/DM/Comment) to a Lead Magnet and return the automated DM payload."""
+    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Creator profile not found.")
+
+    profile = _serialize_creator_profile(row)
+    incoming_kw = body.keyword.strip().upper()
+    comment_upper = (body.comment_text or body.keyword).strip().upper()
+
+    matched_rule: ManyChatTriggerRule | None = None
+    for rule in profile.manychat_triggers:
+        if not rule.active:
+            continue
+        if rule.platform not in ("all", body.platform.lower()):
+            continue
+        rule_kw = rule.keyword.strip().upper()
+        if rule_kw == incoming_kw or (rule_kw and rule_kw in comment_upper):
+            matched_rule = rule
+            break
+
+    if not matched_rule:
+        return ManyChatTriggerResponse(
+            matched=False,
+            keyword=incoming_kw,
+            platform=body.platform,
+            lead_magnet=None,
+            dm_reply_text="",
+            delivery_url="",
+        )
+
+    linked_lm: LeadMagnetItem | None = next(
+        (lm for lm in profile.lead_magnets if lm.id == matched_rule.lead_magnet_id),
+        None,
+    )
+
+    delivery_url = linked_lm.delivery_url if linked_lm else ""
+    lm_title = linked_lm.title if linked_lm else "tu recurso"
+    template = matched_rule.dm_reply_template.strip() or (
+        f"¡Hola {body.username}! Aquí tienes acceso directo a {lm_title}:"
+    )
+    dm_reply_text = f"{template} {delivery_url}".strip()
+
+    # Increment triggers_count & persist
+    matched_rule.triggers_count += 1
+    current_catalog = dict(row.conversion_goals_catalog or {})
+    current_catalog["_manychat_triggers"] = [
+        t.model_dump(mode="json") for t in profile.manychat_triggers
+    ]
+    row.conversion_goals_catalog = current_catalog
+
+    await _record_audit(
+        db=db,
+        workspace_id=row.workspace_id,
+        action_type="MANYCHAT_KEYWORD_TRIGGERED",
+        agent_or_user_id=f"ManyChat:{body.platform}",
+        security_tier=1,
+        operation_status="SUCCESS",
+        payload={
+            "keyword": matched_rule.keyword,
+            "platform": body.platform,
+            "username": body.username,
+            "lead_magnet_title": lm_title,
+            "delivery_url": delivery_url,
+        },
+        ip_source=request.client.host if request.client else "127.0.0.1",
+    )
+    await db.commit()
+
+    await broadcaster.broadcast(
+        "MANYCHAT_LEAD_MAGNET_DELIVERED",
+        {
+            "keyword": matched_rule.keyword,
+            "platform": body.platform,
+            "username": body.username,
+            "lead_magnet": lm_title,
+        },
+    )
+
+    return ManyChatTriggerResponse(
+        matched=True,
+        keyword=matched_rule.keyword,
+        platform=body.platform,
+        lead_magnet=linked_lm,
+        dm_reply_text=dm_reply_text,
+        delivery_url=delivery_url,
+        manychat_flow_id=matched_rule.manychat_flow_id,
+        triggers_count=matched_rule.triggers_count,
     )
 
 
