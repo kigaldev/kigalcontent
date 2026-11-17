@@ -9,9 +9,11 @@ import {
   DownloadCloud,
   Eye,
   Film,
+  Fingerprint,
   FolderOpen,
   HelpCircle,
   Scissors,
+  ShieldCheck,
   UploadCloud,
   Volume2,
   X,
@@ -43,6 +45,66 @@ const RemotionPlayer = dynamic(
   { ssr: false }
 );
 
+type PlatformOverlay = "TikTok" | "Instagram" | "YouTube";
+
+interface NativeSignaturePreset {
+  platform: PlatformOverlay;
+  platformLabel: string;
+  editorLabel: string;
+  encoder: string;
+  comment: string;
+  colorspace: string;
+  stripVerification: string;
+}
+
+function inferSignaturePlatform(
+  profile: Record<string, string> | undefined,
+  explicitPlatform?: unknown
+): PlatformOverlay | null {
+  if (typeof explicitPlatform === "string") {
+    const low = explicitPlatform.toLowerCase();
+    if (low.includes("instagram")) return "Instagram";
+    if (low.includes("tiktok")) return "TikTok";
+    if (low.includes("youtube")) return "YouTube";
+  }
+  if (!profile) return null;
+  const haystack = `${profile.encoder ?? ""} ${profile.comment ?? ""}`.toLowerCase();
+  if (haystack.includes("instagram") || haystack.includes("ig_edits")) return "Instagram";
+  if (haystack.includes("tiktok") || haystack.includes("capcut")) return "TikTok";
+  if (haystack.includes("youtube") || haystack.includes("yt_create")) return "YouTube";
+  return null;
+}
+
+const NATIVE_SIGNATURE_PRESETS: Record<PlatformOverlay, NativeSignaturePreset> = {
+  Instagram: {
+    platform: "Instagram",
+    platformLabel: "Instagram Reels",
+    editorLabel: "Instagram Edits 1.4.0 / iPhone 16 Pro",
+    encoder: "Instagram Edits 1.4.0 (Apple CoreMedia / iPhone 16 Pro)",
+    comment: "Edited with Instagram Edits 1.4.0 · iOS 18",
+    colorspace: "bt709 (Rec.709 · 1080×1920 SDR)",
+    stripVerification: "-map_metadata -1 (0 rastros FFmpeg/Lavf)",
+  },
+  TikTok: {
+    platform: "TikTok",
+    platformLabel: "TikTok",
+    editorLabel: "CapCut 13.8.0 / TikTok Native Studio",
+    encoder: "CapCut 13.8.0 / TikTok Native Studio",
+    comment: "Exported from TikTok Native Studio · CapCut Mobile",
+    colorspace: "bt709 (Rec.709 · 1080×1920 SDR)",
+    stripVerification: "-map_metadata -1 (0 rastros FFmpeg/Lavf)",
+  },
+  YouTube: {
+    platform: "YouTube",
+    platformLabel: "YouTube Shorts",
+    editorLabel: "YouTube Create 2.1.0",
+    encoder: "YouTube Create 2.1.0 (Android/Mobile Encoder)",
+    comment: "Created with YouTube Create 2.1.0",
+    colorspace: "bt709 (Rec.709 · 1080×1920 SDR)",
+    stripVerification: "-map_metadata -1 (0 rastros FFmpeg/Lavf)",
+  },
+};
+
 interface MobileSafeZoneSimulatorProps {
   onRefresh: () => Promise<void>;
 }
@@ -53,9 +115,8 @@ export function MobileSafeZoneSimulator({
   const { selectedDetail, selectedProjectId, backendOnline, showToast } =
     useEngineStore();
 
-  const [platformOverlay, setPlatformOverlay] = useState<
-    "TikTok" | "Instagram" | "YouTube"
-  >("Instagram");
+  const [platformOverlay, setPlatformOverlay] =
+    useState<PlatformOverlay>("Instagram");
   const [showSafeZones, setShowSafeZones] = useState(true);
   const [showExplanation, setShowExplanation] = useState(false);
   const [subtitleYPercent, setSubtitleYPercent] = useState(55);
@@ -78,7 +139,7 @@ export function MobileSafeZoneSimulator({
     if (!selectedProjectId || !gdriveUrl.trim()) return;
     setIsImportingGDrive(true);
     try {
-      const res = await fetch("/api/v1/media/google-drive/import", {
+      const res = await fetch(`${apiClient.apiBase}/api/v1/media/google-drive/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -101,8 +162,11 @@ export function MobileSafeZoneSimulator({
         const err = await res.json().catch(() => ({}));
         showToast("error", err.detail || "Error al importar desde Google Drive.");
       }
-    } catch (err: any) {
-      showToast("error", err.message || "Error al conectar con Google Drive.");
+    } catch (err: unknown) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Error al conectar con Google Drive."
+      );
     } finally {
       setIsImportingGDrive(false);
     }
@@ -150,6 +214,7 @@ export function MobileSafeZoneSimulator({
   const handleRunMediaPipeline = async () => {
     if (!selectedProjectId) return;
     setProcessing(true);
+    const activePreset = NATIVE_SIGNATURE_PRESETS[platformOverlay];
     try {
       if (backendOnline) {
         const qc = await apiClient.processMedia({
@@ -159,15 +224,19 @@ export function MobileSafeZoneSimulator({
           min_silence_duration_sec: minSilenceSec,
           target_lufs: -14.0,
           subtitle_y_percent: subtitleYPercent,
+          target_platform_signature: platformOverlay,
         });
         setLiveQc(qc);
         await onRefresh();
         showToast(
           "success",
-          `Video procesado: ${qc.silences_trimmed} pausas eliminadas · Volumen ajustado a ${qc.measured_lufs} LUFS.`
+          `Video procesado: ${qc.silences_trimmed} pausas eliminadas · ${qc.measured_lufs} LUFS · Huella: ${activePreset.editorLabel}.`
         );
       } else {
-        showToast("info", "Simulación completada: audio normalizado a -14.0 LUFS y video 9:16.");
+        showToast(
+          "info",
+          `Simulación completada: -14.0 LUFS, 9:16 y huella nativa ${activePreset.editorLabel}.`
+        );
       }
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error procesando video");
@@ -178,16 +247,73 @@ export function MobileSafeZoneSimulator({
 
   if (!selectedDetail?.project) {
     return (
-      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-10 text-center text-slate-400">
+      <div className="nle-panel p-10 text-center text-slate-400">
         Selecciona un video en el Paso 1 para verificar el encuadre 9:16 y el audio.
       </div>
     );
   }
 
+  const selectedSignaturePreset = NATIVE_SIGNATURE_PRESETS[platformOverlay];
+  const persistedQcReport = selectedDetail.video_asset?.qc_report as
+    | Record<string, unknown>
+    | undefined;
+  const persistedSignatureProfile = persistedQcReport?.native_signature_profile as
+    | Record<string, string>
+    | undefined;
+  const backendSignatureProfile =
+    liveQc?.native_signature_profile ?? persistedSignatureProfile;
+
+  const backendTargetPlatform = inferSignaturePlatform(
+    backendSignatureProfile,
+    backendSignatureProfile?.target_platform ??
+      backendSignatureProfile?.platform ??
+      persistedQcReport?.target_platform_signature
+  );
+
+  const isBackendSignatureForCurrentPlatform = Boolean(
+    backendSignatureProfile &&
+      backendTargetPlatform &&
+      backendTargetPlatform.toLowerCase() === platformOverlay.toLowerCase()
+  );
+
+  const displayedEncoder =
+    (isBackendSignatureForCurrentPlatform
+      ? backendSignatureProfile?.encoder
+      : undefined) ?? selectedSignaturePreset.encoder;
+  const displayedComment =
+    (isBackendSignatureForCurrentPlatform
+      ? backendSignatureProfile?.comment
+      : undefined) ?? selectedSignaturePreset.comment;
+  const displayedColorspace =
+    (isBackendSignatureForCurrentPlatform
+      ? backendSignatureProfile?.colorspace ?? backendSignatureProfile?.color_space
+      : undefined) ?? selectedSignaturePreset.colorspace;
+  const displayedStripVerification =
+    (isBackendSignatureForCurrentPlatform
+      ? backendSignatureProfile?.metadata_strip ??
+        backendSignatureProfile?.map_metadata
+      : undefined) ?? selectedSignaturePreset.stripVerification;
+
+  const extraSignatureEntries = isBackendSignatureForCurrentPlatform && backendSignatureProfile
+    ? Object.entries(backendSignatureProfile).filter(
+        ([k]) =>
+          ![
+            "encoder",
+            "comment",
+            "colorspace",
+            "color_space",
+            "metadata_strip",
+            "map_metadata",
+            "platform",
+            "target_platform",
+          ].includes(k)
+      )
+    : [];
+
   return (
     <div className="space-y-5">
       {/* Step Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 rounded-xl p-4 sm:p-5">
+      <div className="nle-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
         <div>
           <div className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-xs font-bold text-slate-950">
@@ -237,7 +363,7 @@ export function MobileSafeZoneSimulator({
       {/* Simulator + Processing Grid */}
       <div className="grid gap-6 lg:grid-cols-12 items-start">
         {/* Left: Interactive Remotion 9:16 Simulator */}
-        <div className="lg:col-span-5 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="lg:col-span-5 nle-panel p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Film className="w-4 h-4 text-cyan-400" />
@@ -333,9 +459,9 @@ export function MobileSafeZoneSimulator({
           </div>
         </div>
 
-        {/* Right: Audio & Subtitle Automated Processing */}
+        {/* Right: Audio & Subtitle Automated Processing + Native Editor Signature */}
         <div className="lg:col-span-7 space-y-5">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="nle-panel p-5 space-y-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-cyan-400" />
@@ -427,8 +553,120 @@ export function MobileSafeZoneSimulator({
             )}
           </div>
 
+          {/* Native Editor Fingerprint (Anti-Penalty IG / TikTok / YT) */}
+          <div className="nle-panel p-5 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Fingerprint className="w-4 h-4 text-cyan-400" />
+                  🛡️ Huella de Editor Nativo (Anti-Penalización IG/TikTok/YT)
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Limpia metadatos de renderizado externo/FFmpeg e inyecta la firma del editor móvil oficial para maximizar el alcance orgánico.
+                </p>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  isBackendSignatureForCurrentPlatform
+                    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
+                    : "bg-cyan-500/10 text-cyan-300 border-cyan-500/35"
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                {isBackendSignatureForCurrentPlatform
+                  ? "Aplicada en MP4 Maestro"
+                  : `Objetivo: ${platformOverlay}`}
+              </span>
+            </div>
+
+            {/* Target Signature Selector synchronized with platformOverlay */}
+            <div className="grid sm:grid-cols-3 gap-2.5">
+              {(["Instagram", "TikTok", "YouTube"] as const).map((plat) => {
+                const preset = NATIVE_SIGNATURE_PRESETS[plat];
+                const isSelected = platformOverlay === plat;
+                return (
+                  <button
+                    key={plat}
+                    type="button"
+                    onClick={() => setPlatformOverlay(plat)}
+                    className={`rounded-xl border p-3 text-left transition ${
+                      isSelected
+                        ? "border-cyan-400 bg-cyan-500/12 shadow-sm shadow-cyan-500/10"
+                        : "border-[var(--kc-border)] bg-[var(--kc-canvas)]/70 hover:border-slate-600"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-white">
+                        {preset.platformLabel}
+                      </span>
+                      {isSelected && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      )}
+                    </div>
+                    <p className="text-[11px] font-mono text-cyan-300 mt-1 leading-snug">
+                      {preset.editorLabel}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Applied Metadata Summary */}
+            <div className="grid sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="rounded-xl border border-[var(--kc-border)] bg-[var(--kc-canvas)]/80 p-3 space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                  encoder
+                </span>
+                <p className="font-mono text-xs text-slate-100 break-words">
+                  {displayedEncoder}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[var(--kc-border)] bg-[var(--kc-canvas)]/80 p-3 space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                  comment
+                </span>
+                <p className="font-mono text-xs text-slate-100 break-words">
+                  {displayedComment}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[var(--kc-border)] bg-[var(--kc-canvas)]/80 p-3 space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                  colorspace bt709
+                </span>
+                <p className="font-mono text-xs text-emerald-300 break-words">
+                  {displayedColorspace}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-3 space-y-1">
+                <span className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Verificación de limpieza
+                </span>
+                <p className="font-mono text-xs text-emerald-200 break-words">
+                  {displayedStripVerification}
+                </p>
+              </div>
+            </div>
+
+            {extraSignatureEntries.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {extraSignatureEntries.map(([key, val]) => (
+                  <span
+                    key={key}
+                    className="rounded-md border border-[var(--kc-border)] bg-[var(--kc-canvas)] px-2 py-0.5 font-mono text-[10px] text-slate-300"
+                  >
+                    {key}: <span className="text-cyan-300">{val}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Quality Control Results */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="nle-panel p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-emerald-400" />

@@ -1,28 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
   Activity,
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  ChevronRight,
+  ChevronDown,
   Cpu,
   FileText,
   KanbanSquare,
   Layers,
+  Megaphone,
+  Plug,
   RefreshCw,
   Send,
+  Settings,
   ShieldCheck,
   Smartphone,
   Sparkles,
-  User,
   Wifi,
   WifiOff,
+  Workflow,
   X,
-  AlertCircle,
-  HelpCircle,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import {
@@ -38,11 +40,13 @@ import { KanbanPipelineBoard } from "@/components/KanbanPipelineBoard";
 import { ScriptStudioView } from "@/components/ScriptStudioView";
 import { MobileSafeZoneSimulator } from "@/components/MobileSafeZoneSimulator";
 import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
+import { AdsCampaignStudioView } from "@/components/AdsCampaignStudioView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
 import { ProfileBubbleMenu, type CreatorModalTab } from "@/components/ProfileBubbleMenu";
 import { BackendStatusModal } from "@/components/BackendStatusModal";
+import { N8nWorkflowsHub } from "@/components/N8nWorkflowsHub";
 import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
 interface TabDefinition {
@@ -80,7 +84,7 @@ const STUDIO_TABS: TabDefinition[] = [
     label: "Video 9:16",
     shortLabel: "Video",
     stepName: "Video 9:16",
-    summary: "Revisa subtítulos, audio y crea tu portada o miniatura.",
+    summary: "Revisa subtítulos, audio, huella nativa y crea tu portada o miniatura.",
     icon: Smartphone,
   },
   {
@@ -89,30 +93,37 @@ const STUDIO_TABS: TabDefinition[] = [
     label: "Publicar",
     shortLabel: "Publicar",
     stepName: "Publicar",
-    summary: "Prepara los textos por red social y autoriza la publicación.",
+    summary: "Prepara textos por red, KigalChat Auto-DM y autoriza la publicación.",
     icon: Send,
   },
   {
-    id: "analytics-rmta",
+    id: "ads-studio",
     stepNumber: 5,
+    label: "Ads",
+    shortLabel: "Ads",
+    stepName: "Ads",
+    summary: "Campañas para Meta Ads, Google Ads y YouTube Ads",
+    icon: Megaphone,
+  },
+  {
+    id: "analytics-rmta",
+    stepNumber: 6,
     label: "Resultados",
     shortLabel: "Métricas",
     stepName: "Resultados",
     summary: "Analiza la retención y el aprendizaje de tus videos.",
     icon: BarChart3,
   },
-  {
-    id: "social-credentials",
-    stepNumber: 6,
-    label: "Conexiones",
-    shortLabel: "APIs",
-    stepName: "Conexiones",
-    summary: "Configura las claves oficiales de YouTube, Instagram, TikTok y LinkedIn.",
-    icon: ShieldCheck,
-  },
 ];
 
-export default function AutonomousContentEnginePage() {
+type DockTab = "n8n" | "apis";
+
+const DOCK_TABS: Array<{ id: DockTab; label: string; icon: typeof Workflow }> = [
+  { id: "n8n", label: "Automatizaciones n8n", icon: Workflow },
+  { id: "apis", label: "Conexiones Oficiales APIs", icon: Plug },
+];
+
+export default function KigalContentStudioPage() {
   const {
     activeTab,
     setActiveTab,
@@ -138,7 +149,12 @@ export default function AutonomousContentEnginePage() {
   const [isProfileBubbleOpen, setIsProfileBubbleOpen] = useState(false);
   const [profileModalTab, setProfileModalTab] = useState<CreatorModalTab>("general");
   const [isBackendModalOpen, setIsBackendModalOpen] = useState(false);
+  const [dockTab, setDockTab] = useState<DockTab>("n8n");
+
+  const dockBaseId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dockTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dockDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const isBootstrappingRef = useRef(false);
 
   const currentTabIndex = STUDIO_TABS.findIndex((t) => t.id === activeTab);
@@ -273,12 +289,11 @@ export default function AutonomousContentEnginePage() {
             payload?: Record<string, unknown>;
           };
           const eventName = parsed.event ?? "actividad";
-          const summary =
-            parsed.payload?.working_title
-              ? `${String(parsed.payload.working_title)}`
-              : parsed.payload?.to_state
-              ? `${String(parsed.payload.from_state ?? "")} -> ${String(parsed.payload.to_state)}`
-              : JSON.stringify(parsed.payload ?? {}).slice(0, 80);
+          const summary = parsed.payload?.working_title
+            ? `${String(parsed.payload.working_title)}`
+            : parsed.payload?.to_state
+            ? `${String(parsed.payload.from_state ?? "")} -> ${String(parsed.payload.to_state)}`
+            : JSON.stringify(parsed.payload ?? {}).slice(0, 80);
 
           pushLiveEvent({
             event: eventName,
@@ -327,58 +342,95 @@ export default function AutonomousContentEnginePage() {
     const targetTab = STUDIO_TABS[nextIndex];
     setActiveTab(targetTab.id);
     tabRefs.current[nextIndex]?.focus();
+    tabRefs.current[nextIndex]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  };
+
+  const handleDockTabKeyDown = (
+    e: KeyboardEvent<HTMLButtonElement>,
+    index: number
+  ) => {
+    let nextIndex = index;
+    if (e.key === "ArrowRight") {
+      nextIndex = (index + 1) % DOCK_TABS.length;
+    } else if (e.key === "ArrowLeft") {
+      nextIndex = (index - 1 + DOCK_TABS.length) % DOCK_TABS.length;
+    } else if (e.key === "Home") {
+      nextIndex = 0;
+    } else if (e.key === "End") {
+      nextIndex = DOCK_TABS.length - 1;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    setDockTab(DOCK_TABS[nextIndex].id);
+    dockTabRefs.current[nextIndex]?.focus();
+    dockTabRefs.current[nextIndex]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  };
+
+  const handleOpenAutomationDock = () => {
+    if (dockDetailsRef.current) {
+      dockDetailsRef.current.open = true;
+      dockDetailsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   const activeProject =
     projects.find((p) => p.id === selectedProjectId) ?? selectedDetail?.project ?? null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+    <div className="min-h-screen flex flex-col bg-[#08090d] text-slate-100">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 border-b border-slate-800/90 bg-slate-950/90 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-[var(--kc-border)] bg-[#08090d]/92 backdrop-blur-md">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 py-3.5">
-            {/* Brand + Clean Subtitle */}
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            {/* Brand + Pro Studio OS Badge */}
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 via-indigo-500/20 to-emerald-500/20 border border-cyan-500/30 shadow-inner">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 via-indigo-500/20 to-emerald-500/20 border border-cyan-500/35 shadow-inner">
                 <Cpu className="h-5 w-5 text-cyan-300" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base font-bold tracking-tight text-white sm:text-lg">
-                    Autonomous Content Engine
+                    KigalContent
                   </h1>
-                  <span className="hidden rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-cyan-300 sm:inline-block">
-                    Estudio de Creación
+                  <span className="inline-flex items-center rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-cyan-300">
+                    Pro Studio OS
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
                   {creatorProfile
                     ? `${creatorProfile.name} · ${creatorProfile.niche}`
-                    : "Plataforma guiada paso a paso para crear, revisar y publicar videos de alto impacto"}
+                    : "Estudio profesional todo-en-uno de contenido, video 9:16 y Ads"}
                 </p>
               </div>
             </div>
 
-            {/* Project Selector & Status */}
-            <div className="flex flex-wrap items-center gap-2.5">
+            {/* Project Selector, Status, Profile & Quick Actions */}
+            <div className="flex flex-wrap items-center gap-2">
               {projects.length > 0 && (
-                <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-xs">
+                <label className="flex items-center gap-2 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-panel)] px-2.5 py-1.5 text-xs">
                   <Layers className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                   <span className="text-slate-400 hidden md:inline">Video Activo:</span>
                   <select
                     aria-label="Seleccionar video activo"
                     value={selectedProjectId ?? ""}
                     onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="max-w-[260px] truncate bg-transparent font-semibold text-slate-100 focus:outline-none"
+                    className="max-w-[240px] truncate bg-transparent font-semibold text-slate-100 focus:outline-none"
                   >
                     {projects.map((project) => (
                       <option
                         key={project.id}
                         value={project.id}
-                        className="bg-slate-900 text-slate-100"
+                        className="bg-[#10131c] text-slate-100"
                       >
-                        [{project.asset_code}] {project.working_title} — {HUMAN_STATE_LABELS[project.current_state] ?? project.current_state}
+                        [{project.asset_code}] {project.working_title} —{" "}
+                        {HUMAN_STATE_LABELS[project.current_state] ?? project.current_state}
                       </option>
                     ))}
                   </select>
@@ -442,21 +494,32 @@ export default function AutonomousContentEnginePage() {
               <button
                 type="button"
                 onClick={() => void loadWorkspaceData(selectedProjectId ?? undefined)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-panel)] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
                 title="Actualizar datos del proyecto"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Actualizar</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleOpenAutomationDock}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-surface)] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
+                title="Abrir dock de Automatizaciones n8n y Conexiones Oficiales APIs"
+              >
+                <Settings className="h-3.5 w-3.5 text-cyan-400" aria-hidden="true" />
+                <span className="hidden lg:inline">Automatizaciones y APIs</span>
+                <span className="lg:hidden">APIs</span>
+              </button>
             </div>
           </div>
 
-          {/* Stepper Navigation Tabs (Clean & Simplified) */}
-          <div className="flex items-center justify-between gap-4 border-t border-slate-900 pt-1">
+          {/* 6-Tab Single-Row Studio Navigation */}
+          <div className="flex items-center justify-between gap-4 border-t border-[var(--kc-border)]/70 pt-1">
             <div
               role="tablist"
               aria-label="Pasos de creación de contenido"
-              className="flex flex-wrap items-center gap-1 sm:gap-2"
+              className="flex items-center gap-1 sm:gap-2"
             >
               {STUDIO_TABS.map((tab, index) => {
                 const Icon = tab.icon;
@@ -471,9 +534,14 @@ export default function AutonomousContentEnginePage() {
                     role="tab"
                     type="button"
                     aria-selected={isSelected}
-                    aria-controls={`panel-${tab.id}`}
                     tabIndex={isSelected ? 0 : -1}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      tabRefs.current[index]?.scrollIntoView({
+                        block: "nearest",
+                        inline: "nearest",
+                      });
+                    }}
                     onKeyDown={(e) => handleTabKeyDown(e, index)}
                     className={`inline-flex items-center gap-2 px-3 py-2.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
                       isSelected
@@ -485,11 +553,15 @@ export default function AutonomousContentEnginePage() {
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
                         isSelected
                           ? "bg-cyan-400 text-slate-950"
-                          : "bg-slate-800 text-slate-300"
+                          : "bg-[#151926] text-slate-300 border border-[var(--kc-border)]"
                       }`}
                     >
                       {tab.stepNumber}
                     </span>
+                    <Icon
+                      className="h-3.5 w-3.5 hidden sm:inline shrink-0 opacity-85"
+                      aria-hidden="true"
+                    />
                     <span className="hidden md:inline">{tab.label}</span>
                     <span className="md:hidden">{tab.shortLabel}</span>
                   </button>
@@ -498,11 +570,12 @@ export default function AutonomousContentEnginePage() {
             </div>
 
             {activeProject && (
-              <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pb-1">
+              <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pb-1 shrink-0">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
                 <span>Fase actual:</span>
-                <span className="rounded bg-slate-900 border border-slate-700 px-2 py-0.5 text-[11px] font-semibold text-cyan-300">
-                  {HUMAN_STATE_LABELS[activeProject.current_state] ?? activeProject.current_state}
+                <span className="rounded bg-[var(--kc-panel)] border border-[var(--kc-border)] px-2 py-0.5 text-[11px] font-semibold text-cyan-300">
+                  {HUMAN_STATE_LABELS[activeProject.current_state] ??
+                    activeProject.current_state}
                 </span>
                 <span className="text-slate-600">|</span>
                 <span title="Prioridad calculada de 1 a 10">Prioridad:</span>
@@ -515,15 +588,15 @@ export default function AutonomousContentEnginePage() {
         </div>
       </header>
 
-      {/* Visual Step-by-Step Flow Bar */}
-      <div className="border-b border-slate-800/80 bg-slate-900/60 py-2.5">
+      {/* Visual Step-by-Step Flow Bar (non-sticky for content-first focus) */}
+      <div className="border-b border-[var(--kc-border)]/80 bg-[var(--kc-panel)]/70 py-2.5">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 text-slate-300">
               <span className="rounded-md bg-cyan-500/20 px-2 py-0.5 font-bold text-cyan-300 text-[11px]">
-                {currentTab.label}
+                {currentTab.stepNumber}. {currentTab.label}
               </span>
-              <span className="text-slate-400">—</span>
+              <span className="text-slate-500">—</span>
               <span className="text-slate-300">{currentTab.summary}</span>
             </div>
 
@@ -533,7 +606,7 @@ export default function AutonomousContentEnginePage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab(prevTab.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1 text-slate-400 transition hover:border-slate-700 hover:text-white"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--kc-border)] bg-[var(--kc-canvas)] px-2.5 py-1 text-slate-400 transition hover:border-slate-600 hover:text-white"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" />
                   <span>Anterior: {prevTab.stepName}</span>
@@ -556,7 +629,7 @@ export default function AutonomousContentEnginePage() {
 
       {/* Live Activity Ticker (if any) */}
       {liveEvents.length > 0 && (
-        <div className="border-b border-slate-800/70 bg-slate-900/30">
+        <div className="border-b border-[var(--kc-border)]/60 bg-[var(--kc-panel)]/40">
           <div className="mx-auto flex max-w-[1600px] items-center gap-3 overflow-x-auto px-4 py-1.5 text-xs text-slate-300 sm:px-6">
             <span className="inline-flex items-center gap-1.5 font-semibold text-cyan-400 shrink-0">
               <Activity className="h-3.5 w-3.5 animate-pulse" />
@@ -565,9 +638,11 @@ export default function AutonomousContentEnginePage() {
             {liveEvents.slice(0, 3).map((ev, idx) => (
               <span
                 key={`${ev.timestamp}-${idx}`}
-                className="inline-flex items-center gap-1.5 rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-[11px] shrink-0"
+                className="inline-flex items-center gap-1.5 rounded bg-[var(--kc-surface)] border border-[var(--kc-border)] px-2 py-0.5 text-[11px] shrink-0"
               >
-                <span className="text-slate-300 truncate max-w-[280px]">{ev.summary}</span>
+                <span className="text-slate-300 truncate max-w-[280px]">
+                  {ev.summary}
+                </span>
               </span>
             ))}
           </div>
@@ -602,21 +677,19 @@ export default function AutonomousContentEnginePage() {
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
             />
           )}
+          {activeTab === "ads-studio" && <AdsCampaignStudioView />}
           {activeTab === "analytics-rmta" && (
             <ClosedLoopAnalyticsView
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
             />
           )}
-          {activeTab === "social-credentials" && (
-            <SocialCredentialsSettings />
-          )}
         </section>
 
         {/* Step-by-Step Bottom Footer Navigation */}
-        <div className="mt-10 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="nle-panel mt-10 flex flex-wrap items-center justify-between gap-4 p-4">
           <div>
             <span className="text-xs font-semibold text-cyan-400">
-              {currentTab.label}
+              {currentTab.stepNumber}. {currentTab.label}
             </span>
             <p className="text-xs text-slate-400 mt-0.5">{currentTab.summary}</p>
           </div>
@@ -629,7 +702,7 @@ export default function AutonomousContentEnginePage() {
                   setActiveTab(prevTab.id);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white"
+                className="inline-flex items-center gap-2 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-canvas)] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white"
               >
                 <ArrowLeft className="h-4 w-4" />
                 <span>Paso Anterior: {prevTab.stepName}</span>
@@ -650,6 +723,95 @@ export default function AutonomousContentEnginePage() {
             )}
           </div>
         </div>
+
+        {/* Bottom Collapsible Dock: Automatizaciones n8n & Conexiones Oficiales (APIs) */}
+        <details
+          ref={dockDetailsRef}
+          className="nle-panel mt-6 overflow-hidden scroll-mt-24"
+        >
+          <summary className="flex items-center justify-between gap-3 px-4 py-3.5 text-xs sm:text-sm font-semibold text-slate-100 hover:bg-white/[0.02] transition select-none">
+            <span className="flex items-center gap-2.5 min-w-0">
+              <ChevronDown
+                className="accordion-chevron h-4 w-4 text-cyan-400"
+                aria-hidden="true"
+              />
+              <span className="truncate">
+                ⚡ Automatizaciones n8n &amp; 🔌 Conexiones Oficiales (APIs)
+              </span>
+            </span>
+            <span className="hidden md:inline-flex items-center gap-2 text-[11px] font-normal text-slate-400 shrink-0">
+              5 flujos n8n · LLM Router · Credenciales de redes
+            </span>
+          </summary>
+
+          <div className="border-t border-[var(--kc-border)] p-4 sm:p-5 space-y-5">
+            {/* 2-Tab Switcher inside Collapsible Dock */}
+            <div className="border-b border-[var(--kc-border)]">
+              <div
+                role="tablist"
+                aria-label="Automatizaciones y Conexiones Oficiales"
+                className="flex items-center gap-2"
+              >
+                {DOCK_TABS.map((dTab, index) => {
+                  const Icon = dTab.icon;
+                  const isSelected = dockTab === dTab.id;
+                  return (
+                    <button
+                      key={dTab.id}
+                      ref={(el) => {
+                        dockTabRefs.current[index] = el;
+                      }}
+                      id={`${dockBaseId}-tab-${dTab.id}`}
+                      role="tab"
+                      type="button"
+                      aria-selected={isSelected}
+                      tabIndex={isSelected ? 0 : -1}
+                      onClick={() => {
+                        setDockTab(dTab.id);
+                        dockTabRefs.current[index]?.scrollIntoView({
+                          block: "nearest",
+                          inline: "nearest",
+                        });
+                      }}
+                      onKeyDown={(e) => handleDockTabKeyDown(e, index)}
+                      className={`inline-flex items-center gap-2 px-3 py-2.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
+                        isSelected
+                          ? "text-cyan-300"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{dTab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Dock Tab Panels (no padding/borders on role="tabpanel" itself per modern-web-guidance: tabs) */}
+            <div
+              role="tabpanel"
+              id={`${dockBaseId}-panel-n8n`}
+              aria-labelledby={`${dockBaseId}-tab-n8n`}
+              hidden={dockTab !== "n8n"}
+            >
+              <div>
+                <N8nWorkflowsHub />
+              </div>
+            </div>
+
+            <div
+              role="tabpanel"
+              id={`${dockBaseId}-panel-apis`}
+              aria-labelledby={`${dockBaseId}-tab-apis`}
+              hidden={dockTab !== "apis"}
+            >
+              <div>
+                <SocialCredentialsSettings />
+              </div>
+            </div>
+          </div>
+        </details>
       </main>
 
       {/* Global HITL Approval Native Dialog */}
@@ -680,7 +842,7 @@ export default function AutonomousContentEnginePage() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-5 right-5 z-50 flex max-w-md items-start gap-3 rounded-xl border border-slate-700 bg-slate-900/95 p-4 text-sm shadow-2xl backdrop-blur"
+          className="nle-panel fixed bottom-5 right-5 z-50 flex max-w-md items-start gap-3 p-4 text-sm backdrop-blur"
         >
           {toastMessage.type === "error" ? (
             <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />

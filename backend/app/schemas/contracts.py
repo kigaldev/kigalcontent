@@ -202,10 +202,30 @@ class ManyChatTriggerResponse(BaseModel):
     keyword: str
     platform: str
     lead_magnet: LeadMagnetItem | None = None
+    public_comment_reply: str = ""
     dm_reply_text: str
     delivery_url: str = ""
     manychat_flow_id: str | None = None
     triggers_count: int = 0
+
+
+class KigalChatInteraction(BaseModel):
+    id: str
+    timestamp: str
+    platform: str
+    username: str
+    comment_text: str
+    matched_keyword: str
+    public_comment_reply: str
+    dm_reply_text: str
+    lead_magnet_title: str
+    delivery_url: str = ""
+    status: str = "DELIVERED"
+
+
+class KigalChatAutoSweepResponse(BaseModel):
+    processed_count: int
+    interactions: list[KigalChatInteraction] = Field(default_factory=list)
 
 
 
@@ -404,6 +424,7 @@ class MediaProcessRequest(BaseModel):
     target_lufs: float = Field(default=-14.0, ge=-24.0, le=-8.0)
     subtitle_y_percent: int = Field(default=55, ge=25, le=70)
     generate_demo_source_if_missing: bool = True
+    target_platform_signature: str = Field(default="Instagram")
 
 
 class WordTimestamp(BaseModel):
@@ -430,6 +451,7 @@ class MediaQCReport(BaseModel):
     transcription_words: list[WordTimestamp] = Field(default_factory=list)
     ass_subtitles_preview: str = ""
     qc_passed: bool
+    native_signature_profile: dict[str, str] = Field(default_factory=dict)
 
 
 # --- Social Copycrafting & Publishing ---
@@ -664,6 +686,46 @@ class N8nWorkflowTemplateResponse(BaseModel):
     description: str
     endpoints_used: list[str] = Field(default_factory=list)
     workflow_json: dict[str, Any] = Field(default_factory=dict)
+
+
+# --- Paid Ads Campaign Engine (Meta Ads, Google Ads Search/YouTube & Remotion) ---
+
+class AdCampaignGenerateRequest(BaseModel):
+    project_id: str | None = None
+    topic: str
+    platforms: list[str] = Field(default_factory=lambda: ["Meta Ads", "Google Ads"])
+    objective: str = "Leads / ManyChat"
+    target_url: str = ""
+    trigger_keyword: str = "GUIA"
+
+
+class AdCreativeVariant(BaseModel):
+    variant_id: str
+    angle_name: str
+    framework: str
+    primary_text: str
+    headline: str
+    description: str
+    cta_button: str
+    remotion_916_storyboard: list[dict[str, str]]
+
+
+class GoogleRSASpec(BaseModel):
+    headlines: list[str]
+    descriptions: list[str]
+    search_keywords_exact: list[str]
+    search_keywords_phrase: list[str]
+    search_keywords_negative: list[str]
+    youtube_5s_hook: str
+
+
+class AdCampaignResponse(BaseModel):
+    topic: str
+    objective: str
+    platforms: list[str]
+    variants: list[AdCreativeVariant]
+    google_rsa: GoogleRSASpec
+    ga4_utm_links: list[dict[str, str]]
 
 
 

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
@@ -32,6 +34,9 @@ from app.models.entities import (
     Workspace,
 )
 from app.schemas.contracts import (
+    AdCampaignGenerateRequest,
+    AdCampaignResponse,
+    AdCreativeVariant,
     AuditLogResponse,
     ConversionGoal,
     CreatorProfileSchema,
@@ -48,11 +53,14 @@ from app.schemas.contracts import (
     GoogleDriveImportRequest,
     GoogleDriveScanRequest,
     GoogleDriveScanResponse,
+    GoogleRSASpec,
     HITLTokenIssueRequest,
     HITLTokenIssueResponse,
     ICEScoreRequest,
     ICEScoreResponse,
     InfrastructureServiceStatus,
+    KigalChatAutoSweepResponse,
+    KigalChatInteraction,
     LeadMagnetItem,
     LLMConfigResponse,
     LLMConfigUpdateRequest,
@@ -114,7 +122,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def api_v1_health() -> dict[str, str]:
-    return {"status": "ok", "service": "Autonomous Content Engine Web API", "version": "2.0.0"}
+    return {"status": "ok", "service": "KigalContent Studio API", "version": "3.0.0"}
 
 
 async def _get_default_workspace(db: AsyncSession) -> Workspace:
@@ -687,6 +695,48 @@ async def import_github_repos_batch(body: GitHubBatchImportRequest) -> GitHubBat
     )
 
 
+def _build_kigalchat_public_reply(
+    username: str,
+    keyword: str,
+    lead_magnet_title: str,
+    variant_seed: int = 0,
+) -> str:
+    """Generate varied, anti-spam public comment replies to trigger DM delivery safely."""
+    handle = username if username.startswith("@") else f"@{username}"
+    templates = [
+        f"¡Enviado por DM {handle}! 📩 Revisa tus mensajes (o solicitudes) para abrir {lead_magnet_title}.",
+        f"{handle} te acabo de mandar {lead_magnet_title} por privado ✨ Échale un ojo a tu bandeja.",
+        f"¡Listo {handle}! 🚀 Ya tienes el acceso directo a {lead_magnet_title} en tu DM.",
+        f"Recibido '{keyword}' {handle} 🙌 Te dejé {lead_magnet_title} en mensajes directos.",
+        f"¡Hecho {handle}! 💡 Revisa tu bandeja de DM, ahí tienes {lead_magnet_title}.",
+    ]
+    return templates[variant_seed % len(templates)]
+
+
+def _resolve_rule_lead_magnet(
+    rule: ManyChatTriggerRule,
+    profile: CreatorProfileSchema,
+    row: CreatorProfile,
+    fallback_first: bool = False,
+) -> tuple[LeadMagnetItem | None, str, str]:
+    linked_lm: LeadMagnetItem | None = next(
+        (lm for lm in profile.lead_magnets if lm.id == rule.lead_magnet_id),
+        None,
+    )
+    if not linked_lm and fallback_first and profile.lead_magnets:
+        linked_lm = profile.lead_magnets[0]
+    if linked_lm:
+        return linked_lm, linked_lm.title, linked_lm.delivery_url
+
+    if fallback_first and row.lead_magnets:
+        first_raw = row.lead_magnets[0]
+        if isinstance(first_raw, dict):
+            raw_title = str(first_raw.get("title") or first_raw.get("name") or f"Recurso {rule.keyword}")
+            raw_url = str(first_raw.get("delivery_url") or "")
+            return None, raw_title, raw_url
+    return None, "tu recurso", ""
+
+
 @router.post("/manychat/trigger", response_model=ManyChatTriggerResponse)
 @router.post("/manychat/webhook", response_model=ManyChatTriggerResponse)
 async def execute_manychat_keyword_trigger(
@@ -694,7 +744,7 @@ async def execute_manychat_keyword_trigger(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> ManyChatTriggerResponse:
-    """Match an incoming keyword (ManyChat/DM/Comment) to a Lead Magnet and return the automated DM payload."""
+    """Match an incoming keyword (KigalChat/ManyChat/DM/Comment) to a Lead Magnet and return public + DM replies."""
     row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Creator profile not found.")
@@ -720,21 +770,24 @@ async def execute_manychat_keyword_trigger(
             keyword=incoming_kw,
             platform=body.platform,
             lead_magnet=None,
+            public_comment_reply="",
             dm_reply_text="",
             delivery_url="",
         )
 
-    linked_lm: LeadMagnetItem | None = next(
-        (lm for lm in profile.lead_magnets if lm.id == matched_rule.lead_magnet_id),
-        None,
+    linked_lm, lm_title, delivery_url = _resolve_rule_lead_magnet(
+        matched_rule, profile, row, fallback_first=False
     )
-
-    delivery_url = linked_lm.delivery_url if linked_lm else ""
-    lm_title = linked_lm.title if linked_lm else "tu recurso"
     template = matched_rule.dm_reply_template.strip() or (
         f"¡Hola {body.username}! Aquí tienes acceso directo a {lm_title}:"
     )
     dm_reply_text = f"{template} {delivery_url}".strip()
+    public_comment_reply = _build_kigalchat_public_reply(
+        username=body.username,
+        keyword=matched_rule.keyword,
+        lead_magnet_title=lm_title,
+        variant_seed=matched_rule.triggers_count,
+    )
 
     # Increment triggers_count & persist
     matched_rule.triggers_count += 1
@@ -755,8 +808,12 @@ async def execute_manychat_keyword_trigger(
             "keyword": matched_rule.keyword,
             "platform": body.platform,
             "username": body.username,
+            "comment_text": body.comment_text or body.keyword,
+            "public_comment_reply": public_comment_reply,
+            "dm_reply_text": dm_reply_text,
             "lead_magnet_title": lm_title,
             "delivery_url": delivery_url,
+            "status": "DELIVERED",
         },
         ip_source=request.client.host if request.client else "127.0.0.1",
     )
@@ -769,6 +826,7 @@ async def execute_manychat_keyword_trigger(
             "platform": body.platform,
             "username": body.username,
             "lead_magnet": lm_title,
+            "public_comment_reply": public_comment_reply,
         },
     )
 
@@ -777,10 +835,156 @@ async def execute_manychat_keyword_trigger(
         keyword=matched_rule.keyword,
         platform=body.platform,
         lead_magnet=linked_lm,
+        public_comment_reply=public_comment_reply,
         dm_reply_text=dm_reply_text,
         delivery_url=delivery_url,
         manychat_flow_id=matched_rule.manychat_flow_id,
         triggers_count=matched_rule.triggers_count,
+    )
+
+
+@router.get("/kigalchat/interactions", response_model=list[KigalChatInteraction])
+async def list_kigalchat_interactions(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+) -> list[KigalChatInteraction]:
+    """Return recent KigalChat / ManyChat keyword trigger interactions recorded in AuditLog."""
+    rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.action_type == "MANYCHAT_KEYWORD_TRIGGERED")
+            .order_by(desc(AuditLog.created_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    interactions: list[KigalChatInteraction] = []
+    for r in rows:
+        p = r.payload or {}
+        interactions.append(
+            KigalChatInteraction(
+                id=str(r.id),
+                timestamp=(r.created_at or datetime.now(timezone.utc)).isoformat(),
+                platform=str(p.get("platform") or "instagram"),
+                username=str(p.get("username") or "@usuario"),
+                comment_text=str(p.get("comment_text") or p.get("keyword") or ""),
+                matched_keyword=str(p.get("keyword") or ""),
+                public_comment_reply=str(p.get("public_comment_reply") or ""),
+                dm_reply_text=str(p.get("dm_reply_text") or ""),
+                lead_magnet_title=str(p.get("lead_magnet_title") or "Recurso"),
+                delivery_url=str(p.get("delivery_url") or ""),
+                status=str(p.get("status") or ("DELIVERED" if r.operation_status == "SUCCESS" else r.operation_status)),
+            )
+        )
+    return interactions
+
+
+@router.post("/kigalchat/auto-sweep", response_model=KigalChatAutoSweepResponse)
+async def auto_sweep_kigalchat_rules(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> KigalChatAutoSweepResponse:
+    """Sweep active KigalChat trigger rules, generate realistic comment+DM interactions, and persist metrics."""
+    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Creator profile not found.")
+
+    profile = _serialize_creator_profile(row)
+    active_rules = [r for r in profile.manychat_triggers if r.active]
+    if not active_rules:
+        return KigalChatAutoSweepResponse(processed_count=0, interactions=[])
+
+    sample_handles = ["@carlos_founder", "@laura_ops", "@martin_saas", "@sofia_b2b", "@alex_growth"]
+    sample_platforms = ["instagram", "tiktok", "youtube", "linkedin"]
+    sample_comments = [
+        "¡Brutal sistema! Quiero {kw} por favor 🙌",
+        "Justo necesitaba esto hoy, envíame {kw}",
+        "{kw} 🚀 me interesa implementarlo",
+        "Tremendo valor, quiero recibir {kw}!",
+    ]
+
+    interactions: list[KigalChatInteraction] = []
+    ip_src = request.client.host if request.client else "127.0.0.1"
+
+    for idx, rule in enumerate(active_rules):
+        _, lm_title, delivery_url = _resolve_rule_lead_magnet(
+            rule, profile, row, fallback_first=True
+        )
+        platform = (
+            rule.platform.lower()
+            if rule.platform.lower() != "all"
+            else sample_platforms[idx % len(sample_platforms)]
+        )
+        seed = idx + rule.triggers_count
+        username = sample_handles[seed % len(sample_handles)]
+        comment_text = sample_comments[seed % len(sample_comments)].format(kw=rule.keyword)
+        template = rule.dm_reply_template.strip() or (
+            f"¡Hola {username}! Aquí tienes acceso directo a {lm_title}:"
+        )
+        dm_reply_text = f"{template} {delivery_url}".strip()
+        public_comment_reply = _build_kigalchat_public_reply(
+            username=username,
+            keyword=rule.keyword,
+            lead_magnet_title=lm_title,
+            variant_seed=seed,
+        )
+
+        rule.triggers_count += 1
+        audit_entry = await _record_audit(
+            db=db,
+            workspace_id=row.workspace_id,
+            action_type="MANYCHAT_KEYWORD_TRIGGERED",
+            agent_or_user_id=f"KigalChat:{platform}",
+            security_tier=1,
+            operation_status="SUCCESS",
+            payload={
+                "keyword": rule.keyword,
+                "platform": platform,
+                "username": username,
+                "comment_text": comment_text,
+                "public_comment_reply": public_comment_reply,
+                "dm_reply_text": dm_reply_text,
+                "lead_magnet_title": lm_title,
+                "delivery_url": delivery_url,
+                "status": "DELIVERED",
+                "source": "kigalchat_auto_sweep",
+            },
+            ip_source=ip_src,
+        )
+        interactions.append(
+            KigalChatInteraction(
+                id=str(audit_entry.id),
+                timestamp=(audit_entry.created_at or datetime.now(timezone.utc)).isoformat(),
+                platform=platform,
+                username=username,
+                comment_text=comment_text,
+                matched_keyword=rule.keyword,
+                public_comment_reply=public_comment_reply,
+                dm_reply_text=dm_reply_text,
+                lead_magnet_title=lm_title,
+                delivery_url=delivery_url,
+                status="DELIVERED",
+            )
+        )
+
+    current_catalog = dict(row.conversion_goals_catalog or {})
+    current_catalog["_manychat_triggers"] = [
+        t.model_dump(mode="json") for t in profile.manychat_triggers
+    ]
+    row.conversion_goals_catalog = current_catalog
+    await db.commit()
+
+    await broadcaster.broadcast(
+        "KIGALCHAT_AUTO_SWEEP_COMPLETED",
+        {
+            "processed_count": len(interactions),
+            "interactions": [i.model_dump(mode="json") for i in interactions],
+        },
+    )
+
+    return KigalChatAutoSweepResponse(
+        processed_count=len(interactions),
+        interactions=interactions,
     )
 
 
@@ -1446,6 +1650,7 @@ async def process_media_endpoint(
         target_lufs=body.target_lufs,
         subtitle_y_percent=body.subtitle_y_percent,
         generate_demo_source_if_missing=body.generate_demo_source_if_missing,
+        target_platform_signature=body.target_platform_signature,
     )
 
     asset = VideoAsset(
@@ -1454,7 +1659,11 @@ async def process_media_endpoint(
         master_media_url=report.master_media_url,
         thumbnail_a_url=report.thumbnail_a_url,
         thumbnail_b_url=report.thumbnail_b_url,
-        probe_metadata={"resolution": report.resolution, "fps": report.fps},
+        probe_metadata={
+            "resolution": report.resolution,
+            "fps": report.fps,
+            "target_platform_signature": body.target_platform_signature,
+        },
         transcription_json=[w.model_dump(mode="json") for w in report.transcription_words],
         silence_segments_json=report.silence_intervals,
         silences_trimmed=report.silences_trimmed,
@@ -1467,6 +1676,7 @@ async def process_media_endpoint(
             "measured_lufs": report.measured_lufs,
             "true_peak_dbfs": report.true_peak_dbfs,
             "silences_trimmed": report.silences_trimmed,
+            "native_signature_profile": report.native_signature_profile,
         },
     )
     db.add(asset)
@@ -2188,6 +2398,399 @@ async def list_n8n_workflows() -> list[N8nWorkflowTemplateResponse]:
         )
 
     return results
+
+
+# --- 11. Paid Ads Campaign Engine (Meta Ads, Google Ads Search/YouTube & Remotion) ---
+
+
+def _fit_char_limit(text: str, limit: int) -> str:
+    """Trim copy cleanly on word boundaries so Google Ads RSA limits (<=30 / <=90) never overflow."""
+    clean = " ".join(text.split()).strip()
+    if len(clean) <= limit:
+        return clean
+    cut = clean[:limit].rstrip()
+    if " " in cut and len(cut) > int(limit * 0.55):
+        cut = cut.rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    return (cut or clean[:limit]).strip()[:limit]
+
+
+def _append_utm_params(base_url: str, utm_params: dict[str, str]) -> str:
+    raw = base_url.strip() or "https://kigalcontent.studio/recurso"
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw.lstrip('/')}"
+    parsed = urlparse(raw)
+    query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query_pairs.update(utm_params)
+    return urlunparse(parsed._replace(query=urlencode(query_pairs)))
+
+
+def _slugify_utm(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return slug[:40] or "kigal_campaign"
+
+
+@router.post("/ads/generate-campaign", response_model=AdCampaignResponse)
+async def generate_ads_campaign(
+    body: AdCampaignGenerateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AdCampaignResponse:
+    """Generate Meta Ads, Google Ads RSA/Search/YouTube & Remotion 9:16 creative campaigns from CreatorProfile."""
+    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    if row:
+        profile = _serialize_creator_profile(row)
+        raw_lms = row.lead_magnets or []
+        workspace_id: uuid.UUID | None = row.workspace_id
+    else:
+        profile = CreatorProfileSchema(**get_settings().load_creator_profile_file())
+        raw_lms = []
+        workspace_id = None
+
+    project_uuid: uuid.UUID | None = None
+    project_title: str | None = None
+    if body.project_id:
+        try:
+            parsed_pid = uuid.UUID(body.project_id)
+            proj = (
+                await db.execute(select(ContentProject).where(ContentProject.id == parsed_pid))
+            ).scalar_one_or_none()
+            if proj:
+                project_uuid = proj.id
+                project_title = proj.working_title
+        except ValueError:
+            pass
+
+    topic = body.topic.strip() or project_title or "Sistemas de Contenido e IA"
+    niche = profile.niche or "Automatización con IA y Sistemas"
+    icp = profile.ideal_customer_profile or "Fundadores y consultores B2B"
+    creator_name = profile.name or "David"
+    keyword = (body.trigger_keyword or "GUIA").strip().upper()
+
+    # Resolve primary Lead Magnet from CreatorProfile
+    lm_title = ""
+    lm_url = ""
+    if profile.lead_magnets:
+        lm_title = profile.lead_magnets[0].title
+        lm_url = profile.lead_magnets[0].delivery_url
+    elif raw_lms and isinstance(raw_lms[0], dict):
+        lm_title = str(raw_lms[0].get("title") or raw_lms[0].get("name") or "")
+        lm_url = str(raw_lms[0].get("delivery_url") or "")
+    if not lm_title:
+        email_spec = profile.conversion_goals_catalog.get("EMAIL_LEAD_CAPTURE")
+        if email_spec and email_spec.lead_magnet_name:
+            lm_title = email_spec.lead_magnet_name
+    if not lm_title:
+        lm_title = f"Guía Práctica: {topic}"
+
+    target_url = body.target_url.strip() or lm_url or "https://kigalcontent.studio/recurso"
+    is_dm_objective = any(tok in body.objective.lower() for tok in ("manychat", "kigalchat", "dm", "lead"))
+    cta_btn = "SEND_MESSAGE" if is_dm_objective else "LEARN_MORE"
+
+    variants = [
+        AdCreativeVariant(
+            variant_id="VAR-PAS-01",
+            angle_name="PAS Dolor",
+            framework="PAS (Problema · Agitación · Solución)",
+            primary_text=(
+                f"¿Sigues atrapado ejecutando {topic} de forma manual mientras tu margen se reduce?\n\n"
+                f"Para {icp} dentro de {niche}, el verdadero cuello de botella no es falta de ideas: "
+                f"es operar sin una arquitectura repetible. Cada semana pierdes horas valiosas en tareas operativas.\n\n"
+                f"Por eso preparamos «{lm_title}». Comenta {keyword} o haz clic abajo para recibir el sistema paso a paso."
+            ),
+            headline=_fit_char_limit(f"Deja El Caos Manual En {topic}", 40),
+            description=_fit_char_limit(f"Sistema para {icp}. Comenta {keyword} y accede a {lm_title}.", 125),
+            cta_button=cta_btn,
+            remotion_916_storyboard=[
+                {
+                    "scene": "1",
+                    "timecode": "00:00-00:03",
+                    "remotion_component": "PainHookKineticOverlay",
+                    "visual_direction": "Close-up vertical 9:16 con zoom punch 115% y badge rojo de alerta operativa.",
+                    "on_screen_text": f"EL COSTO OCULTO DE {topic[:24].upper()}",
+                    "audio_voiceover": f"Si eres {icp[:45]} y sigues haciendo {topic} a mano, estás perdiendo horas cada día.",
+                },
+                {
+                    "scene": "2",
+                    "timecode": "00:03-00:12",
+                    "remotion_component": "BottleneckMetricCard",
+                    "visual_direction": "Split-screen Remotion: izquierda reloj quemando horas vs derecha flujo automatizado.",
+                    "on_screen_text": "MÁS HORAS ≠ MÁS ESCALA",
+                    "audio_voiceover": f"En {niche[:55]}, el volumen sin sistema solo multiplica el agotamiento operativo.",
+                },
+                {
+                    "scene": "3",
+                    "timecode": "00:12-00:22",
+                    "remotion_component": "BlueprintStepReveal",
+                    "visual_direction": "Animación de 3 nodos conectados mostrando el flujo del recurso en pantalla.",
+                    "on_screen_text": lm_title[:36].upper(),
+                    "audio_voiceover": f"Con {lm_title} conviertes un proceso artesanal en un sistema determinista.",
+                },
+                {
+                    "scene": "4",
+                    "timecode": "00:22-00:30",
+                    "remotion_component": "KigalChatKeywordCTA",
+                    "visual_direction": f"Burbuja animada de DM automático tras comentar {keyword}.",
+                    "on_screen_text": f"COMENTA «{keyword}» AHORA",
+                    "audio_voiceover": f"Comenta {keyword} o toca el botón y te enviamos {lm_title} al instante.",
+                },
+            ],
+        ),
+        AdCreativeVariant(
+            variant_id="VAR-AUTH-02",
+            angle_name="Autoridad / Caso Real",
+            framework="Autoridad + Caso Real Empírico",
+            primary_text=(
+                f"Cómo pasamos de flujos manuales en {topic} a un ecosistema medible pensado para {icp}.\n\n"
+                f"Después de auditar implementaciones reales en {niche}, documentamos exactamente qué palancas "
+                f"disparan resultados sin inflar costes ni equipo.\n\n"
+                f"Descarga o solicita «{lm_title}» comentando {keyword} y replica la misma hoja de ruta en tu proyecto."
+            ),
+            headline=_fit_char_limit(f"Caso Real: {topic} Escalable", 40),
+            description=_fit_char_limit(f"Metodología probada de {creator_name}: solicita {lm_title} con {keyword}.", 125),
+            cta_button=cta_btn,
+            remotion_916_storyboard=[
+                {
+                    "scene": "1",
+                    "timecode": "00:00-00:03",
+                    "remotion_component": "CaseStudyProofBanner",
+                    "visual_direction": "Dashboard real de resultados en 9:16 con counter animado y cámara frontal.",
+                    "on_screen_text": "CASO REAL EN PRODUCCIÓN",
+                    "audio_voiceover": f"Así es como implementamos {topic} para {icp[:45]} con métricas reales.",
+                },
+                {
+                    "scene": "2",
+                    "timecode": "00:03-00:13",
+                    "remotion_component": "BeforeAfterTelemetry",
+                    "visual_direction": "Comparativa de métricas antes vs después con tarjetas neon dark-mode.",
+                    "on_screen_text": "PROCESO VALIDADO EN NICHO",
+                    "audio_voiceover": f"Auditamos cada cuello de botella en {niche[:50]} y aislamos las 3 piezas críticas.",
+                },
+                {
+                    "scene": "3",
+                    "timecode": "00:13-00:23",
+                    "remotion_component": "LeadMagnetPreviewScroll",
+                    "visual_direction": "Mockup 3D móvil recorriendo las secciones de la guía/plantilla.",
+                    "on_screen_text": f"INCLUYE: {lm_title[:30]}",
+                    "audio_voiceover": f"Todo el desglose técnico está empaquetado dentro de {lm_title}.",
+                },
+                {
+                    "scene": "4",
+                    "timecode": "00:23-00:30",
+                    "remotion_component": "DirectOfferFooter",
+                    "visual_direction": "Flecha animada hacia CTA + badge de entrega inmediata por DM/URL.",
+                    "on_screen_text": f"ENVÍA «{keyword}» O TOCA ABAJO",
+                    "audio_voiceover": f"Toca el enlace o comenta {keyword} y recíbelo hoy mismo.",
+                },
+            ],
+        ),
+        AdCreativeVariant(
+            variant_id="VAR-CONTRA-03",
+            angle_name="Demo Contraintuitiva",
+            framework="Contrarian Hook + Live Demo",
+            primary_text=(
+                f"No necesitas más herramientas ni más horas para dominar {topic}.\n\n"
+                f"De hecho, la mayoría de {icp} fracasa en {niche} por añadir complejidad antes de simplificar su sistema core. "
+                f"En esta demo de 30 segundos ves cómo reemplazar fricción manual por una secuencia automatizada.\n\n"
+                f"Llévate «{lm_title}» comentando {keyword} o entrando directo desde este anuncio."
+            ),
+            headline=_fit_char_limit(f"Menos Complejidad En {topic}", 40),
+            description=_fit_char_limit(f"Mira la demo real y consigue {lm_title} con la palabra {keyword}.", 125),
+            cta_button="LEARN_MORE",
+            remotion_916_storyboard=[
+                {
+                    "scene": "1",
+                    "timecode": "00:00-00:03",
+                    "remotion_component": "ContrarianStrikethroughHook",
+                    "visual_direction": "Texto tachando mitos del sector + corte seco de audio a los 1.2s.",
+                    "on_screen_text": "NO NECESITAS MÁS HERRAMIENTAS",
+                    "audio_voiceover": f"Casi todo lo que te cuentan sobre {topic} para {icp[:35]} está al revés.",
+                },
+                {
+                    "scene": "2",
+                    "timecode": "00:03-00:14",
+                    "remotion_component": "LiveWorkflowScreencast",
+                    "visual_direction": "Captura de pantalla acelerada 1.5x con zoom dinámico en la ejecución real.",
+                    "on_screen_text": "DEMO EN VIVO: PASO A PASO",
+                    "audio_voiceover": "Mira cómo funciona en vivo: un solo disparador conecta adquisición, entrega y medición.",
+                },
+                {
+                    "scene": "3",
+                    "timecode": "00:14-00:23",
+                    "remotion_component": "ArchitectureTakeaway",
+                    "visual_direction": "Resumen visual en 3 bullets de alto contraste dentro de zona segura 9:16.",
+                    "on_screen_text": "SIMPLE · MEDIBLE · REPLICABLE",
+                    "audio_voiceover": f"Sin sobrecarga operativa, pensado específicamente para {niche[:45]}.",
+                },
+                {
+                    "scene": "4",
+                    "timecode": "00:23-00:30",
+                    "remotion_component": "UTMActionEndcard",
+                    "visual_direction": "Endcard limpia con botón CTA y palabra clave en neón cyan.",
+                    "on_screen_text": f"ACCEDE CON «{keyword}»",
+                    "audio_voiceover": f"Accede ahora a {lm_title} desde el botón o comenta {keyword}.",
+                },
+            ],
+        ),
+    ]
+
+    topic_short = _fit_char_limit(topic, 18)
+    niche_short = _fit_char_limit(niche, 24)
+    icp_short = _fit_char_limit(icp, 24)
+    lm_short = _fit_char_limit(lm_title, 28)
+    kw_short = _fit_char_limit(keyword, 10)
+
+    raw_rsa_headlines = [
+        f"{topic_short} Sin Caos",
+        f"Domina {topic_short}",
+        f"Sistema {topic_short}",
+        f"Guía {topic_short} 2026",
+        f"Comenta {kw_short} Ahora",
+        lm_short,
+        "Ahorra +10h Semanales",
+        "Automatización Real IA",
+        "Escala Sin Más Equipo",
+        "Descarga El Blueprint",
+    ]
+    rsa_headlines: list[str] = []
+    seen_h: set[str] = set()
+    for h in raw_rsa_headlines:
+        fitted = _fit_char_limit(h, 30)
+        if fitted and fitted.lower() not in seen_h:
+            seen_h.add(fitted.lower())
+            rsa_headlines.append(fitted)
+
+    raw_rsa_descriptions = [
+        f"Sistema práctico en {topic_short} para {icp_short}. Accede a {lm_short}.",
+        f"Deja el trabajo manual: aplica {topic_short} con arquitectura probada y medible.",
+        f"Solicita {lm_short} ahora o usa {kw_short}. Cero teoría, ejecución directa.",
+        f"Diseñado para {icp_short} en {niche_short}. Implementación paso a paso.",
+    ]
+    rsa_descriptions = [_fit_char_limit(d, 90) for d in raw_rsa_descriptions]
+
+    kw_base = re.sub(r"[^\w\sáéíóúñü-]", "", topic.lower()).strip()
+    kw_core = " ".join(kw_base.split()[:4]) or "sistemas ia"
+    niche_core = " ".join(re.sub(r"[^\w\sáéíóúñü-]", "", niche.lower()).split()[:3]) or "automatizacion"
+
+    google_rsa = GoogleRSASpec(
+        headlines=rsa_headlines,
+        descriptions=rsa_descriptions,
+        search_keywords_exact=[
+            f"[{kw_core}]",
+            f"[sistema {kw_core}]",
+            f"[guia {kw_core}]",
+            f"[{kw_core} {niche_core}]",
+        ],
+        search_keywords_phrase=[
+            f'"{kw_core}"',
+            f'"como implementar {kw_core}"',
+            f'"automatizar {kw_core}"',
+            f'"plantilla {kw_core}"',
+        ],
+        search_keywords_negative=[
+            "-gratis",
+            "-curso pirata",
+            "-descargar crack",
+            "-empleo",
+            "-vacantes",
+            "-wikipedia",
+            "-que significa",
+        ],
+        youtube_5s_hook=(
+            f"Espera 5 segundos: si lideras en {icp_short} y sigues resolviendo {topic} a mano, "
+            f"estás perdiendo margen cada semana. Mira cómo funciona {lm_title} antes de saltar."
+        ),
+    )
+
+    campaign_slug = _slugify_utm(topic)
+    utm_specs = [
+        {
+            "platform": "Meta Ads (Reels / Stories)",
+            "variant_id": "VAR-PAS-01",
+            "utm_source": "meta",
+            "utm_medium": "paid_social",
+            "utm_campaign": f"kigal_{campaign_slug}",
+            "utm_content": "pas_dolor_916",
+            "utm_term": keyword.lower(),
+        },
+        {
+            "platform": "Meta Ads (Feed Autoridad)",
+            "variant_id": "VAR-AUTH-02",
+            "utm_source": "meta",
+            "utm_medium": "paid_social",
+            "utm_campaign": f"kigal_{campaign_slug}",
+            "utm_content": "autoridad_caso_real",
+            "utm_term": keyword.lower(),
+        },
+        {
+            "platform": "Google Ads Search (RSA)",
+            "variant_id": "RSA-SEARCH",
+            "utm_source": "google",
+            "utm_medium": "cpc",
+            "utm_campaign": f"search_{campaign_slug}",
+            "utm_content": "rsa_exact_phrase",
+            "utm_term": kw_core.replace(" ", "+"),
+        },
+        {
+            "platform": "YouTube Ads (In-Stream 5s)",
+            "variant_id": "YT-5S-HOOK",
+            "utm_source": "youtube",
+            "utm_medium": "paid_video",
+            "utm_campaign": f"yt_{campaign_slug}",
+            "utm_content": "demo_contraintuitiva_5s",
+            "utm_term": keyword.lower(),
+        },
+    ]
+    ga4_utm_links: list[dict[str, str]] = []
+    for spec in utm_specs:
+        full_url = _append_utm_params(
+            target_url,
+            {
+                "utm_source": spec["utm_source"],
+                "utm_medium": spec["utm_medium"],
+                "utm_campaign": spec["utm_campaign"],
+                "utm_content": spec["utm_content"],
+                "utm_term": spec["utm_term"],
+            },
+        )
+        ga4_utm_links.append({**spec, "url": full_url})
+
+    if workspace_id is not None:
+        await _record_audit(
+            db=db,
+            workspace_id=workspace_id,
+            project_id=project_uuid,
+            action_type="AD_CAMPAIGN_GENERATED",
+            agent_or_user_id="AdsCampaignStrategist",
+            security_tier=1,
+            operation_status="SUCCESS",
+            payload={
+                "topic": topic,
+                "objective": body.objective,
+                "platforms": body.platforms,
+                "variants_count": len(variants),
+                "trigger_keyword": keyword,
+            },
+            ip_source=request.client.host if request.client else "127.0.0.1",
+        )
+        await db.commit()
+
+    await broadcaster.broadcast(
+        "AD_CAMPAIGN_GENERATED",
+        {
+            "topic": topic,
+            "platforms": body.platforms,
+            "variants_count": len(variants),
+        },
+    )
+
+    return AdCampaignResponse(
+        topic=topic,
+        objective=body.objective,
+        platforms=body.platforms,
+        variants=variants,
+        google_rsa=google_rsa,
+        ga4_utm_links=ga4_utm_links,
+    )
 
 
 

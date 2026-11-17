@@ -17,6 +17,48 @@ from app.core.config import get_settings
 from app.schemas.contracts import MediaQCReport, WordTimestamp
 
 
+NATIVE_EDITOR_SIGNATURES: dict[str, dict[str, str]] = {
+    "Instagram": {
+        "encoder": "Instagram Edits 1.4.0 (iOS 18.2; iPhone16,2)",
+        "comment": "ig_edits_export=1;ig_camera_session=native_reels_hdr;color_primaries=bt709",
+        "make": "Apple",
+        "model": "iPhone 16 Pro",
+        "com.apple.quicktime.software": "Instagram Edits 1.4.0",
+    },
+    "TikTok": {
+        "encoder": "CapCut 13.8.0 / TikTok Native Studio (ByteDance VideoEngine v4.2)",
+        "comment": "te_is_fast_import=0;te_editor_type=tiktok_native_camera;LvMetaInfo=capcut_official_export",
+    },
+    "YouTube": {
+        "encoder": "YouTube Create 2.1.0 (Google MediaFramework; ShortsNative=1)",
+        "comment": "yt_shorts_native_editor=true;yt_create_export_v2=1;bt709_sdr",
+    },
+}
+
+
+def _resolve_native_signature(platform: str) -> dict[str, str]:
+    if platform in NATIVE_EDITOR_SIGNATURES:
+        return NATIVE_EDITOR_SIGNATURES[platform]
+    lower_lookup = {k.lower(): v for k, v in NATIVE_EDITOR_SIGNATURES.items()}
+    return lower_lookup.get(platform.strip().lower(), NATIVE_EDITOR_SIGNATURES["Instagram"])
+
+
+def build_native_editor_ffmpeg_flags(platform: str = "Instagram") -> list[str]:
+    """Return FFmpeg flags that align color profile, bitstream, and metadata tags with native mobile editors."""
+    sig = _resolve_native_signature(platform)
+    flags = [
+        "-map_metadata", "-1",
+        "-fflags", "+bitexact",
+        "-movflags", "+faststart+use_metadata_tags",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+    ]
+    for k, v in sig.items():
+        flags.extend(["-metadata", f"{k}={v}"])
+    return flags
+
+
 def _resolve_bin(name: str, fallback: str) -> str:
     return shutil.which(name) or fallback
 
@@ -378,10 +420,11 @@ def render_916_master_and_ab_thumbnails(
     thumb_b_path: Path,
     title_a: str = "SISTEMA REAL 3.4x",
     title_b: str = "ERROR EN RETENCIÓN",
+    target_platform_signature: str = "Instagram",
 ) -> None:
     """
     Re-frame 9:16 (1080x1920), burn dynamic .ass subtitles (NVENC when CUDA present, libx264 fallback),
-    and export 1280x720 A/B test thumbnails.
+    inject native editor metadata flags, and export 1280x720 A/B test thumbnails.
     """
     ffmpeg = _resolve_bin("ffmpeg", get_settings().ffmpeg_bin)
     master_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -410,6 +453,7 @@ def render_916_master_and_ab_thumbnails(
         "-maxrate", "10M",
         "-bufsize", "16M",
         "-c:a", "copy",
+        *build_native_editor_ffmpeg_flags(target_platform_signature),
         str(master_output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -437,6 +481,7 @@ def run_full_media_pipeline(
     target_lufs: float = -14.0,
     subtitle_y_percent: int = 55,
     generate_demo_source_if_missing: bool = True,
+    target_platform_signature: str = "Instagram",
 ) -> MediaQCReport:
     """Execute end-to-end deterministic FFmpeg + Whisper pipeline and return QC report."""
     settings = get_settings()
@@ -486,6 +531,7 @@ def run_full_media_pipeline(
         master_output_path=master_path,
         thumb_a_path=thumb_a_path,
         thumb_b_path=thumb_b_path,
+        target_platform_signature=target_platform_signature,
     )
 
     master_probe = probe_media_forensics(master_path)
@@ -513,4 +559,5 @@ def run_full_media_pipeline(
         transcription_words=words,
         ass_subtitles_preview=ass_text,
         qc_passed=qc_passed,
+        native_signature_profile=_resolve_native_signature(target_platform_signature),
     )

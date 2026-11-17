@@ -22,7 +22,7 @@ class EventBroadcaster:
             {
                 "event": "CONNECTED",
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "payload": {"message": "Subscribed to Autonomous Content Engine event stream"},
+                "payload": {"message": "Subscribed to KigalContent Studio event stream"},
             }
         )
 

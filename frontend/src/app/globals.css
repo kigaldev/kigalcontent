@@ -1,66 +1,122 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light dark;
-  --ace-bg-light: #f8fafc;
-  --ace-bg-dark: #070b14;
-  --ace-surface-light: #ffffff;
-  --ace-surface-dark: #0f172a;
-  --ace-border-light: #cbd5e1;
-  --ace-border-dark: #1e293b;
-  --ace-text-light: #0f172a;
-  --ace-text-dark: #f1f5f9;
-  --ace-accent-light: #0284c7;
-  --ace-accent-dark: #22d3ee;
+  color-scheme: dark;
 
-  --ace-bg: var(--ace-bg-dark);
-  --ace-surface: var(--ace-surface-dark);
-  --ace-border: var(--ace-border-dark);
-  --ace-text: var(--ace-text-dark);
-  --ace-accent: var(--ace-accent-dark);
+  /* KigalContent Pro NLE Dark Studio Tokens (Premiere / DaVinci / CapCut / Edits) */
+  --kc-canvas: #08090d;
+  --kc-panel: #10131c;
+  --kc-surface: #151926;
+  --kc-border: #232838;
+  --kc-accent: #22d3ee;
+  --kc-text: #f1f5f9;
+  --kc-text-muted: #94a3b8;
 
-  @media (prefers-color-scheme: light) {
-    --ace-bg: var(--ace-bg-light);
-    --ace-surface: var(--ace-surface-light);
-    --ace-border: var(--ace-border-light);
-    --ace-text: var(--ace-text-light);
-    --ace-accent: var(--ace-accent-light);
+  /* Derived tints via color-mix(in oklab, ...) — never in oklch with neutrals */
+  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 78%, var(--kc-panel));
+  --kc-border-specular: color-mix(in oklab, var(--kc-border) 72%, white 18%);
+  --kc-specular-highlight: color-mix(in oklab, white 9%, transparent);
+  --kc-accent-soft: color-mix(in oklab, var(--kc-accent) 16%, transparent);
+  --kc-accent-border: color-mix(in oklab, var(--kc-accent) 44%, var(--kc-border));
+  --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border) 55%, white 32%);
+
+  accent-color: var(--kc-accent);
+  scrollbar-color: var(--kc-scrollbar-thumb) var(--kc-canvas);
+}
+
+@supports not (scrollbar-color: auto) {
+  :root::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
   }
 
-  @supports (color: light-dark(white, black)) {
-    --ace-bg: light-dark(var(--ace-bg-light), var(--ace-bg-dark));
-    --ace-surface: light-dark(var(--ace-surface-light), var(--ace-surface-dark));
-    --ace-border: light-dark(var(--ace-border-light), var(--ace-border-dark));
-    --ace-text: light-dark(var(--ace-text-light), var(--ace-text-dark));
-    --ace-accent: light-dark(var(--ace-accent-light), var(--ace-accent-dark));
+  :root::-webkit-scrollbar-thumb {
+    background: var(--kc-scrollbar-thumb);
   }
 
-  accent-color: var(--ace-accent);
-  scrollbar-color: #475569 transparent;
+  :root::-webkit-scrollbar-track {
+    background: var(--kc-canvas);
+  }
 }
 
 body {
-  background-color: #070b14;
-  color: #f1f5f9;
+  background-color: var(--kc-canvas);
+  color: var(--kc-text);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Pro NLE Studio Panel: specular top bevel, crisp border, deep shadow */
+.nle-panel {
+  background: linear-gradient(180deg, var(--kc-panel-elevated) 0%, var(--kc-panel) 100%);
+  border: 1px solid var(--kc-border);
+  border-block-start-color: var(--kc-border-specular);
+  border-radius: 0.875rem;
+  box-shadow:
+    inset 0 1px 0 0 var(--kc-specular-highlight),
+    0 18px 40px -16px rgba(0, 0, 0, 0.78),
+    0 2px 8px -2px rgba(0, 0, 0, 0.5);
+}
+
+/* Native <details> & ::details-content smooth disclosure (modern-web-guidance: accordion) */
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary .accordion-chevron {
+  flex-shrink: 0;
+  rotate: -90deg;
+}
+
+details[open] > summary .accordion-chevron {
+  rotate: 0deg;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  details > summary .accordion-chevron {
+    transition: rotate 0.2s ease-in-out;
+  }
+}
+
+details::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+
+details:not([open])::details-content {
+  block-size: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  details::details-content {
+    transition: block-size, content-visibility, display;
+    transition-duration: 0.28s;
+    transition-timing-function: ease-in-out;
+    transition-behavior: allow-discrete;
+  }
 }
 
 /* Native <dialog> modal scroll containment (modern-web-guidance: dialog) */
 dialog:modal {
   overscroll-behavior: contain;
   margin: auto;
-  border: 1px solid #334155;
+  border: 1px solid var(--kc-border);
   border-radius: 1rem;
-  background: #0f172a;
-  color: #f8fafc;
+  background: var(--kc-panel);
+  color: var(--kc-text);
   padding: 0;
   max-width: min(94vw, 38rem);
   width: 100%;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
 }
 
 dialog::backdrop {
-  background: rgba(2, 6, 23, 0.78);
+  background: rgba(4, 6, 12, 0.82);
   backdrop-filter: blur(6px);
   overflow: hidden;
   overscroll-behavior: contain;
@@ -74,7 +130,7 @@ dialog.teleprompter-dialog:modal {
   margin: 0;
   border: none;
   border-radius: 0;
-  background: #020617;
+  background: var(--kc-canvas);
   overscroll-behavior: contain;
 }
 
@@ -98,7 +154,7 @@ dialog.wide-dialog:modal {
   content: "";
   position: absolute;
   inset: auto 0 0;
-  border-block-end: 3px solid #22d3ee;
+  border-block-end: 3px solid var(--kc-accent);
 }
 
 /* Responsive Two-Column & Audit Tables (modern-web-guidance: responsive-table) */
@@ -108,7 +164,7 @@ dialog.wide-dialog:modal {
   max-block-size: min(620px, 75vh);
   container-type: inline-size;
   border-radius: 0.75rem;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--kc-border);
 }
 
 .table-wrapper table {
@@ -121,13 +177,13 @@ dialog.wide-dialog:modal {
   position: sticky;
   inset-block-start: 0;
   z-index: 2;
-  background: #0f172a;
+  background: var(--kc-panel);
 }
 
 .table-wrapper tbody th {
   position: sticky;
   inset-inline-start: 0;
-  background: #0b1220;
+  background: var(--kc-surface);
   z-index: 1;
 }
 
@@ -147,17 +203,17 @@ dialog.wide-dialog:modal {
 
   .table-wrapper tr {
     margin-block-end: 1rem;
-    border: 1px solid #334155;
+    border: 1px solid var(--kc-border);
     border-radius: 0.5rem;
     padding: 0.75rem;
-    background: #0f172a;
+    background: var(--kc-panel);
   }
 
   .table-wrapper tbody th {
     position: sticky;
     inset-block-start: 0;
     z-index: 2;
-    background: #1e293b;
+    background: var(--kc-surface);
     padding: 0.4rem 0.6rem;
     border-radius: 0.375rem;
     margin-bottom: 0.5rem;
@@ -166,7 +222,7 @@ dialog.wide-dialog:modal {
   .table-wrapper td[data-label]::before {
     content: attr(data-label) ": ";
     font-weight: 600;
-    color: #38bdf8;
+    color: var(--kc-accent);
     display: block;
     font-size: 0.75rem;
     text-transform: uppercase;

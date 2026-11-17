@@ -15,8 +15,8 @@ export type ActiveStudioTab =
   | "script-studio"
   | "mobile-simulator"
   | "publishing-hitl"
-  | "analytics-rmta"
-  | "social-credentials";
+  | "ads-studio"
+  | "analytics-rmta";
 
 interface PendingHITLModal {
   open: boolean;
@@ -40,6 +40,8 @@ interface EngineState {
   liveEvents: Array<{ event: string; timestamp: string; summary: string }>;
   hitlModal: PendingHITLModal | null;
   toastMessage: { type: "success" | "error" | "info"; text: string } | null;
+  creatorSecurityPin: string;
+  activeHitlToken: string;
 
   setActiveTab: (tab: ActiveStudioTab) => void;
   setBackendOnline: (online: boolean) => void;
@@ -54,6 +56,8 @@ interface EngineState {
   closeHitlModal: () => void;
   showToast: (type: "success" | "error" | "info", text: string) => void;
   clearToast: () => void;
+  setCreatorSecurityPin: (pin: string) => void;
+  setActiveHitlToken: (token: string) => void;
 }
 
 export const useEngineStore = create<EngineState>((set) => ({
@@ -68,6 +72,8 @@ export const useEngineStore = create<EngineState>((set) => ({
   liveEvents: [],
   hitlModal: null,
   toastMessage: null,
+  creatorSecurityPin: "884210",
+  activeHitlToken: "",
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setBackendOnline: (backendOnline) => set({ backendOnline }),
@@ -92,4 +98,6 @@ export const useEngineStore = create<EngineState>((set) => ({
   closeHitlModal: () => set({ hitlModal: null }),
   showToast: (type, text) => set({ toastMessage: { type, text } }),
   clearToast: () => set({ toastMessage: null }),
+  setCreatorSecurityPin: (creatorSecurityPin) => set({ creatorSecurityPin }),
+  setActiveHitlToken: (activeHitlToken) => set({ activeHitlToken }),
 }));

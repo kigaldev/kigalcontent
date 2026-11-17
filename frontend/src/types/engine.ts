@@ -33,6 +33,8 @@ export type FSMState = z.infer<typeof FSMStateSchema>;
 
 export type SocialChannel = "YouTube" | "Instagram" | "TikTok" | "LinkedIn";
 
+export type ScriptTargetPlatform = "YouTube" | "Instagram" | "TikTok" | "LinkedIn" | "X";
+
 export interface TwoColumnScriptBlock {
   block_id: string;
   section_label: string;
@@ -140,6 +142,7 @@ export interface MediaQCReport {
   transcription_words: WordTimestamp[];
   ass_subtitles_preview: string;
   qc_passed: boolean;
+  native_signature_profile?: Record<string, string>;
 }
 
 export interface SocialPost {
@@ -317,4 +320,62 @@ export interface N8nWorkflowTemplate {
   description: string;
   endpoints_used: string[];
   workflow_json: Record<string, unknown>;
+}
+
+export interface KigalChatInteraction {
+  id: string;
+  timestamp: string;
+  platform: string;
+  username: string;
+  comment_text: string;
+  matched_keyword: string;
+  public_comment_reply: string;
+  dm_reply_text: string;
+  lead_magnet_title: string;
+  delivery_url: string;
+  status: "DELIVERED" | "PENDING" | "UNMATCHED";
+}
+
+export interface AdCampaignGenerateRequest {
+  project_id?: string | null;
+  topic: string;
+  platforms: string[];
+  objective: string;
+  target_url?: string;
+  trigger_keyword?: string;
+}
+
+export interface AdCreativeVariant {
+  variant_id: string;
+  angle_name: string;
+  framework: string;
+  primary_text: string;
+  headline: string;
+  description: string;
+  cta_button: string;
+  remotion_916_storyboard: Array<{
+    timecode: string;
+    visual: string;
+    copy_overlay: string;
+    audio: string;
+  }>;
+}
+
+export interface AdCampaignResponse {
+  topic: string;
+  objective: string;
+  platforms: string[];
+  variants: AdCreativeVariant[];
+  google_rsa: {
+    headlines: string[];
+    descriptions: string[];
+    search_keywords_exact: string[];
+    search_keywords_phrase: string[];
+    search_keywords_negative: string[];
+    youtube_5s_hook: string;
+  };
+  ga4_utm_links: Array<{
+    platform: string;
+    utm_url: string;
+  }>;
 }

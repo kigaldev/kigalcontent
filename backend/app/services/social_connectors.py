@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.security import HITLSecurityManager
 from app.schemas.contracts import ConversionGoal, PreflightCheckResult, SocialChannel
 from app.services.domain_engines import get_cta_for_goal
+from app.workers.media_pipeline import NATIVE_EDITOR_SIGNATURES
 
 
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
@@ -66,6 +67,7 @@ class SocialCopyCraftEngine:
                 "notify_subscribers": True,
                 "ab_test_enabled": True,
                 "chapters_count": len(chapters),
+                "native_editor_fingerprint": NATIVE_EDITOR_SIGNATURES["YouTube"],
             },
         }
 
@@ -104,6 +106,7 @@ class SocialCopyCraftEngine:
                 "first_line_chars": len(hook),
                 "share_to_feed": True,
                 "target_metric": "Sends per Reach (>2.0%)",
+                "native_editor_fingerprint": NATIVE_EDITOR_SIGNATURES["Instagram"],
             },
         }
 
@@ -132,6 +135,7 @@ class SocialCopyCraftEngine:
                 "allow_stitch": True,
                 "allow_comments": True,
                 "target_metric": "Completion Rate & Loop Rate",
+                "native_editor_fingerprint": NATIVE_EDITOR_SIGNATURES["TikTok"],
             },
         }
 
@@ -181,6 +185,45 @@ class SocialCopyCraftEngine:
                 "has_link_in_body": False,
                 "pdf_carousel_supported": True,
                 "target_metric": "Dwell Time & Qualified Comments",
+            },
+        }
+
+    def generate_x_twitter(
+        self,
+        headline: str,
+        thesis_points: list[str],
+        goal: ConversionGoal,
+    ) -> dict[str, Any]:
+        """Generate an X (Twitter) high-signal thread opener with follow-up CTA reply."""
+        hook = headline.strip()[:140]
+        cta_text = get_cta_for_goal(self.profile, goal)
+        hashtags = ["#SistemasIA", "#BuildInPublic"]
+
+        bullets = [
+            f"→ {URL_PATTERN.sub('[enlace en respuesta]', pt.strip())}"
+            for pt in thesis_points[:3]
+            if pt and pt.strip()
+        ]
+        parts = [hook]
+        if bullets:
+            parts.extend(["", *bullets])
+        parts.extend(["", "🧵 Hilo técnico 👇"])
+        thread_opener = "\n".join(parts)
+        if len(thread_opener) > 280:
+            thread_opener = thread_opener[:277].rstrip() + "..."
+
+        first_reply = f"{cta_text} {' '.join(hashtags)}".strip()
+        return {
+            "channel": "X",
+            "title": hook[:100],
+            "post_body": thread_opener,
+            "first_comment": first_reply,
+            "hashtags": hashtags,
+            "metadata_payload": {
+                "format": "thread_opener",
+                "char_count": len(thread_opener),
+                "has_link_in_opener": False,
+                "target_metric": "Bookmarks & Thread Engagement",
             },
         }
 

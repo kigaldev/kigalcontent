@@ -1,4 +1,6 @@
 import type {
+  AdCampaignGenerateRequest,
+  AdCampaignResponse,
   AnalyticsOverview,
   AuditLogEntry,
   ContentProject,
@@ -7,6 +9,7 @@ import type {
   DurationPreset,
   FSMState,
   GitHubRepoItem,
+  KigalChatInteraction,
   LeadMagnetItem,
   MediaQCReport,
   N8nWorkflowTemplate,
@@ -257,6 +260,7 @@ export const apiClient = {
       keyword: string;
       platform: string;
       lead_magnet: LeadMagnetItem | null;
+      public_comment_reply?: string;
       dm_reply_text: string;
       delivery_url: string;
       manychat_flow_id?: string | null;
@@ -316,6 +320,7 @@ export const apiClient = {
     min_silence_duration_sec: number;
     target_lufs: number;
     subtitle_y_percent: number;
+    target_platform_signature?: string;
   }) =>
     requestJson<MediaQCReport>("/media/process", {
       method: "POST",
@@ -397,4 +402,22 @@ export const apiClient = {
   mcpHealthcheck: () => requestJson<Record<string, unknown>>("/mcp/healthcheck"),
 
   listN8nWorkflows: () => requestJson<N8nWorkflowTemplate[]>("/n8n/workflows"),
+
+  listKigalChatInteractions: () =>
+    requestJson<KigalChatInteraction[]>("/kigalchat/interactions"),
+
+  runKigalChatAutoSweep: () =>
+    requestJson<{ processed_count: number; interactions: KigalChatInteraction[] }>(
+      "/kigalchat/auto-sweep",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      }
+    ),
+
+  generateAdCampaign: (payload: AdCampaignGenerateRequest) =>
+    requestJson<AdCampaignResponse>("/ads/generate-campaign", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

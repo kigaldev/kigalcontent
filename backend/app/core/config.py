@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     )
 
     app_env: str = Field(default="development")
-    app_name: str = Field(default="Autonomous Content Engine")
+    app_name: str = Field(default="KigalContent Studio API")
     api_v1_prefix: str = Field(default="/api/v1")
 
     # Security & HITL HMAC

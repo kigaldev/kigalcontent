@@ -59,7 +59,7 @@ const CHANNELS_GUIDE: SocialChannelGuide[] = [
       {
         title: "1. Crear o seleccionar un Proyecto en Google Cloud",
         detail:
-          "Inicia sesión en Google Cloud Console con la cuenta asociada a tu canal de YouTube y crea un nuevo proyecto llamado 'Autonomous Content Engine'.",
+          "Inicia sesión en Google Cloud Console con la cuenta asociada a tu canal de YouTube y crea un nuevo proyecto llamado 'KigalContent Studio'.",
       },
       {
         title: "2. Activar la 'YouTube Data API v3'",
@@ -189,7 +189,7 @@ const CHANNELS_GUIDE: SocialChannelGuide[] = [
           "En 'Auth', añade tu dominio o callback local. Autoriza a tu usuario y obtén el 'Access Token' con permiso 'w_member_social'.",
       },
       {
-        title: "4. Pegar Token en Autonomous Content Engine",
+        title: "4. Pegar Token en KigalContent",
         detail:
           "Pega el token abajo. El motor programará las publicaciones cuidando la regla de 'enlaces en el primer comentario' para no restar visibilidad.",
       },

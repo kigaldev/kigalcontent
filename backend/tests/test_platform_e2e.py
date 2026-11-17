@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,6 +20,7 @@ if _TEST_DB.exists():
     _TEST_DB.unlink()
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB.as_posix()}"
 
+from app.core.config import get_settings
 from app.core.security import HITLSecurityManager
 from app.main import app
 from app.schemas.contracts import (
@@ -34,7 +39,11 @@ from app.services.domain_engines import (
     generate_parametric_script,
 )
 from app.services.social_connectors import SocialCopyCraftEngine, validate_preflight
-from app.workers.media_pipeline import run_full_media_pipeline
+from app.workers.media_pipeline import (
+    NATIVE_EDITOR_SIGNATURES,
+    build_native_editor_ffmpeg_flags,
+    run_full_media_pipeline,
+)
 
 
 class TestDomainAlgorithms:
@@ -123,6 +132,41 @@ class TestDomainAlgorithms:
         assert pf_bad.passed is False
         assert len(pf_bad.blocking_errors) == 1
 
+        # Verify native editor fingerprints & X/Twitter helper
+        assert by_ch["YouTube"]["metadata_payload"]["native_editor_fingerprint"] == NATIVE_EDITOR_SIGNATURES["YouTube"]
+        assert by_ch["Instagram"]["metadata_payload"]["native_editor_fingerprint"] == NATIVE_EDITOR_SIGNATURES["Instagram"]
+        assert by_ch["TikTok"]["metadata_payload"]["native_editor_fingerprint"] == NATIVE_EDITOR_SIGNATURES["TikTok"]
+
+        x_post = engine.generate_x_twitter(
+            headline="Automatiza tu sistema editorial en 2026",
+            thesis_points=["Elimina cuellos manuales", "Mide Watch Time Share"],
+            goal=ConversionGoal.EMAIL_LEAD_CAPTURE,
+        )
+        assert x_post["channel"] == "X"
+        assert len(x_post["post_body"]) <= 280
+        assert x_post["first_comment"]
+
+    def test_build_native_editor_ffmpeg_flags_and_rebrand(self):
+        assert get_settings().app_name == "KigalContent Studio API"
+
+        for platform in ("Instagram", "TikTok", "YouTube"):
+            flags = build_native_editor_ffmpeg_flags(platform)
+            assert "-map_metadata" in flags and "-1" in flags
+            assert "-fflags" in flags and "+bitexact" in flags
+            assert "-movflags" in flags and "+faststart+use_metadata_tags" in flags
+            assert "-colorspace" in flags and "bt709" in flags
+            expected_sig = NATIVE_EDITOR_SIGNATURES[platform]
+            for k, v in expected_sig.items():
+                assert f"{k}={v}" in flags
+
+        # Unknown platform falls back cleanly to Instagram signature
+        fallback_flags = build_native_editor_ffmpeg_flags("UnknownPlatform")
+        assert f"make={NATIVE_EDITOR_SIGNATURES['Instagram']['make']}" in fallback_flags
+        assert (
+            f"com.apple.quicktime.software={NATIVE_EDITOR_SIGNATURES['Instagram']['com.apple.quicktime.software']}"
+            in fallback_flags
+        )
+
     def test_hmac_hitl_security_signing_and_tamper_rejection(self):
         mgr = HITLSecurityManager(secret_key="unit-test-secret")
         issued = mgr.issue_hitl_token(
@@ -185,6 +229,32 @@ class TestRealMediaPipelineFFmpeg:
             assert Path(report.thumbnail_b_url).exists()
             assert "PlayResX: 1080" in report.ass_subtitles_preview
             assert len(report.transcription_words) >= 5
+            assert report.native_signature_profile == NATIVE_EDITOR_SIGNATURES["Instagram"]
+
+    def test_ffmpeg_pipeline_with_native_editor_signature(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_path = Path(tmpdir) / "demo_tiktok_raw.mp4"
+            report = run_full_media_pipeline(
+                project_id="test-media-sig-tiktok",
+                raw_media_url=str(raw_path),
+                script_text_hint="Flujo nativo optimizado para retención y audio limpio",
+                generate_demo_source_if_missing=True,
+                target_platform_signature="TikTok",
+            )
+            assert report.qc_passed is True
+            assert report.native_signature_profile == NATIVE_EDITOR_SIGNATURES["TikTok"]
+            master_path = Path(report.master_media_url)
+            assert master_path.exists()
+
+            ffprobe = shutil.which("ffprobe") or "ffprobe"
+            probe = subprocess.run(
+                [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", str(master_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            tags = json.loads(probe.stdout).get("format", {}).get("tags", {})
+            assert tags.get("comment") == NATIVE_EDITOR_SIGNATURES["TikTok"]["comment"]
 
 
 class TestFastAPIEndToEnd:
@@ -358,6 +428,125 @@ class TestFastAPIEndToEnd:
                 json={"repo_url_or_slug": "invalid-single-word"},
             )
             assert bad_resp.status_code == 400
+
+    def test_ads_generate_campaign_endpoint(self):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/ads/generate-campaign",
+                json={
+                    "topic": "Automatización de Embudo con IA para Consultores B2B",
+                    "platforms": ["Meta Ads", "Google Ads"],
+                    "objective": "Leads / ManyChat",
+                    "target_url": "https://kigalcontent.studio/blueprint",
+                    "trigger_keyword": "SISTEMA",
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert len(data["variants"]) == 3
+            angles = [v["angle_name"] for v in data["variants"]]
+            assert "PAS Dolor" in angles
+            assert "Autoridad / Caso Real" in angles
+            assert "Demo Contraintuitiva" in angles
+            for variant in data["variants"]:
+                assert len(variant["remotion_916_storyboard"]) >= 3
+                assert variant["primary_text"]
+                assert variant["headline"]
+
+            rsa = data["google_rsa"]
+            assert len(rsa["headlines"]) >= 5
+            assert all(len(h) <= 30 for h in rsa["headlines"])
+            assert len(rsa["descriptions"]) >= 3
+            assert all(len(d) <= 90 for d in rsa["descriptions"])
+            assert len(rsa["search_keywords_exact"]) >= 3
+            assert len(rsa["search_keywords_phrase"]) >= 3
+            assert len(rsa["search_keywords_negative"]) >= 3
+            assert rsa["youtube_5s_hook"]
+
+            assert len(data["ga4_utm_links"]) >= 3
+            assert all("utm_source=" in link["url"] for link in data["ga4_utm_links"])
+
+    def test_kigalchat_auto_sweep_and_interactions(self):
+        with (
+            patch("app.core.config.Settings.save_creator_profile_file", return_value=None),
+            TestClient(app) as client,
+        ):
+            # Before configuring triggers, auto-sweep returns processed_count=0 cleanly
+            empty_sweep = client.post("/api/v1/kigalchat/auto-sweep")
+            assert empty_sweep.status_code == 200
+            assert empty_sweep.json()["processed_count"] == 0
+            assert empty_sweep.json()["interactions"] == []
+
+            initial_list = client.get("/api/v1/kigalchat/interactions")
+            assert initial_list.status_code == 200
+            assert initial_list.json() == []
+
+            # Configure a LeadMagnetItem and active ManyChat/KigalChat trigger rule
+            upd = client.put(
+                "/api/v1/creator-profile",
+                json={
+                    "lead_magnets": [
+                        {
+                            "id": "lm-kigal-01",
+                            "title": "Blueprint KigalChat IA",
+                            "description": "Sistema de automatización de comentarios y DMs",
+                            "format": "Guía PDF",
+                            "delivery_url": "https://kigalcontent.studio/recursos/blueprint",
+                            "source": "manual",
+                        }
+                    ],
+                    "manychat_triggers": [
+                        {
+                            "id": "trig-kigal-01",
+                            "keyword": "SISTEMA",
+                            "lead_magnet_id": "lm-kigal-01",
+                            "platform": "instagram",
+                            "dm_reply_template": "¡Hola! Aquí tienes tu Blueprint:",
+                            "active": True,
+                            "triggers_count": 0,
+                        }
+                    ],
+                },
+            )
+            assert upd.status_code == 200
+
+            # Single manual trigger generates varied public_comment_reply
+            trig = client.post(
+                "/api/v1/manychat/trigger",
+                json={
+                    "keyword": "SISTEMA",
+                    "platform": "instagram",
+                    "username": "@founder_test",
+                    "comment_text": "Quiero el SISTEMA porfa",
+                },
+            )
+            assert trig.status_code == 200
+            trig_data = trig.json()
+            assert trig_data["matched"] is True
+            assert trig_data["public_comment_reply"]
+            assert trig_data["triggers_count"] == 1
+
+            # Auto-sweep processes active rule and increments triggers_count
+            sweep = client.post("/api/v1/kigalchat/auto-sweep")
+            assert sweep.status_code == 200
+            sweep_data = sweep.json()
+            assert sweep_data["processed_count"] == 1
+            assert len(sweep_data["interactions"]) == 1
+            item = sweep_data["interactions"][0]
+            assert item["matched_keyword"] == "SISTEMA"
+            assert item["lead_magnet_title"] == "Blueprint KigalChat IA"
+            assert item["delivery_url"] == "https://kigalcontent.studio/recursos/blueprint"
+            assert item["public_comment_reply"]
+            assert item["dm_reply_text"]
+            assert item["status"] == "DELIVERED"
+
+            # Persisted triggers_count is now 2 and interactions list has both records
+            prof = client.get("/api/v1/creator-profile").json()
+            assert prof["manychat_triggers"][0]["triggers_count"] == 2
+
+            interactions = client.get("/api/v1/kigalchat/interactions").json()
+            assert len(interactions) == 2
+            assert all(i["public_comment_reply"] for i in interactions)
 
 
 
