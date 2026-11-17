@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { CreatorProfile } from "@/types/engine";
 import { useEngineStore } from "@/store/useEngineStore";
+import { apiClient } from "@/lib/api";
 
 interface CreatorProfileModalProps {
   isOpen: boolean;
@@ -259,30 +260,13 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
     };
 
     try {
-      const res = await fetch("/api/v1/creator-profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const saved: CreatorProfile = await res.json();
-        setCreatorProfile(saved);
-        setSaveSuccess(true);
-        setTimeout(() => {
-          setSaveSuccess(false);
-          onClose();
-        }, 1200);
-      } else {
-        // Fallback update local store directly if backend offline
-        if (creatorProfile) {
-          setCreatorProfile({ ...creatorProfile, ...payload } as CreatorProfile);
-        }
-        setSaveSuccess(true);
-        setTimeout(() => {
-          setSaveSuccess(false);
-          onClose();
-        }, 1200);
-      }
+      const saved = await apiClient.updateCreatorProfile(payload);
+      setCreatorProfile(saved);
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        onClose();
+      }, 1200);
     } catch {
       if (creatorProfile) {
         setCreatorProfile({ ...creatorProfile, ...payload } as CreatorProfile);
@@ -415,34 +399,20 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
     }
     setGithubLoading(true);
     try {
-      const res = await fetch("/api/v1/creator-profile/import-github", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repo_url_or_slug: slugRaw,
-          github_token: githubTokenInput.trim() || null,
-        }),
+      const data = await apiClient.importGitHubRepo({
+        repo_url_or_slug: slugRaw,
+        github_token: githubTokenInput.trim() || null,
       });
 
-      if (res.ok) {
-        const data = (await res.json()) as {
-          repo_full_name: string;
-          repo_url: string;
-          suggested_niche: string;
-          suggested_project_context: string;
-          suggested_content_pillars: string[];
-          suggested_tagline: string;
-        };
-        if (data.suggested_niche) setNiche(data.suggested_niche);
-        if (data.suggested_project_context) setProjectContext(data.suggested_project_context);
-        if (data.suggested_content_pillars?.length) setContentPillars(data.suggested_content_pillars);
-        if (data.suggested_tagline && !tagline) setTagline(data.suggested_tagline);
-        setGithubUrl(data.repo_url);
-        setImportStatusMessage(
-          `Repositorio "${data.repo_full_name}" conectado y analizado. Contexto técnico y pilares cargados en el perfil.`
-        );
-        return;
-      }
+      if (data.suggested_niche) setNiche(data.suggested_niche);
+      if (data.suggested_project_context) setProjectContext(data.suggested_project_context);
+      if (data.suggested_content_pillars?.length) setContentPillars(data.suggested_content_pillars);
+      if (data.suggested_tagline && !tagline) setTagline(data.suggested_tagline);
+      setGithubUrl(data.repo_url);
+      setImportStatusMessage(
+        `Repositorio "${data.repo_full_name}" conectado y analizado. Contexto técnico y pilares cargados en el perfil.`
+      );
+      return;
 
       // Direct public GitHub API fallback when backend is offline in Studio Local Mode
       let cleanSlug = slugRaw.replace(/\/$/, "").replace(/\.git$/, "");
@@ -451,9 +421,9 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
       }
       const ghRes = await fetch(`https://api.github.com/repos/${cleanSlug}`);
       if (!ghRes.ok) {
-        const errPayload = await res.json().catch(() => null);
+        const errPayload = await ghRes.json().catch(() => null);
         throw new Error(
-          errPayload?.detail ||
+          errPayload?.message ||
             `No se pudo acceder al repositorio "${cleanSlug}" (código ${ghRes.status}).`
         );
       }
@@ -464,9 +434,11 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
         language?: string;
         topics?: string[];
       };
-      const pillars = Array.from(
-        new Set([...(ghMeta.language ? [ghMeta.language] : []), ...(ghMeta.topics || []).slice(0, 5)])
-      );
+      const rawPillars = [
+        ...(ghMeta.language ? [ghMeta.language] : []),
+        ...(ghMeta.topics || []).slice(0, 5),
+      ];
+      const pillars: string[] = Array.from(new Set(rawPillars)).filter((p): p is string => Boolean(p));
       setNiche(
         ghMeta.language
           ? `Tecnología, ${ghMeta.language} y Producto Digital`
@@ -478,7 +450,9 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
         }\nTemas: ${pillars.join(", ")}.`
       );
       if (pillars.length > 0) setContentPillars(pillars);
-      if (ghMeta.description && !tagline) setTagline(ghMeta.description.slice(0, 120));
+      if (ghMeta.description && !tagline) {
+        setTagline((ghMeta.description || "").slice(0, 120));
+      }
       setGithubUrl(ghMeta.html_url);
       setImportStatusMessage(
         `Repositorio "${ghMeta.full_name}" importado directamente vía API pública de GitHub.`

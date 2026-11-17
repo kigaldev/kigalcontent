@@ -200,6 +200,19 @@ export const apiClient = {
       body: JSON.stringify(payload),
     }),
 
+  importGitHubRepo: (payload: { repo_url_or_slug: string; github_token?: string | null }) =>
+    requestJson<{
+      repo_full_name: string;
+      repo_url: string;
+      suggested_niche: string;
+      suggested_project_context: string;
+      suggested_content_pillars: string[];
+      suggested_tagline: string;
+    }>("/creator-profile/import-github", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   generateScript: (payload: {
     project_id: string;
     duration_preset: DurationPreset;

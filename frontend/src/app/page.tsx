@@ -41,6 +41,7 @@ import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
+import { CreatorProfileView } from "@/components/CreatorProfileView";
 import { BackendStatusModal } from "@/components/BackendStatusModal";
 import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
@@ -55,6 +56,15 @@ interface TabDefinition {
 }
 
 const STUDIO_TABS: TabDefinition[] = [
+  {
+    id: "creator-profile",
+    stepNumber: 0,
+    label: "Paso 0: Perfil de Creador",
+    shortLabel: "0. Perfil",
+    stepName: "Perfil de Creador y Contexto",
+    summary: "Define tu identidad, nicho, audiencia y extrae contexto de Claude, Codex, Gemini o GitHub.",
+    icon: Sparkles,
+  },
   {
     id: "pipeline",
     stepNumber: 1,
@@ -406,9 +416,9 @@ export default function AutonomousContentEnginePage() {
 
               <button
                 type="button"
-                onClick={() => setIsProfileModalOpen(true)}
+                onClick={() => setActiveTab("creator-profile")}
                 className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/60 to-violet-950/60 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:border-cyan-400 hover:text-white transition shadow-sm"
-                title="Configurar información, audiencia y estilo del creador"
+                title="Ir al Paso 0: Perfil y Contexto del Creador"
               >
                 <div className="w-5 h-5 rounded-full bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-[10px] text-cyan-300 font-bold">
                   {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
@@ -562,6 +572,15 @@ export default function AutonomousContentEnginePage() {
           aria-labelledby={`tab-${activeTab}`}
           className="space-y-6"
         >
+          {activeTab === "creator-profile" && (
+            <CreatorProfileView
+              onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
+              onProceedToNextStep={() => {
+                setActiveTab("pipeline");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            />
+          )}
           {activeTab === "pipeline" && (
             <KanbanPipelineBoard
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
