@@ -41,6 +41,7 @@ import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
+import { BackendStatusModal } from "@/components/BackendStatusModal";
 import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
 interface TabDefinition {
@@ -133,6 +134,7 @@ export default function AutonomousContentEnginePage() {
   } = useEngineStore();
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isBackendModalOpen, setIsBackendModalOpen] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const isBootstrappingRef = useRef(false);
 
@@ -380,16 +382,18 @@ export default function AutonomousContentEnginePage() {
                 </label>
               )}
 
-              <div
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+              <button
+                type="button"
+                onClick={() => setIsBackendModalOpen(true)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition cursor-pointer hover:opacity-90 ${
                   backendOnline
                     ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                    : "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:border-amber-400"
                 }`}
                 title={
                   backendOnline
-                    ? `Servidor conectado (${apiClient.apiBase})`
-                    : "Modo local: puedes redactar guiones y probar el simulador sin necesidad de servidor"
+                    ? `Servidor conectado (${apiClient.apiBase}). Clic para ver detalles.`
+                    : "Modo local: Clic aquí para conectar con tu servidor de Railway o MiniPC."
                 }
               >
                 {backendOnline ? (
@@ -398,7 +402,7 @@ export default function AutonomousContentEnginePage() {
                   <WifiOff className="h-3.5 w-3.5" />
                 )}
                 <span>{backendOnline ? "Servidor Online" : "Modo Local"}</span>
-              </div>
+              </button>
 
               <button
                 type="button"
@@ -637,6 +641,17 @@ export default function AutonomousContentEnginePage() {
       <CreatorProfileModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
+      />
+
+      {/* Backend Connection Diagnostics & Custom URL Modal */}
+      <BackendStatusModal
+        isOpen={isBackendModalOpen}
+        onClose={() => setIsBackendModalOpen(false)}
+        onReconnected={() => {
+          setIsBackendModalOpen(false);
+          void loadWorkspaceData(selectedProjectId ?? undefined);
+        }}
+        backendOnline={backendOnline}
       />
 
       {/* Toast Notification Banner */}

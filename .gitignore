@@ -28,3 +28,4 @@ media_workspace/processed/*
 !.env.example
 backend/.env
 frontend/.env*
+**/.content_engine/memory/

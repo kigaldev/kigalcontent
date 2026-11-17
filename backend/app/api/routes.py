@@ -104,6 +104,11 @@ from app.workers.media_pipeline import run_full_media_pipeline
 router = APIRouter()
 
 
+@router.get("/health")
+async def api_v1_health() -> dict[str, str]:
+    return {"status": "ok", "service": "Autonomous Content Engine Web API", "version": "2.0.0"}
+
+
 async def _get_default_workspace(db: AsyncSession) -> Workspace:
     ws = (await db.execute(select(Workspace).limit(1))).scalar_one_or_none()
     if not ws:

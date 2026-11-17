@@ -19,32 +19,70 @@ import type {
 
 /**
  * Resolves the API base URL depending on execution environment:
- * 1. Server-side runtime (Vercel Server Functions): Uses the internal Vercel service binding
- *    injected into `process.env.BACKEND_URL` (e.g. `http://backend.internal...`).
- * 2. Client-side runtime in browser: When deployed on Vercel under one domain with `/api/(.*)` rewrites,
- *    relative calls or `window.location.origin` route directly to the backend service.
- * 3. Client/Server custom override: `process.env.NEXT_PUBLIC_API_URL` if explicitly set.
- * 4. Local development fallback: `http://localhost:8000`.
+ * 1. Server-side runtime (Vercel Server Functions): Uses `process.env.BACKEND_URL`
+ * 2. Client-side runtime: `process.env.NEXT_PUBLIC_API_URL` injected at build-time.
+ * 3. Client override: `localStorage.getItem("ACE_BACKEND_URL")` for instant debugging/connection.
+ * 4. Browser fallback: `window.location.origin` if not on vercel.app.
+ * 5. Local development fallback: `http://localhost:8000`.
  */
 export function getApiBaseUrl(): string {
-  if (typeof process !== "undefined" && process.env.BACKEND_URL) {
-    return process.env.BACKEND_URL.replace(/\/$/, "");
-  }
+  let url = "";
+
   if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+    url = process.env.NEXT_PUBLIC_API_URL;
+  } else if (typeof process !== "undefined" && process.env.BACKEND_URL) {
+    url = process.env.BACKEND_URL;
   }
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin;
+
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem("ACE_BACKEND_URL");
+      if (stored && stored.trim()) {
+        url = stored.trim();
+      }
+    } catch {
+      // localStorage restricted/unavailable
+    }
+
+    if (!url && window.location?.origin && !window.location.hostname.includes("vercel.app")) {
+      url = window.location.origin;
+    }
   }
-  return "http://localhost:8000";
+
+  if (!url) {
+    url = "http://localhost:8000";
+  }
+
+  // Remove trailing slashes and redundant /api or /api/v1 paths
+  return url.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/api$/, "");
+}
+
+export function setCustomBackendUrl(url: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (url && url.trim()) {
+      window.localStorage.setItem("ACE_BACKEND_URL", url.trim());
+    } else {
+      window.localStorage.removeItem("ACE_BACKEND_URL");
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function getCustomBackendUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem("ACE_BACKEND_URL");
+  } catch {
+    return null;
+  }
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const base = getApiBaseUrl();
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  const targetUrl = base.startsWith("http")
-    ? new URL(`api/v1${normalizedPath}`, `${base.replace(/\/$/, "")}/`).toString()
-    : `${base}/api/v1${normalizedPath}`;
+  const targetUrl = `${base}/api/v1${normalizedPath}`;
 
   const res = await fetch(targetUrl, {
     ...init,
@@ -72,25 +110,35 @@ export const apiClient = {
     return getApiBaseUrl();
   },
 
-  health: async (): Promise<{ status: string }> => {
-    const base = getApiBaseUrl();
-    const endpoint = base.startsWith("http")
-      ? new URL("api/health", `${base.replace(/\/$/, "")}/`).toString()
-      : `${base}/api/health`;
+  health: async (customUrl?: string): Promise<{ status: string }> => {
+    const rawBase = customUrl || getApiBaseUrl();
+    const cleanBase = rawBase.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/api$/, "");
 
-    try {
-      const res = await fetch(endpoint, { cache: "no-store" });
-      if (res.ok) return res.json();
-    } catch {
-      // fallback to /health below
+    const candidateEndpoints = [
+      `${cleanBase}/health`,
+      `${cleanBase}/api/health`,
+      `${cleanBase}/api/v1/health`,
+    ];
+
+    let lastError: Error | null = null;
+    for (const ep of candidateEndpoints) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const res = await fetch(ep, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
     }
 
-    const fallbackEndpoint = base.startsWith("http")
-      ? new URL("health", `${base.replace(/\/$/, "")}/`).toString()
-      : `${base}/health`;
-    const fallbackRes = await fetch(fallbackEndpoint, { cache: "no-store" });
-    if (!fallbackRes.ok) throw new Error("Backend offline");
-    return fallbackRes.json();
+    throw new Error(lastError?.message || `Servidor no responde en ${cleanBase}`);
   },
 
   listProjects: () => requestJson<ContentProject[]>("/projects"),
