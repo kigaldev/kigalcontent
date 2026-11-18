@@ -1108,6 +1108,13 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectSumma
     ]
 
 
+@router.post("/projects/purge-test-data")
+async def purge_test_data_endpoint(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    from app.services.seed import purge_test_dummy_records
+    count = await purge_test_dummy_records(db)
+    return {"status": "ok", "purged_projects": count}
+
+
 @router.post("/projects", response_model=ProjectSummaryResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     body: ProjectCreateRequest,

@@ -438,8 +438,7 @@ export function AdsCampaignStudioView({
     "TikTok Spark Ads",
   ]);
   const [topic, setTopic] = useState(
-    selectedDetail?.project?.working_title ??
-      "La paradoja del CEO de 3T$: Sistemas vs Horas Manuales"
+    selectedDetail?.project?.working_title ?? ""
   );
   const [objective, setObjective] = useState<string>("Leads / ManyChat DM");
   const [triggerKeyword, setTriggerKeyword] = useState("BLUEPRINT");
@@ -456,8 +455,7 @@ export function AdsCampaignStudioView({
       {
         project_id: selectedProjectId ?? null,
         topic:
-          selectedDetail?.project?.working_title ??
-          "La paradoja del CEO de 3T$: Sistemas vs Horas Manuales",
+          selectedDetail?.project?.working_title ?? "Campaña de Contenido",
         platforms: [
           "Meta Ads (IG/FB)",
           "Google Search Ads",

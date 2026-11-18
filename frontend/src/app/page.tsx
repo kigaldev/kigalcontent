@@ -15,6 +15,7 @@ import {
   Layers,
   Megaphone,
   Plug,
+  Plus,
   RefreshCw,
   Send,
   Settings,
@@ -31,8 +32,8 @@ import {
   FALLBACK_ANALYTICS,
   FALLBACK_AUDIT_LOGS,
   FALLBACK_CREATOR_PROFILE,
-  FALLBACK_DETAIL,
   FALLBACK_PROJECTS,
+  buildEmptyProjectDetail,
 } from "@/lib/fallbackSeed";
 import { HUMAN_STATE_LABELS } from "@/lib/utils";
 import { useEngineStore, type ActiveStudioTab } from "@/store/useEngineStore";
@@ -211,16 +212,12 @@ export default function KigalContentStudioPage() {
         }
         const activeId =
           explicitProjectId ??
-          useEngineStore.getState().selectedProjectId ??
-          FALLBACK_PROJECTS[0]?.id;
+          useEngineStore.getState().selectedProjectId;
         if (activeId && !useEngineStore.getState().selectedDetail) {
-          setSelectedDetail({
-            ...FALLBACK_DETAIL,
-            project:
-              (currentProjects.length > 0 ? currentProjects : FALLBACK_PROJECTS).find(
-                (p) => p.id === activeId
-              ) ?? FALLBACK_DETAIL.project,
-          });
+          const matched = currentProjects.find((p) => p.id === activeId);
+          if (matched) {
+            setSelectedDetail(buildEmptyProjectDetail(matched));
+          }
         }
       } finally {
         isBootstrappingRef.current = false;
@@ -260,10 +257,7 @@ export default function KigalContentStudioPage() {
       }
       const matched = projects.find((p) => p.id === selectedProjectId);
       if (matched && !cancelled) {
-        setSelectedDetail({
-          ...FALLBACK_DETAIL,
-          project: matched,
-        });
+        setSelectedDetail(buildEmptyProjectDetail(matched));
       }
     }
 
@@ -413,7 +407,7 @@ export default function KigalContentStudioPage() {
 
             {/* Project Selector, Status, Profile & Quick Actions */}
             <div className="flex flex-wrap items-center gap-2">
-              {projects.length > 0 && (
+              {projects.length > 0 ? (
                 <label className="flex items-center gap-2 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-panel)] px-2.5 py-1.5 text-xs">
                   <Layers className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                   <span className="text-slate-400 hidden md:inline">Video Activo:</span>
@@ -435,6 +429,16 @@ export default function KigalContentStudioPage() {
                     ))}
                   </select>
                 </label>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("pipeline")}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-cyan-500/50 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer"
+                  title="Crea tu primer video en el Paso 1: Ideas"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>+ Crear Primera Idea</span>
+                </button>
               )}
 
               <button

@@ -93,7 +93,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
       } else {
         const mock: ContentProject = {
           id: crypto.randomUUID(),
-          asset_code: `ACE-${Math.floor(200 + Math.random() * 700)}`,
+          asset_code: `KC-${Math.floor(100 + Math.random() * 900)}`,
           working_title: title.trim(),
           target_duration: duration,
           conversion_goal: goal,

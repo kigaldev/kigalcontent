@@ -247,17 +247,17 @@ export function ClosedLoopAnalyticsView({
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400">Visualizaciones Totales</span>
           <div className="text-2xl font-bold text-white mt-1">
-            {(activeSnap?.view_count ?? views).toLocaleString()}
+            {activeSnap ? activeSnap.view_count.toLocaleString() : "0"}
           </div>
-          <span className="text-[11px] text-emerald-400 font-semibold mt-1 inline-block">
-            +{(views / baselineViews).toFixed(1)}x sobre la media
+          <span className="text-[11px] text-slate-400 font-semibold mt-1 inline-block">
+            {activeSnap ? `+${(activeSnap.view_count / (baselineViews || 1)).toFixed(1)}x sobre la media` : "Sin publicaciones aún"}
           </span>
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400">Retención inicial (3 seg)</span>
           <div className="text-2xl font-bold text-cyan-300 mt-1">
-            {activeSnap?.hold_rate_3s ?? hold3s}%
+            {activeSnap ? `${activeSnap.hold_rate_3s}%` : "--"}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 inline-block">
             Meta recomendada: &gt;70%
@@ -267,7 +267,7 @@ export function ClosedLoopAnalyticsView({
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400">Vieron el video completo</span>
           <div className="text-2xl font-bold text-violet-300 mt-1">
-            {activeSnap?.completion_rate ?? completion}%
+            {activeSnap ? `${activeSnap.completion_rate}%` : "--"}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 inline-block">
             Meta en shorts: &gt;50%
@@ -277,10 +277,10 @@ export function ClosedLoopAnalyticsView({
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400">Compartidos por Mensaje</span>
           <div className="text-2xl font-bold text-emerald-300 mt-1">
-            {activeSnap?.sends_per_reach ?? sendsReach}%
+            {activeSnap ? `${activeSnap.sends_per_reach}%` : "--"}
           </div>
-          <span className="text-[11px] text-emerald-400 font-semibold mt-1 inline-block">
-            {sendsReach >= 2.0 ? "Contenido muy viral" : "Normal"}
+          <span className="text-[11px] text-slate-400 font-semibold mt-1 inline-block">
+            {activeSnap ? (activeSnap.sends_per_reach >= 2.0 ? "Contenido muy viral" : "Normal") : "Meta: >2.0%"}
           </span>
         </div>
       </div>
@@ -305,75 +305,85 @@ export function ClosedLoopAnalyticsView({
           </div>
 
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 overflow-hidden">
-            <svg
-              viewBox="0 0 600 200"
-              className="w-full h-44 overflow-visible"
-              aria-label="Gráfico de retención de video"
-            >
-              {/* Grid Lines */}
-              {[100, 75, 50, 25].map((pct) => {
-                const y = 175 - (pct / 100) * 145;
-                return (
-                  <g key={pct}>
-                    <line
-                      x1="35"
-                      y1={y}
-                      x2="575"
-                      y2={y}
-                      stroke="#1e293b"
-                      strokeDasharray="4 4"
-                    />
-                    <text x="5" y={y + 3} fill="#64748b" fontSize="10">
-                      {pct}%
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* 3-Second Critical Hook Marker */}
-              <line
-                x1={35 + (3 / maxSec) * 540}
-                y1="25"
-                x2={35 + (3 / maxSec) * 540}
-                y2="175"
-                stroke="#fbbf24"
-                strokeWidth="1.5"
-                strokeDasharray="3 3"
-              />
-              <text
-                x={39 + (3 / maxSec) * 540}
-                y="34"
-                fill="#fbbf24"
-                fontSize="10"
-                fontWeight="bold"
+            {activeSnap ? (
+              <svg
+                viewBox="0 0 600 200"
+                className="w-full h-44 overflow-visible"
+                aria-label="Gráfico de retención de video"
               >
-                Gancho (3 seg)
-              </text>
+                {/* Grid Lines */}
+                {[100, 75, 50, 25].map((pct) => {
+                  const y = 175 - (pct / 100) * 145;
+                  return (
+                    <g key={pct}>
+                      <line
+                        x1="35"
+                        y1={y}
+                        x2="575"
+                        y2={y}
+                        stroke="#1e293b"
+                        strokeDasharray="4 4"
+                      />
+                      <text x="5" y={y + 3} fill="#64748b" fontSize="10">
+                        {pct}%
+                      </text>
+                    </g>
+                  );
+                })}
 
-              <polyline
-                fill="none"
-                stroke="#22d3ee"
-                strokeWidth="3"
-                points={svgPoints}
-              />
-              {retentionPoints.map((pt) => {
-                const x = 35 + (pt.sec / maxSec) * 540;
-                const y = 175 - (pt.pct / 100) * 145;
-                return (
-                  <g key={pt.sec}>
-                    <circle cx={x} cy={y} r="4" fill="#10b981" />
-                    <text
-                      x={x - 6}
-                      y="194"
-                      fill="#94a3b8"
-                      fontSize="10"
-                    >
-                      {pt.sec}s
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+                {/* 3-Second Critical Hook Marker */}
+                <line
+                  x1={35 + (3 / maxSec) * 540}
+                  y1="25"
+                  x2={35 + (3 / maxSec) * 540}
+                  y2="175"
+                  stroke="#fbbf24"
+                  strokeWidth="1.5"
+                  strokeDasharray="3 3"
+                />
+                <text
+                  x={39 + (3 / maxSec) * 540}
+                  y="34"
+                  fill="#fbbf24"
+                  fontSize="10"
+                  fontWeight="bold"
+                >
+                  Gancho (3 seg)
+                </text>
+
+                <polyline
+                  fill="none"
+                  stroke="#22d3ee"
+                  strokeWidth="3"
+                  points={svgPoints}
+                />
+                {retentionPoints.map((pt) => {
+                  const x = 35 + (pt.sec / maxSec) * 540;
+                  const y = 175 - (pt.pct / 100) * 145;
+                  return (
+                    <g key={pt.sec}>
+                      <circle cx={x} cy={y} r="4" fill="#10b981" />
+                      <text
+                        x={x - 6}
+                        y="194"
+                        fill="#94a3b8"
+                        fontSize="10"
+                      >
+                        {pt.sec}s
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            ) : (
+              <div className="h-44 flex flex-col items-center justify-center text-center p-4 text-xs text-slate-500">
+                <BarChart3 className="w-8 h-8 text-slate-700 mb-2" />
+                <p className="font-semibold text-slate-400">Sin datos de retención todavía</p>
+                <p className="text-[11px] text-slate-500 mt-1 max-w-xs">
+                  Publica tu primer video en redes para ver aquí la curva de retención segundo a segundo.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -585,30 +595,25 @@ export function ClosedLoopAnalyticsView({
           Cada vez que analizas un video, el sistema recuerda qué fórmulas funcionaron mejor para aplicarlas automáticamente al redactar los próximos guiones en el Paso 2.
         </p>
 
-        <div className="grid gap-2">
-          {(analytics?.learned_rules ?? [
-            {
-              id: "lr-1",
-              rule_statement: "Los videos con un dato numérico en los primeros 3 segundos tienen un 28% más de retención.",
-              confidence_weight: 0.92,
-            },
-            {
-              id: "lr-2",
-              rule_statement: "En videos de más de 60 segundos, colocar un cambio de plano antes del segundo 15 reduce el abandono a la mitad.",
-              confidence_weight: 0.88,
-            },
-          ]).map((rule) => (
-            <div
-              key={rule.id}
-              className="rounded-xl bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 flex items-center justify-between gap-3"
-            >
-              <span>{rule.rule_statement}</span>
-              <span className="text-[11px] font-semibold text-emerald-300 shrink-0">
-                Confianza: {Math.round(rule.confidence_weight * 100)}%
-              </span>
-            </div>
-          ))}
-        </div>
+        {analytics?.learned_rules && analytics.learned_rules.length > 0 ? (
+          <div className="grid gap-2">
+            {analytics.learned_rules.map((rule) => (
+              <div
+                key={rule.id}
+                className="rounded-xl bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 flex items-center justify-between gap-3"
+              >
+                <span>{rule.rule_statement}</span>
+                <span className="text-[11px] font-semibold text-emerald-300 shrink-0">
+                  Confianza: {Math.round(rule.confidence_weight * 100)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl bg-slate-950/60 border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
+            Aún no hay aprendizajes automáticos guardados. El motor RMT-A analizará el rendimiento de tus videos cuando comiences a publicar.
+          </div>
+        )}
       </div>
     </div>
   );
