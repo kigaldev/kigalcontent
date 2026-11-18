@@ -10,7 +10,7 @@ import React, {
   type KeyboardEvent,
 } from "react";
 import {
-  AlertTriangle,
+  Briefcase,
   Check,
   CheckCircle2,
   Clock,
@@ -20,26 +20,31 @@ import {
   Gauge,
   Hash,
   Image as ImageIcon,
-  KeyRound,
+  Instagram,
   Layers,
-  MessageSquare,
+  PlaySquare,
   Plus,
   RefreshCw,
   Save,
   Search,
-  ShieldAlert,
   ShieldCheck,
   Sliders,
   Sparkles,
-  Trash2,
   Tv,
+  Twitter,
   UserCheck,
   Wand2,
   Zap,
 } from "lucide-react";
 import { TeleprompterModal } from "@/components/TeleprompterModal";
 import { ScriptExporterModal } from "@/components/ScriptExporterModal";
-import { ThumbnailCoverStudio } from "@/components/ThumbnailCoverStudio";
+import { MasterScriptVisor } from "@/components/script-studio/MasterScriptVisor";
+import { YouTubePlatformVisor } from "@/components/script-studio/YouTubePlatformVisor";
+import { InstagramPlatformVisor } from "@/components/script-studio/InstagramPlatformVisor";
+import { TikTokPlatformVisor } from "@/components/script-studio/TikTokPlatformVisor";
+import { LinkedInPlatformVisor } from "@/components/script-studio/LinkedInPlatformVisor";
+import { XPlatformVisor } from "@/components/script-studio/XPlatformVisor";
+import { ScriptConfigPanel } from "@/components/script-studio/ScriptConfigPanel";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import {
@@ -59,62 +64,22 @@ interface ScriptStudioViewProps {
   onRefresh: () => Promise<void>;
 }
 
-type ScriptSubTabId = "config" | "av-script" | "written-posts" | "thumbnails";
+export type ScriptSubTabId =
+  | "master"
+  | "youtube"
+  | "instagram"
+  | "tiktok"
+  | "linkedin"
+  | "x"
+  | "config";
 
 interface SubTabSpec {
   id: ScriptSubTabId;
   label: string;
   shortLabel: string;
+  badge?: string;
+  icon?: React.ComponentType<{ className?: string }>;
 }
-
-const SCRIPT_SUBTABS: SubTabSpec[] = [
-  { id: "config", label: "1. Formato y Redes", shortLabel: "1. Formato" },
-  { id: "av-script", label: "2. Guión 2 Columnas", shortLabel: "2. Guión" },
-  {
-    id: "written-posts",
-    label: "3. LinkedIn, X / Twitter y SEO",
-    shortLabel: "3. LinkedIn / X / SEO",
-  },
-  { id: "thumbnails", label: "4. Portadas A/B", shortLabel: "4. Portadas" },
-];
-
-const PLATFORM_OPTIONS: Array<{
-  id: ScriptTargetPlatform;
-  label: string;
-  hint: string;
-  accent: string;
-}> = [
-  {
-    id: "YouTube",
-    label: "YouTube",
-    hint: "16:9 & Shorts · SEO <60c",
-    accent: "border-rose-500/60 bg-rose-500/15 text-rose-200",
-  },
-  {
-    id: "Instagram",
-    label: "Instagram",
-    hint: "Reels 9:16 · DM Trigger",
-    accent: "border-pink-500/60 bg-pink-500/15 text-pink-200",
-  },
-  {
-    id: "TikTok",
-    label: "TikTok",
-    hint: "Search 100c · Loop rápido",
-    accent: "border-cyan-500/60 bg-cyan-500/15 text-cyan-200",
-  },
-  {
-    id: "LinkedIn",
-    label: "LinkedIn",
-    hint: "Sin links (-60%) · 1er Com.",
-    accent: "border-sky-500/60 bg-sky-500/15 text-sky-200",
-  },
-  {
-    id: "X",
-    label: "X",
-    hint: "Tweet <=280c & Hilo 4–5",
-    accent: "border-amber-500/60 bg-amber-500/15 text-amber-200",
-  },
-];
 
 const AI_SLOP_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   { label: "En el mundo actual...", regex: /en el mundo actual/gi },
@@ -350,9 +315,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     showToast,
   } = useEngineStore();
 
-  const captionId = useId();
   const subTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const [activeSubTab, setActiveSubTab] = useState<ScriptSubTabId>("config");
+  const [activeSubTab, setActiveSubTab] = useState<ScriptSubTabId>("master");
 
   const [targetPlatforms, setTargetPlatforms] = useState<ScriptTargetPlatform[]>([
     "YouTube",
@@ -365,28 +329,38 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
   const [blocks, setBlocks] = useState<TwoColumnScriptBlock[]>([]);
   const [selectedHookIndex, setSelectedHookIndex] = useState(0);
 
-  // Lead magnet keyword from Paso 0 (manychat_triggers)
+  // Lead magnet keyword from Paso 0
   const [leadMagnetKeyword, setLeadMagnetKeyword] = useState("BLUEPRINT");
 
-  // Quality controls (Anti-Slop + HookLab)
+  // Quality controls
   const [antiSlopEnabled, setAntiSlopEnabled] = useState(true);
   const [contrarianHookEnabled, setContrarianHookEnabled] = useState(true);
   const [requireVerifiableData, setRequireVerifiableData] = useState(true);
 
-  // LinkedIn, X & OpenSEO state
+  // Platform-specific content states
+  // YouTube
+  const [ytSeoTitle, setYtSeoTitle] = useState("");
+  const [ytDescription, setYtDescription] = useState("");
+  const [seoKeywords, setSeoKeywords] = useState<string[]>([]);
+
+  // Instagram
+  const [igReelCaption, setIgReelCaption] = useState("");
+
+  // TikTok
+  const [tiktokSearchHook, setTiktokSearchHook] = useState("");
+  const [tiktokCaption, setTiktokCaption] = useState("");
+
+  // LinkedIn
   const [linkedInHook, setLinkedInHook] = useState("");
   const [linkedInBody, setLinkedInBody] = useState("");
   const [linkedInFirstComment, setLinkedInFirstComment] = useState("");
+
+  // X / Twitter
   const [xSingleTweet, setXSingleTweet] = useState("");
   const [xThreadTweets, setXThreadTweets] = useState<string[]>([]);
-  const [ytSeoTitle, setYtSeoTitle] = useState("");
-  const [tiktokSearchHook, setTiktokSearchHook] = useState("");
-  const [seoKeywords, setSeoKeywords] = useState<string[]>([]);
-  const [customKeywordInput, setCustomKeywordInput] = useState("");
 
-  // UI & modals state
+  // UI state
   const [saving, setSaving] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
   const [showContextDrawer, setShowContextDrawer] = useState(false);
   const [showTeleprompter, setShowTeleprompter] = useState(false);
   const [showExporter, setShowExporter] = useState(false);
@@ -441,8 +415,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     ];
   }, [selectedDetail]);
 
-  const activeHook =
-    hookVariants[selectedHookIndex] ?? hookVariants[0] ?? null;
+  const activeHook = hookVariants[selectedHookIndex] ?? hookVariants[0] ?? null;
 
   // Sync script state when selected project changes
   useEffect(() => {
@@ -472,7 +445,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     }
   }, [creatorProfile, goal]);
 
-  const regenerateWrittenPosts = useCallback(
+  // Regenerate all platform adapted materials from master script blocks
+  const regeneratePlatformContents = useCallback(
     (
       overrideBlocks?: TwoColumnScriptBlock[],
       overrideHook?: string,
@@ -482,9 +456,39 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       const workingBlocks = overrideBlocks ?? blocks;
       const hookStr = overrideHook ?? activeHook?.hook_text ?? selectedDetail.project.working_title;
       const kw = overrideKeyword ?? leadMagnetKeyword;
+      const title = selectedDetail.project.working_title;
 
+      // YouTube
+      setYtSeoTitle(clampText(title, 58));
+      const ytDescIntro = `${hookStr}\n\nEn este video analizamos cómo dominar ${title} con un enfoque operativo y datos reales.`;
+      setYtDescription(ytDescIntro);
+      const keywords = extractSeoKeywords(
+        title,
+        creatorProfile?.niche ?? "",
+        creatorProfile?.content_pillars ?? [],
+        workingBlocks
+      );
+      setSeoKeywords(keywords);
+
+      // Instagram Reels
+      const igLines = [
+        hookStr,
+        "",
+        ...workingBlocks.slice(0, 3).map((b) => `• ${b.section_label}: ${clampText(b.audio_voiceover, 90)}`),
+        "",
+        `💬 Comenta "${kw}" y te envío el recurso completo directo a tus mensajes privados (DM).`,
+      ];
+      setIgReelCaption(igLines.join("\n"));
+
+      // TikTok
+      setTiktokSearchHook(
+        clampText(`${title}: ${workingBlocks[0]?.audio_voiceover ?? ""}`, 95)
+      );
+      setTiktokCaption(`${clampText(hookStr, 90)} #aprendeentiktok #creadordecontenido #${creatorProfile?.niche?.toLowerCase().replace(/\s+/g, "") || "techtok"}`);
+
+      // LinkedIn
       const li = buildLinkedInDraft({
-        title: selectedDetail.project.working_title,
+        title,
         hookText: hookStr,
         blocks: workingBlocks,
         keyword: kw,
@@ -495,8 +499,9 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       setLinkedInBody(li.body);
       setLinkedInFirstComment(li.firstComment);
 
+      // X
       const xDraft = buildXDraft({
-        title: selectedDetail.project.working_title,
+        title,
         hookText: hookStr,
         blocks: workingBlocks,
         keyword: kw,
@@ -504,22 +509,6 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       });
       setXSingleTweet(xDraft.singleTweet);
       setXThreadTweets(xDraft.thread);
-
-      setYtSeoTitle(clampText(selectedDetail.project.working_title, 58));
-      setTiktokSearchHook(
-        clampText(
-          `${selectedDetail.project.working_title}: ${workingBlocks[0]?.audio_voiceover ?? ""}`,
-          100
-        )
-      );
-      setSeoKeywords(
-        extractSeoKeywords(
-          selectedDetail.project.working_title,
-          creatorProfile?.niche ?? "",
-          creatorProfile?.content_pillars ?? [],
-          workingBlocks
-        )
-      );
     },
     [
       selectedDetail,
@@ -532,11 +521,11 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     ]
   );
 
-  // Auto-populate LinkedIn / X / OpenSEO when project detail loads
+  // Auto-populate when project detail loads
   const projectKey = selectedDetail?.project?.id;
   useEffect(() => {
     if (!projectKey) return;
-    regenerateWrittenPosts(
+    regeneratePlatformContents(
       selectedDetail?.script?.two_column_blocks ?? [],
       selectedDetail?.script?.hook_variants?.[selectedDetail?.script?.selected_hook_index ?? 0]
         ?.hook_text ?? selectedDetail?.project?.working_title
@@ -550,12 +539,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
   );
 
   const spec = DURATION_PRESET_META[preset];
-  const progressPct = Math.min(
-    100,
-    Math.round((timing.wordCount / spec.wordRange[1]) * 100)
-  );
 
-  // Live Anti-Slop & Verifiable Data audit
+  // Quality audit
   const qualityAudit = useMemo(() => {
     const allVoiceText = extractSentences(blocks).join(" ");
     const slopMatches: string[] = [];
@@ -579,10 +564,6 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     };
   }, [blocks]);
 
-  const linkedInHasExternalUrl = /https?:\/\/\S+/i.test(
-    `${linkedInHook}\n${linkedInBody}`
-  );
-
   const handleCopy = async (key: string, value: string, label: string) => {
     const ok = await copyToClipboard(value);
     if (ok) {
@@ -598,9 +579,10 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
 
   const handleTogglePlatform = (platform: ScriptTargetPlatform) => {
     setTargetPlatforms((prev) => {
-      if (prev.includes(platform)) {
-        if (prev.length === 1) {
-          showToast("info", "Mantén al menos 1 plataforma objetivo activa.");
+      const exists = prev.includes(platform);
+      if (exists) {
+        if (prev.length <= 1) {
+          showToast("error", "Debes mantener al menos una red social activa.");
           return prev;
         }
         return prev.filter((p) => p !== platform);
@@ -609,144 +591,82 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     });
   };
 
-  const selectSubTab = (tabId: ScriptSubTabId, idx?: number) => {
-    setActiveSubTab(tabId);
-    const resolvedIdx =
-      typeof idx === "number"
-        ? idx
-        : SCRIPT_SUBTABS.findIndex((t) => t.id === tabId);
-    if (resolvedIdx >= 0) {
-      subTabRefs.current[resolvedIdx]?.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-      });
-    }
-  };
+  const handleCleanSlopInBlocks = () => {
+    let replacedCount = 0;
+    const cleaned = blocks.map((blk) => {
+      let voice = blk.audio_voiceover;
+      for (const pat of AI_SLOP_PATTERNS) {
+        if (pat.regex.test(voice)) {
+          replacedCount++;
+          voice = voice.replace(pat.regex, "").replace(/\s{2,}/g, " ").trim();
+        }
+        pat.regex.lastIndex = 0;
+      }
+      return { ...blk, audio_voiceover: voice };
+    });
 
-  const handleSubTabKeyDown = (
-    e: KeyboardEvent<HTMLButtonElement>,
-    index: number
-  ) => {
-    let nextIdx = index;
-    if (e.key === "ArrowRight") {
-      nextIdx = (index + 1) % SCRIPT_SUBTABS.length;
-    } else if (e.key === "ArrowLeft") {
-      nextIdx = (index - 1 + SCRIPT_SUBTABS.length) % SCRIPT_SUBTABS.length;
-    } else if (e.key === "Home") {
-      nextIdx = 0;
-    } else if (e.key === "End") {
-      nextIdx = SCRIPT_SUBTABS.length - 1;
-    } else {
+    if (replacedCount === 0) {
+      showToast("info", "No se encontraron muletillas IA en los bloques de locución.");
       return;
     }
-    e.preventDefault();
-    const target = SCRIPT_SUBTABS[nextIdx];
-    selectSubTab(target.id, nextIdx);
-    subTabRefs.current[nextIdx]?.focus();
+
+    setBlocks(cleaned);
+    showToast("success", `Se eliminaron ${replacedCount} muletilla(s) IA de la locución.`);
+    regeneratePlatformContents(cleaned);
   };
 
+  // Block handlers
   const handleUpdateBlock = (
-    idx: number,
+    index: number,
     field: keyof TwoColumnScriptBlock,
-    value: string
+    value: string | number
   ) => {
-    setBlocks((prev) =>
-      prev.map((blk, i) => (i === idx ? { ...blk, [field]: value } : blk))
-    );
+    setBlocks((prev) => {
+      const clone = [...prev];
+      const target = { ...clone[index] };
+      if (
+        field === "pattern_interrupt_sec" ||
+        field === "word_count" ||
+        field === "estimated_seconds"
+      ) {
+        (target[field] as number) = Number(value) || 0;
+      } else if (field === "pacing_warning") {
+        (target[field] as boolean) = Boolean(value);
+      } else {
+        (target[field] as string) = String(value);
+      }
+      clone[index] = target;
+      return clone;
+    });
   };
 
   const handleAddBlock = () => {
     setBlocks((prev) => [
       ...prev,
       {
-        block_id: `blk-${prev.length + 1}`,
-        section_label: `Bloque ${prev.length + 1}`,
-        timecode: "00:45 - 00:55",
-        visual_direction: "Plano medio + B-roll de refuerzo.",
-        b_roll_cue: "Captura de dashboard / métrica",
+        block_id: `blk-${Date.now()}-${prev.length + 1}`,
+        section_label: `Paso ${prev.length + 1}`,
+        timecode: "00:00",
+        visual_direction: "Zoom sutil 105%",
+        b_roll_cue: "",
         on_screen_text: "PUNTO CLAVE",
-        audio_voiceover:
-          "Añade aquí la locución estructurada para este segmento audiovisual.",
-        sfx_cue: "Click sutil",
-        music_cue: "Continuar bed (-22 dB)",
-        pattern_interrupt_sec: spec.cutInterval[0],
+        audio_voiceover: "Explica aquí tu siguiente punto con claridad y sin rodeos.",
+        sfx_cue: "",
+        music_cue: "",
+        pattern_interrupt_sec: 3,
         word_count: 10,
-        estimated_seconds: 4.3,
+        estimated_seconds: 5,
         pacing_warning: false,
       },
     ]);
   };
 
-  const handleCleanSlopInBlocks = () => {
-    setBlocks((prev) =>
-      prev.map((blk) => {
-        let cleaned = blk.audio_voiceover;
-        for (const pat of AI_SLOP_PATTERNS) {
-          cleaned = cleaned.replace(pat.regex, "").replace(/\s{2,}/g, " ").trim();
-          pat.regex.lastIndex = 0;
-        }
-        if (cleaned && cleaned !== blk.audio_voiceover) {
-          cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-        }
-        return { ...blk, audio_voiceover: cleaned || blk.audio_voiceover };
-      })
-    );
-    showToast("success", "Muletillas genéricas limpiadas en los bloques del guión.");
-  };
-
-  const handleApplyHookToBlock1 = (hookText: string) => {
-    if (blocks.length === 0) return;
-    setBlocks((prev) =>
-      prev.map((blk, i) =>
-        i === 0
-          ? {
-              ...blk,
-              audio_voiceover: hookText,
-              on_screen_text: clampText(hookText.toUpperCase(), 32),
-            }
-          : blk
-      )
-    );
-    showToast("success", "Gancho ganador aplicado al Bloque 1 del guión.");
-  };
-
-  const handleRegenerateScript = async () => {
-    if (!selectedProjectId) return;
-    setRegenerating(true);
-    try {
-      if (backendOnline) {
-        const updated = await apiClient.generateScript({
-          project_id: selectedProjectId,
-          duration_preset: preset,
-          conversion_goal: goal,
-          wpm_rate: wpm,
-        });
-        setBlocks(updated.two_column_blocks);
-        setSelectedHookIndex(updated.selected_hook_index ?? 0);
-        await onRefresh();
-        regenerateWrittenPosts(
-          updated.two_column_blocks,
-          updated.hook_variants?.[updated.selected_hook_index ?? 0]?.hook_text
-        );
-        showToast(
-          "success",
-          `Guión regenerado para ${spec.label} (${targetPlatforms.join(", ")}).`
-        );
-      } else {
-        regenerateWrittenPosts();
-        showToast(
-          "info",
-          `Parámetros aplicados localmente (${targetPlatforms.join(", ")} · ${spec.shortLabel}).`
-        );
-      }
-    } catch (err) {
-      showToast(
-        "error",
-        err instanceof Error ? err.message : "Error regenerando guión"
-      );
-    } finally {
-      setRegenerating(false);
+  const handleRemoveBlock = (index: number) => {
+    if (blocks.length <= 1) {
+      showToast("error", "El guión debe tener al menos un bloque.");
+      return;
     }
+    setBlocks((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSaveScript = async () => {
@@ -823,38 +743,128 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     }
   };
 
-  const handleAddSeoKeyword = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleaned = customKeywordInput.trim().toLowerCase();
-    if (!cleaned) return;
-    if (!seoKeywords.includes(cleaned)) {
-      setSeoKeywords((prev) => [...prev, cleaned]);
+  // Dynamic Subtabs List based on selected platforms
+  const subTabSpecs = useMemo<SubTabSpec[]>(() => {
+    const list: SubTabSpec[] = [
+      {
+        id: "master",
+        label: "📋 Guión Maestro (A/V)",
+        shortLabel: "Guión A/V",
+        icon: FileText,
+      },
+    ];
+
+    if (targetPlatforms.includes("YouTube")) {
+      list.push({
+        id: "youtube",
+        label: "🎬 YouTube",
+        shortLabel: "YouTube",
+        badge: "Shorts & 16:9",
+        icon: PlaySquare,
+      });
     }
-    setCustomKeywordInput("");
+
+    if (targetPlatforms.includes("Instagram")) {
+      list.push({
+        id: "instagram",
+        label: "📸 Instagram",
+        shortLabel: "Instagram",
+        badge: "Reels & Grid 1:1",
+        icon: Instagram,
+      });
+    }
+
+    if (targetPlatforms.includes("TikTok")) {
+      list.push({
+        id: "tiktok",
+        label: "🎵 TikTok",
+        shortLabel: "TikTok",
+        badge: "SEO & Loop",
+        icon: Zap,
+      });
+    }
+
+    if (targetPlatforms.includes("LinkedIn")) {
+      list.push({
+        id: "linkedin",
+        label: "💼 LinkedIn",
+        shortLabel: "LinkedIn",
+        badge: "Zero-Link & PDF",
+        icon: Briefcase,
+      });
+    }
+
+    if (targetPlatforms.includes("X")) {
+      list.push({
+        id: "x",
+        label: "🐦 X (Twitter)",
+        shortLabel: "X",
+        badge: "Hilo Viral",
+        icon: Twitter,
+      });
+    }
+
+    list.push({
+      id: "config",
+      label: "⚙️ Configuración & Redes",
+      shortLabel: "Configuración",
+      icon: Sliders,
+    });
+
+    return list;
+  }, [targetPlatforms]);
+
+  // Ensure activeSubTab is always valid
+  useEffect(() => {
+    const isValid = subTabSpecs.some((s) => s.id === activeSubTab);
+    if (!isValid) {
+      setActiveSubTab("master");
+    }
+  }, [subTabSpecs, activeSubTab]);
+
+  const selectSubTab = (id: ScriptSubTabId, idx: number) => {
+    setActiveSubTab(id);
+    subTabRefs.current[idx]?.focus();
+  };
+
+  const handleSubTabKeyDown = (
+    e: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number
+  ) => {
+    const count = subTabSpecs.length;
+    let targetIndex = currentIndex;
+    if (e.key === "ArrowRight") {
+      targetIndex = (currentIndex + 1) % count;
+    } else if (e.key === "ArrowLeft") {
+      targetIndex = (currentIndex - 1 + count) % count;
+    } else if (e.key === "Home") {
+      targetIndex = 0;
+    } else if (e.key === "End") {
+      targetIndex = count - 1;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    selectSubTab(subTabSpecs[targetIndex].id, targetIndex);
   };
 
   if (!selectedDetail?.project) {
     return (
-      <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-10 text-center text-slate-400">
+      <div className="bg-[#07090e] border border-slate-800 rounded-xl p-10 text-center text-slate-400">
         Selecciona un video en el Paso 1 para redactar su guión multiplataforma, posts y portadas.
       </div>
     );
   }
 
-  const activeSubTabIndex = SCRIPT_SUBTABS.findIndex((t) => t.id === activeSubTab);
-  const prevSubTab = activeSubTabIndex > 0 ? SCRIPT_SUBTABS[activeSubTabIndex - 1] : null;
-  const nextSubTab =
-    activeSubTabIndex < SCRIPT_SUBTABS.length - 1
-      ? SCRIPT_SUBTABS[activeSubTabIndex + 1]
-      : null;
-
-  const isWrittenChannelSelected =
-    targetPlatforms.includes("LinkedIn") || targetPlatforms.includes("X");
+  const targetSeconds = Math.round((spec.durationRange[0] + spec.durationRange[1]) / 2);
+  const timingDelta = timing.estimatedDurationSec - targetSeconds;
+  const isOverLimit = timingDelta > 5;
+  const isUnderLimit = timingDelta < -8;
 
   return (
     <div className="space-y-4">
-      {/* Pro Dark NLE Studio Header + Subtab Navigation */}
-      <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl overflow-hidden shadow-xl shadow-black/30">
+      {/* Studio Header + Dynamic Navigation Bar */}
+      <div className="bg-[#07090e] border border-slate-800/90 rounded-xl overflow-hidden shadow-xl shadow-black/40">
         <div className="p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -867,11 +877,12 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
               <h2 className="text-base font-bold text-white tracking-tight">
                 Estudio de Guiones Multiplataforma
               </h2>
-              <div className="flex flex-wrap items-center gap-1 ml-1">
+              {/* Quick platform badges */}
+              <div className="flex flex-wrap items-center gap-1.5 ml-2">
                 {targetPlatforms.map((plat) => (
                   <span
                     key={plat}
-                    className="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-[10px] font-mono font-semibold text-cyan-300"
+                    className="px-2 py-0.5 rounded-full bg-[#020306] border border-slate-700 text-[10px] font-mono font-semibold text-cyan-300"
                   >
                     {plat}
                   </span>
@@ -887,7 +898,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
               <span className="font-mono text-slate-300">{spec.shortLabel}</span>{" "}
               <span className="text-slate-500">·</span>{" "}
               <span className="text-emerald-300 font-mono">
-                Trigger: {leadMagnetKeyword}
+                Trigger DM: {leadMagnetKeyword}
               </span>
             </p>
           </div>
@@ -936,13 +947,13 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
           </div>
         </div>
 
-        {/* 4 Clean Subtabs (tablist pattern: identical sizing/border regardless of selection + ::after bottom indicator) */}
+        {/* Dynamic Subtabs Navigation (Visores Especializados) */}
         <div
           role="tablist"
-          aria-label="Subpasos del Estudio de Guiones"
-          className="bg-slate-950/80 px-2 sm:px-4 border-b border-slate-800/80 gap-1"
+          aria-label="Visores por Red Social y Guión Maestro"
+          className="bg-[#020306] px-2 sm:px-4 border-b border-slate-800/80 gap-1 overflow-x-auto flex"
         >
-          {SCRIPT_SUBTABS.map((tab, idx) => {
+          {subTabSpecs.map((tab, idx) => {
             const isSelected = activeSubTab === tab.id;
             return (
               <button
@@ -957,17 +968,16 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                 tabIndex={isSelected ? 0 : -1}
                 onClick={() => selectSubTab(tab.id, idx)}
                 onKeyDown={(e) => handleSubTabKeyDown(e, idx)}
-                className={`inline-flex items-center gap-2 px-3.5 py-3 text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-[-2px] ${
+                className={`inline-flex items-center gap-2 px-3.5 py-3 text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors border-b-2 focus-visible:outline-2 focus-visible:outline-cyan-400 ${
                   isSelected
-                    ? "text-cyan-300"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "text-cyan-300 border-cyan-400 bg-cyan-950/20"
+                    : "text-slate-400 border-transparent hover:text-slate-200 hover:border-slate-800"
                 }`}
               >
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.shortLabel}</span>
-                {tab.id === "written-posts" && isWrittenChannelSelected && (
-                  <span className="rounded-full bg-sky-500/20 border border-sky-500/40 px-1.5 py-0.5 text-[10px] font-mono text-sky-300">
-                    Activo
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span className="rounded-full bg-slate-800 border border-slate-700 px-1.5 py-0.5 text-[9px] font-mono text-slate-300">
+                    {tab.badge}
                   </span>
                 )}
               </button>
@@ -980,7 +990,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       {showContextDrawer && creatorProfile && (
         <form
           onSubmit={handleSaveContextEngine}
-          className="bg-[#0b0e14] border border-violet-500/40 rounded-xl p-4 space-y-3"
+          className="bg-[#07090e] border border-violet-500/40 rounded-xl p-4 space-y-3"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-violet-200 flex items-center gap-2">
@@ -999,7 +1009,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                 type="text"
                 value={nicheEdit}
                 onChange={(e) => setNicheEdit(e.target.value)}
-                className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
+                className="mt-1 w-full rounded-lg bg-[#020306] border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
               />
             </label>
             <label className="text-xs text-slate-300">
@@ -1008,7 +1018,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
                 type="text"
                 value={icpEdit}
                 onChange={(e) => setIcpEdit(e.target.value)}
-                className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
+                className="mt-1 w-full rounded-lg bg-[#020306] border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-400"
               />
             </label>
           </div>
@@ -1024,7 +1034,232 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       )}
 
       {/* =================================================================== */}
-      {/* SUBTAB 1: 1. Formato y Redes                                        */}
+      {/* 1. VISOR: GUIÓN MAESTRO (A/V)                                       */}
+      {/* =================================================================== */}
+      <div
+        role="tabpanel"
+        id="script-panel-master"
+        aria-labelledby="script-subtab-master"
+        hidden={activeSubTab !== "master"}
+      >
+        {activeSubTab === "master" && (
+          <MasterScriptVisor
+            blocks={blocks}
+            hookVariants={hookVariants}
+            selectedHookIndex={selectedHookIndex}
+            preset={preset}
+            wpm={wpm}
+            wordCount={timing.wordCount}
+            oralTimingSeconds={timing.estimatedDurationSec}
+            spec={spec}
+            timingDelta={timingDelta}
+            isOverLimit={isOverLimit}
+            isUnderLimit={isUnderLimit}
+            qualityAudit={qualityAudit}
+            antiSlopEnabled={antiSlopEnabled}
+            onSelectHook={(idx) => {
+              setSelectedHookIndex(idx);
+              regeneratePlatformContents(blocks, hookVariants[idx]?.hook_text);
+            }}
+            onUpdateBlock={handleUpdateBlock}
+            onAddBlock={handleAddBlock}
+            onRemoveBlock={handleRemoveBlock}
+            onOpenTeleprompter={() => setShowTeleprompter(true)}
+            onOpenExporter={() => setShowExporter(true)}
+            onCleanSlop={handleCleanSlopInBlocks}
+            onCopy={handleCopy}
+            copiedKey={copiedKey}
+          />
+        )}
+      </div>
+
+      {/* =================================================================== */}
+      {/* 2. VISOR: YOUTUBE                                                   */}
+      {/* =================================================================== */}
+      {targetPlatforms.includes("YouTube") && (
+        <div
+          role="tabpanel"
+          id="script-panel-youtube"
+          aria-labelledby="script-subtab-youtube"
+          hidden={activeSubTab !== "youtube"}
+        >
+          {activeSubTab === "youtube" && (
+            <YouTubePlatformVisor
+              assetCode={selectedDetail.project.asset_code}
+              projectTitle={selectedDetail.project.working_title}
+              abVariants={selectedDetail.project.ab_variants ?? []}
+              blocks={blocks}
+              activeHook={activeHook}
+              videoTitle={ytSeoTitle}
+              videoDescription={ytDescription}
+              seoKeywords={seoKeywords}
+              leadMagnetKeyword={leadMagnetKeyword}
+              deliveryUrl={activeLeadMagnetDeliveryUrl}
+              onUpdateTitle={setYtSeoTitle}
+              onUpdateDescription={setYtDescription}
+              onOpenTeleprompter={() => setShowTeleprompter(true)}
+              onCopy={handleCopy}
+              copiedKey={copiedKey}
+              onSyncFromMaster={() => {
+                regeneratePlatformContents();
+                showToast("success", "Visor de YouTube sincronizado desde el Guión Maestro.");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 3. VISOR: INSTAGRAM                                                 */}
+      {/* =================================================================== */}
+      {targetPlatforms.includes("Instagram") && (
+        <div
+          role="tabpanel"
+          id="script-panel-instagram"
+          aria-labelledby="script-subtab-instagram"
+          hidden={activeSubTab !== "instagram"}
+        >
+          {activeSubTab === "instagram" && (
+            <InstagramPlatformVisor
+              assetCode={selectedDetail.project.asset_code}
+              projectTitle={selectedDetail.project.working_title}
+              abVariants={selectedDetail.project.ab_variants ?? []}
+              blocks={blocks}
+              activeHook={activeHook}
+              reelCaption={igReelCaption}
+              manychatKeyword={leadMagnetKeyword}
+              hashtags={seoKeywords}
+              onUpdateCaption={setIgReelCaption}
+              onOpenTeleprompter={() => setShowTeleprompter(true)}
+              onCopy={handleCopy}
+              copiedKey={copiedKey}
+              onSyncFromMaster={() => {
+                regeneratePlatformContents();
+                showToast("success", "Visor de Instagram sincronizado desde el Guión Maestro.");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 4. VISOR: TIKTOK                                                    */}
+      {/* =================================================================== */}
+      {targetPlatforms.includes("TikTok") && (
+        <div
+          role="tabpanel"
+          id="script-panel-tiktok"
+          aria-labelledby="script-subtab-tiktok"
+          hidden={activeSubTab !== "tiktok"}
+        >
+          {activeSubTab === "tiktok" && (
+            <TikTokPlatformVisor
+              assetCode={selectedDetail.project.asset_code}
+              projectTitle={selectedDetail.project.working_title}
+              abVariants={selectedDetail.project.ab_variants ?? []}
+              blocks={blocks}
+              activeHook={activeHook}
+              tiktokCaption={tiktokCaption}
+              searchHook={tiktokSearchHook}
+              hashtags={seoKeywords}
+              onUpdateCaption={setTiktokCaption}
+              onUpdateSearchHook={setTiktokSearchHook}
+              onOpenTeleprompter={() => setShowTeleprompter(true)}
+              onCopy={handleCopy}
+              copiedKey={copiedKey}
+              onSyncFromMaster={() => {
+                regeneratePlatformContents();
+                showToast("success", "Visor de TikTok sincronizado desde el Guión Maestro.");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 5. VISOR: LINKEDIN                                                  */}
+      {/* =================================================================== */}
+      {targetPlatforms.includes("LinkedIn") && (
+        <div
+          role="tabpanel"
+          id="script-panel-linkedin"
+          aria-labelledby="script-subtab-linkedin"
+          hidden={activeSubTab !== "linkedin"}
+        >
+          {activeSubTab === "linkedin" && (
+            <LinkedInPlatformVisor
+              assetCode={selectedDetail.project.asset_code}
+              projectTitle={selectedDetail.project.working_title}
+              abVariants={selectedDetail.project.ab_variants ?? []}
+              blocks={blocks}
+              activeHook={activeHook}
+              linkedInHook={linkedInHook}
+              linkedInBody={linkedInBody}
+              linkedInFirstComment={linkedInFirstComment}
+              onUpdateHook={setLinkedInHook}
+              onUpdateBody={setLinkedInBody}
+              onUpdateFirstComment={setLinkedInFirstComment}
+              onCopy={handleCopy}
+              copiedKey={copiedKey}
+              onSyncFromMaster={() => {
+                regeneratePlatformContents();
+                showToast("success", "Visor de LinkedIn sincronizado desde el Guión Maestro.");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 6. VISOR: X / TWITTER                                               */}
+      {/* =================================================================== */}
+      {targetPlatforms.includes("X") && (
+        <div
+          role="tabpanel"
+          id="script-panel-x"
+          aria-labelledby="script-subtab-x"
+          hidden={activeSubTab !== "x"}
+        >
+          {activeSubTab === "x" && (
+            <XPlatformVisor
+              assetCode={selectedDetail.project.asset_code}
+              projectTitle={selectedDetail.project.working_title}
+              abVariants={selectedDetail.project.ab_variants ?? []}
+              blocks={blocks}
+              activeHook={activeHook}
+              singleTweet={xSingleTweet}
+              threadTweets={xThreadTweets}
+              leadMagnetKeyword={leadMagnetKeyword}
+              onUpdateSingleTweet={setXSingleTweet}
+              onUpdateThreadTweet={(index, val) => {
+                setXThreadTweets((prev) => {
+                  const clone = [...prev];
+                  clone[index] = val;
+                  return clone;
+                });
+              }}
+              onAddThreadTweet={() => {
+                setXThreadTweets((prev) => [
+                  ...prev,
+                  `${prev.length + 1}/ Añade tu siguiente punto clave aquí.`,
+                ]);
+              }}
+              onRemoveThreadTweet={(index) => {
+                setXThreadTweets((prev) => prev.filter((_, i) => i !== index));
+              }}
+              onCopy={handleCopy}
+              copiedKey={copiedKey}
+              onSyncFromMaster={() => {
+                regeneratePlatformContents();
+                showToast("success", "Visor de X sincronizado desde el Guión Maestro.");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* 7. VISOR: CONFIGURACIÓN & REDES                                     */}
       {/* =================================================================== */}
       <div
         role="tabpanel"
@@ -1032,1386 +1267,53 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
         aria-labelledby="script-subtab-config"
         hidden={activeSubTab !== "config"}
       >
-        <div className="space-y-5">
-          {/* Multi-Platform Toggle Pills */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-cyan-400" />
-                  1. Selector Múltiple de Plataformas Objetivo
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Marca una o varias redes para adaptar duración, ganchos, copies de LinkedIn/X y SEO.
-                </p>
-              </div>
-              <span className="text-[11px] font-mono text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 rounded-full px-2.5 py-1">
-                {targetPlatforms.length} / {PLATFORM_OPTIONS.length} activas
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-              {PLATFORM_OPTIONS.map((plat) => {
-                const active = targetPlatforms.includes(plat.id);
-                return (
-                  <button
-                    key={plat.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => handleTogglePlatform(plat.id)}
-                    className={`rounded-xl border px-3 py-2.5 text-left transition ${
-                      active
-                        ? `${plat.accent} shadow-sm`
-                        : "border-slate-800 bg-slate-950/70 text-slate-400 hover:border-slate-700 hover:text-slate-200"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold">{plat.label}</span>
-                      <span
-                        className={`h-2 w-2 rounded-full ${
-                          active ? "bg-emerald-400" : "bg-slate-700"
-                        }`}
-                      />
-                    </div>
-                    <p className="text-[10px] opacity-80 mt-1 font-mono truncate">
-                      {plat.hint}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Duration, Conversion Goal + ManyChat Trigger Keyword, WPM */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-5">
-            <div className="grid gap-5 lg:grid-cols-12">
-              {/* Duration Selector */}
-              <div className="lg:col-span-5">
-                <span className="block text-xs font-bold text-slate-200 mb-2">
-                  2. Duración del Formato
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  {(Object.keys(DURATION_PRESET_META) as DurationPreset[]).map(
-                    (key) => {
-                      const active = preset === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          aria-pressed={active}
-                          onClick={() => setPreset(key)}
-                          className={`px-3 py-2.5 rounded-lg border text-left transition ${
-                            active
-                              ? "bg-cyan-500/15 border-cyan-400 text-cyan-200"
-                              : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600"
-                          }`}
-                        >
-                          <div className="text-xs font-bold">
-                            {DURATION_PRESET_META[key].shortLabel}
-                          </div>
-                          <div className="text-[10px] font-mono opacity-80 mt-0.5">
-                            {DURATION_PRESET_META[key].wordRange[0]}–
-                            {DURATION_PRESET_META[key].wordRange[1]} pal. · corte{" "}
-                            {DURATION_PRESET_META[key].cutInterval[0]}s
-                          </div>
-                        </button>
-                      );
-                    }
-                  )}
-                </div>
-              </div>
-
-              {/* Conversion Goal + Lead Magnet Trigger Keyword */}
-              <div className="lg:col-span-4 space-y-3">
-                <label className="block text-xs font-bold text-slate-200">
-                  3. Objetivo de Conversión
-                  <select
-                    value={goal}
-                    onChange={(e) => setGoal(e.target.value as ConversionGoal)}
-                    className="mt-1.5 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-white font-sans focus:outline-none focus:border-cyan-400"
-                  >
-                    {Object.entries(CONVERSION_GOAL_META).map(([k, m]) => (
-                      <option key={k} value={k}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="rounded-lg border border-slate-800 bg-slate-950/80 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label
-                      htmlFor="script-lead-magnet-select"
-                      className="text-[11px] font-bold text-emerald-300 inline-flex items-center gap-1.5"
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      Palabra Clave Lead Magnet (Paso 0)
-                    </label>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {manychatTriggers.length} reglas
-                    </span>
-                  </div>
-
-                  {manychatTriggers.length > 0 ? (
-                    <select
-                      id="script-lead-magnet-select"
-                      value={leadMagnetKeyword}
-                      onChange={(e) => setLeadMagnetKeyword(e.target.value)}
-                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-400"
-                    >
-                      {!manychatTriggers.some(
-                        (rule) => rule.keyword === leadMagnetKeyword
-                      ) &&
-                        leadMagnetKeyword && (
-                          <option value={leadMagnetKeyword}>
-                            {leadMagnetKeyword} — Personalizada
-                          </option>
-                        )}
-                      {manychatTriggers.map((rule) => {
-                        const linkedLm = leadMagnets.find(
-                          (lm) => lm.id === rule.lead_magnet_id
-                        );
-                        return (
-                          <option key={rule.id} value={rule.keyword}>
-                            {rule.keyword} ({rule.platform})
-                            {linkedLm ? ` — ${linkedLm.title}` : ""}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  ) : (
-                    <input
-                      id="script-lead-magnet-select"
-                      type="text"
-                      value={leadMagnetKeyword}
-                      onChange={(e) =>
-                        setLeadMagnetKeyword(e.target.value.toUpperCase())
-                      }
-                      placeholder="Ej. BLUEPRINT"
-                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 text-xs text-emerald-300 font-mono uppercase focus:outline-none focus:border-emerald-400"
-                    />
-                  )}
-
-                  <p className="text-[11px] text-slate-400 leading-snug">
-                    CTA:{" "}
-                    <span className="text-slate-200">
-                      &ldquo;Comenta {leadMagnetKeyword} y te envío el recurso por privado.&rdquo;
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              {/* WPM Slider + Regenerate Action */}
-              <div className="lg:col-span-3 flex flex-col justify-between gap-3">
-                <label className="block text-xs font-bold text-slate-200">
-                  <div className="flex justify-between items-center">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Gauge className="w-3.5 h-3.5 text-cyan-400" />
-                      Velocidad Oral (WPM)
-                    </span>
-                    <span className="font-mono text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 rounded px-1.5 py-0.5">
-                      {wpm} pal/min
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={130}
-                    max={150}
-                    step={2}
-                    value={wpm}
-                    onChange={(e) => setWpm(Number(e.target.value))}
-                    className="mt-3 w-full"
-                  />
-                  <span className="text-[11px] text-slate-400 block mt-1.5 font-normal">
-                    140 WPM es el ritmo óptimo para retención sin fatiga auditiva.
-                  </span>
-                </label>
-
-                <button
-                  type="button"
-                  onClick={handleRegenerateScript}
-                  disabled={regenerating}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-cyan-500/50 bg-cyan-500/15 hover:bg-cyan-500/25 text-xs font-bold text-cyan-200 transition disabled:opacity-60"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${regenerating ? "animate-spin" : ""}`}
-                  />
-                  {regenerating
-                    ? "Adaptando Guión..."
-                    : "Adaptar Guión a Configuración"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Quality Controls: Anti-Slop + HookLab */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Controles de Calidad Editorial (Anti-Slop + HookLab)
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Reglas activas aplicadas al guión audiovisual y a las piezas escritas de LinkedIn / X.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {antiSlopEnabled && !qualityAudit.slopClean && (
-                  <button
-                    type="button"
-                    onClick={handleCleanSlopInBlocks}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/50 hover:bg-amber-500/30 text-xs font-bold text-amber-200 transition"
-                  >
-                    <Wand2 className="w-3.5 h-3.5" />
-                    Limpiar {qualityAudit.slopMatches.length} muletilla(s)
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-3">
-              {/* Switch 1: Anti-Slop */}
-              <label className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/80 p-3.5 cursor-pointer hover:border-slate-700 transition">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>Filtro Anti-Slop IA</span>
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        antiSlopEnabled
-                          ? qualityAudit.slopClean
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-amber-500/15 text-amber-300"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {antiSlopEnabled
-                        ? qualityAudit.slopClean
-                          ? "PASS"
-                          : `${qualityAudit.slopMatches.length} ALERTA`
-                        : "OFF"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Evita muletillas genéricas (&ldquo;en el mundo actual&rdquo;, &ldquo;descubre el secreto&rdquo;, &ldquo;siguiente nivel&rdquo;).
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-checked={antiSlopEnabled}
-                  {...({ switch: "" } as Record<string, string>)}
-                  checked={antiSlopEnabled}
-                  onChange={(e) => setAntiSlopEnabled(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-400 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2"
-                />
-              </label>
-
-              {/* Switch 2: Contrarian Hook */}
-              <label className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/80 p-3.5 cursor-pointer hover:border-slate-700 transition">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>Gancho Contraintuitivo</span>
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        contrarianHookEnabled
-                          ? "bg-violet-500/20 text-violet-300"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {contrarianHookEnabled ? "HOOKLAB ON" : "OFF"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Prioriza ruptura de patrón en 0–3s y tesis contraria al consenso del nicho.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-checked={contrarianHookEnabled}
-                  {...({ switch: "" } as Record<string, string>)}
-                  checked={contrarianHookEnabled}
-                  onChange={(e) => setContrarianHookEnabled(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-400 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2"
-                />
-              </label>
-
-              {/* Switch 3: Verifiable Data */}
-              <label className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/80 p-3.5 cursor-pointer hover:border-slate-700 transition">
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>Exigir Datos Verificables</span>
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        requireVerifiableData
-                          ? qualityAudit.evidenceOk
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : "bg-amber-500/15 text-amber-300"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {requireVerifiableData
-                        ? `${qualityAudit.evidenceCount} CIFRAS`
-                        : "OFF"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Verifica métricas, porcentajes, tiempos o benchmarks reales dentro de la locución.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-checked={requireVerifiableData}
-                  {...({ switch: "" } as Record<string, string>)}
-                  checked={requireVerifiableData}
-                  onChange={(e) => setRequireVerifiableData(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-400 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-cyan-400 focus-visible:outline-offset-2"
-                />
-              </label>
-            </div>
-
-            {antiSlopEnabled && qualityAudit.slopMatches.length > 0 && (
-              <div
-                role="status"
-                className="rounded-lg border border-amber-500/40 bg-amber-950/20 px-3.5 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
-                  Muletillas IA detectadas en guión:{" "}
-                  <strong className="font-mono">
-                    {qualityAudit.slopMatches.join(", ")}
-                  </strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => selectSubTab("av-script")}
-                  className="text-amber-300 underline hover:text-white font-semibold"
-                >
-                  Revisar en Guión 2 Columnas →
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* =================================================================== */}
-      {/* SUBTAB 2: 2. Guión 2 Columnas                                       */}
-      {/* =================================================================== */}
-      <div
-        role="tabpanel"
-        id="script-panel-av-script"
-        aria-labelledby="script-subtab-av-script"
-        hidden={activeSubTab !== "av-script"}
-      >
-        <div className="space-y-4">
-          {/* Compact NLE Telemetry Bar */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-3.5 sm:p-4 space-y-3">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center">
-              <div className="rounded-lg bg-slate-950/90 border border-slate-800 px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400">
-                  Palabras Totales
-                </span>
-                <div className="text-sm font-bold text-white font-mono mt-0.5">
-                  {timing.wordCount}{" "}
-                  <span className="text-[11px] font-normal text-slate-400">
-                    / meta {spec.wordRange[0]}–{spec.wordRange[1]}
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-slate-950/90 border border-slate-800 px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400">
-                  Duración ({wpm} WPM)
-                </span>
-                <div className="text-sm font-bold text-cyan-300 font-mono inline-flex items-center gap-1.5 mt-0.5">
-                  <Clock className="w-3.5 h-3.5" />
-                  {timing.estimatedDurationSec}s{" "}
-                  <span className="text-[11px] font-normal text-slate-400">
-                    / {spec.durationRange[0]}–{spec.durationRange[1]}s
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-slate-950/90 border border-slate-800 px-3 py-2">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400">
-                  Ritmo de Corte
-                </span>
-                <div className="text-sm font-bold text-slate-100 font-mono mt-0.5">
-                  Cada {spec.cutInterval[0]}–{spec.cutInterval[1]}s
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-slate-950/90 border border-slate-800 px-3 py-2">
-                <div className="flex justify-between text-[11px] mb-1.5">
-                  <span className="text-slate-400">Presupuesto Oral</span>
-                  <span
-                    className={
-                      timing.withinBudget
-                        ? "text-emerald-400 font-bold"
-                        : "text-amber-400 font-bold"
-                    }
-                  >
-                    {timing.withinBudget ? "Longitud Óptima" : "Ajustar longitud"}
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className={`h-full transition-all ${
-                      timing.withinBudget ? "bg-emerald-400" : "bg-amber-400"
-                    }`}
-                    style={{ width: `${progressPct}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Action Toolbar inside AV Script */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3
-                  id={captionId}
-                  className="text-xs sm:text-sm font-bold text-slate-200 flex items-center gap-2"
-                >
-                  <FileText className="w-4 h-4 text-cyan-400" />
-                  Guión Audiovisual a 2 Columnas (Pantalla vs. Voz)
-                </h3>
-                {antiSlopEnabled && (
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
-                      qualityAudit.slopClean
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                        : "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                    }`}
-                  >
-                    {qualityAudit.slopClean
-                      ? "Anti-Slop PASS"
-                      : `${qualityAudit.slopMatches.length} muletillas`}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowTeleprompter(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/20 border border-violet-400/50 hover:bg-violet-500/30 text-xs font-semibold text-violet-200 transition"
-                >
-                  <Tv className="w-3.5 h-3.5" />
-                  Teleprompter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowExporter(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-xs font-semibold text-slate-200 transition"
-                >
-                  <Download className="w-3.5 h-3.5 text-cyan-400" />
-                  Exportar (3 Formatos)
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddBlock}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Añadir Escena
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveScript}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition disabled:opacity-60"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  {saving ? "Guardando..." : "Guardar"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Two-Column AV Script Table (responsive-table pattern from globals.css) */}
-          <div
-            tabIndex={0}
-            role="region"
-            aria-labelledby={captionId}
-            className="table-wrapper bg-[#0b0e14]"
-          >
-            <table>
-              <caption className="sr-only">
-                Editor de Guión Audiovisual a Dos Columnas con cálculo de tiempo
-              </caption>
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                  <th className="p-3 w-44 border-b border-slate-800">
-                    Escena &amp; Tiempo
-                  </th>
-                  <th className="p-3 border-b border-slate-800">
-                    Qué se ve (Cámara, Pantalla y Textos)
-                  </th>
-                  <th className="p-3 border-b border-slate-800">
-                    Qué se dice (Locución de voz, música y efectos)
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {timing.blocks.map((blk, idx) => (
-                  <tr
-                    key={blk.block_id}
-                    className={
-                      blk.pacing_warning
-                        ? "bg-amber-950/20"
-                        : "hover:bg-slate-900/40"
-                    }
-                  >
-                    <th
-                      scope="row"
-                      className="p-3 align-top border-r border-slate-800/80 text-left"
-                    >
-                      <input
-                        type="text"
-                        value={blk.section_label}
-                        onChange={(e) =>
-                          handleUpdateBlock(idx, "section_label", e.target.value)
-                        }
-                        aria-label={`Nombre de la escena ${idx + 1}`}
-                        className="w-full bg-transparent text-xs font-bold text-white focus:outline-none border-b border-transparent focus:border-cyan-400 pb-0.5"
-                      />
-                      <input
-                        type="text"
-                        value={blk.timecode}
-                        onChange={(e) =>
-                          handleUpdateBlock(idx, "timecode", e.target.value)
-                        }
-                        aria-label={`Tiempo escena ${idx + 1}`}
-                        className="mt-1 w-full bg-transparent text-[11px] font-mono text-cyan-300 focus:outline-none"
-                      />
-                      <div className="mt-2 flex items-center justify-between text-[11px] font-mono">
-                        <span className="text-slate-400">
-                          {blk.word_count} pal. · {blk.estimated_seconds}s
-                        </span>
-                        {blk.pacing_warning ? (
-                          <span
-                            title="Demasiado texto para una sola escena sin cambiar de plano"
-                            className="inline-flex items-center gap-0.5 text-amber-400 font-semibold"
-                          >
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            Largo
-                          </span>
-                        ) : (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                        )}
-                      </div>
-                      {blocks.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setBlocks((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="mt-2 text-[11px] text-slate-500 hover:text-rose-400 inline-flex items-center gap-1"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          Eliminar
-                        </button>
-                      )}
-                    </th>
-
-                    <td data-label="Columna Visual" className="p-3 align-top space-y-2">
-                      <textarea
-                        rows={2}
-                        value={blk.visual_direction}
-                        onChange={(e) =>
-                          handleUpdateBlock(idx, "visual_direction", e.target.value)
-                        }
-                        placeholder="Ej. Mirando a cámara en plano medio."
-                        aria-label={`Dirección visual escena ${idx + 1}`}
-                        className="w-full rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
-                      />
-                      <div className="grid sm:grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={blk.b_roll_cue}
-                          onChange={(e) =>
-                            handleUpdateBlock(idx, "b_roll_cue", e.target.value)
-                          }
-                          placeholder="Plano de apoyo / B-roll"
-                          aria-label={`Plano de apoyo escena ${idx + 1}`}
-                          className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-slate-300"
-                        />
-                        <input
-                          type="text"
-                          value={blk.on_screen_text}
-                          onChange={(e) =>
-                            handleUpdateBlock(idx, "on_screen_text", e.target.value)
-                          }
-                          placeholder="Texto en pantalla"
-                          aria-label={`Texto en pantalla escena ${idx + 1}`}
-                          className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] font-bold text-amber-300"
-                        />
-                      </div>
-                    </td>
-
-                    <td data-label="Columna Sonora" className="p-3 align-top space-y-2">
-                      <textarea
-                        rows={3}
-                        value={blk.audio_voiceover}
-                        onChange={(e) =>
-                          handleUpdateBlock(idx, "audio_voiceover", e.target.value)
-                        }
-                        placeholder="Locución exacta..."
-                        aria-label={`Locución escena ${idx + 1}`}
-                        className="w-full rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-white leading-relaxed focus:outline-none focus:border-cyan-400"
-                      />
-                      <div className="grid sm:grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={blk.sfx_cue}
-                          onChange={(e) =>
-                            handleUpdateBlock(idx, "sfx_cue", e.target.value)
-                          }
-                          placeholder="Efecto de sonido"
-                          aria-label={`Efecto de sonido escena ${idx + 1}`}
-                          className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-cyan-200"
-                        />
-                        <input
-                          type="text"
-                          value={blk.music_cue}
-                          onChange={(e) =>
-                            handleUpdateBlock(idx, "music_cue", e.target.value)
-                          }
-                          placeholder="Música de fondo"
-                          aria-label={`Música escena ${idx + 1}`}
-                          className="rounded bg-slate-900/80 border border-slate-800 px-2 py-1 text-[11px] text-violet-200"
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* =================================================================== */}
-      {/* SUBTAB 3: 3. LinkedIn, X / Twitter y SEO                            */}
-      {/* =================================================================== */}
-      <div
-        role="tabpanel"
-        id="script-panel-written-posts"
-        aria-labelledby="script-subtab-written-posts"
-        hidden={activeSubTab !== "written-posts"}
-      >
-        <div className="space-y-5">
-          {/* Context & Sync Bar */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-sky-400" />
-                  Adaptación Multiplataforma: LinkedIn, X / Twitter, OpenSEO &amp; HookLab
-                </h3>
-                {!isWrittenChannelSelected && (
-                  <span className="text-[11px] rounded-full bg-amber-500/15 border border-amber-500/40 px-2 py-0.5 text-amber-200">
-                    Tip: Activa LinkedIn o X si los publicarás esta semana
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400">
-                Extraído automáticamente de los bloques del guión, tu Gancho Activo y el trigger{" "}
-                <span className="font-mono text-emerald-300">{leadMagnetKeyword}</span>.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {!targetPlatforms.includes("LinkedIn") && (
-                <button
-                  type="button"
-                  onClick={() => handleTogglePlatform("LinkedIn")}
-                  className="px-2.5 py-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 transition"
-                >
-                  + Activar LinkedIn
-                </button>
-              )}
-              {!targetPlatforms.includes("X") && (
-                <button
-                  type="button"
-                  onClick={() => handleTogglePlatform("X")}
-                  className="px-2.5 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition"
-                >
-                  + Activar X
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  regenerateWrittenPosts();
-                  showToast("success", "Posts de LinkedIn, hilo de X y OpenSEO sincronizados desde el guión.");
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-400/50 hover:bg-cyan-500/25 text-xs font-bold text-cyan-200 transition"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Regenerar desde Guión
-              </button>
-            </div>
-          </div>
-
-          <div className="grid xl:grid-cols-2 gap-5">
-            {/* LinkedIn Post Generator */}
-            <section
-              aria-label="Generador de Publicación para LinkedIn"
-              className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                <div>
-                  <h4 className="text-sm font-bold text-sky-300">
-                    Publicación Ejecutiva LinkedIn (Zero-Link)
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Gancho &lt;135 chars antes de &ldquo;...ver más&rdquo; + cuerpo sin URLs (-60% penalty) + 1er comentario.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleCopy(
-                      "linkedin-post",
-                      `${linkedInHook}\n\n${linkedInBody}`,
-                      "Post de LinkedIn"
-                    )
-                  }
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold transition"
-                >
-                  {copiedKey === "linkedin-post" ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  Copiar Post LinkedIn
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <label
-                      htmlFor="linkedin-hook-input"
-                      className="font-semibold text-slate-200"
-                    >
-                      Gancho de Apertura (&lt;135 caracteres)
-                    </label>
-                    <span
-                      className={`font-mono text-[11px] font-bold ${
-                        linkedInHook.length <= 135
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }`}
-                    >
-                      {linkedInHook.length} / 135 chars
-                    </span>
-                  </div>
-                  <input
-                    id="linkedin-hook-input"
-                    type="text"
-                    value={linkedInHook}
-                    onChange={(e) => setLinkedInHook(e.target.value)}
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-sky-400"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <label
-                      htmlFor="linkedin-body-input"
-                      className="font-semibold text-slate-200"
-                    >
-                      Cuerpo Estructurado (Sin enlaces externos)
-                    </label>
-                    <span
-                      className={`font-mono text-[11px] font-semibold ${
-                        linkedInHasExternalUrl
-                          ? "text-rose-400"
-                          : "text-emerald-400"
-                      }`}
-                    >
-                      {linkedInHasExternalUrl
-                        ? "⚠ Enlace detectado (-60% alcance)"
-                        : "✓ Limpio (0 enlaces)"}
-                    </span>
-                  </div>
-                  <textarea
-                    id="linkedin-body-input"
-                    rows={8}
-                    value={linkedInBody}
-                    onChange={(e) => setLinkedInBody(e.target.value)}
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-sky-400"
-                  />
-                  {linkedInHasExternalUrl && (
-                    <div className="mt-1.5 flex items-center justify-between rounded-lg border border-rose-500/40 bg-rose-950/30 px-2.5 py-1.5 text-[11px] text-rose-200">
-                      <span>
-                        LinkedIn penaliza hasta un -60% los enlaces dentro del cuerpo principal.
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setLinkedInBody((b) => stripUrls(b))}
-                        className="underline font-bold text-rose-300 hover:text-white ml-2 shrink-0"
-                      >
-                        Quitar URLs
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <label
-                      htmlFor="linkedin-first-comment"
-                      className="font-semibold text-emerald-300"
-                    >
-                      Primer Comentario (Palabra Clave + URL Lead Magnet)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void handleCopy(
-                          "linkedin-comment",
-                          linkedInFirstComment,
-                          "1er Comentario LinkedIn"
-                        )
-                      }
-                      className="text-[11px] text-cyan-300 hover:text-white inline-flex items-center gap-1 font-semibold"
-                    >
-                      {copiedKey === "linkedin-comment" ? (
-                        <Check className="w-3 h-3" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      Copiar 1er Comentario
-                    </button>
-                  </div>
-                  <textarea
-                    id="linkedin-first-comment"
-                    rows={2}
-                    value={linkedInFirstComment}
-                    onChange={(e) => setLinkedInFirstComment(e.target.value)}
-                    className="w-full rounded-lg bg-slate-950 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-100 focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-              </div>
-            </section>
-
-            {/* X / Twitter Single Tweet + 4-5 Tweet Thread */}
-            <section
-              aria-label="Generador de Tweet e Hilo para X"
-              className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                <div>
-                  <h4 className="text-sm font-bold text-amber-300">
-                    X / Twitter: Tweet Impacto + Hilo (4–5 Tweets)
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Límite estricto de 280 caracteres por publicación con contador en vivo.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleCopy(
-                      "x-thread",
-                      xThreadTweets.join("\n\n---\n\n"),
-                      "Hilo completo de X"
-                    )
-                  }
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold transition"
-                >
-                  {copiedKey === "x-thread" ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  Copiar Hilo
-                </button>
-              </div>
-
-              {/* Single High-Impact Tweet */}
-              <div className="rounded-xl border border-slate-800 bg-slate-950/90 p-3 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <label
-                    htmlFor="x-single-tweet"
-                    className="font-bold text-slate-200"
-                  >
-                    Tweet Único de Alto Impacto (&le;280)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`font-mono text-[11px] font-bold ${
-                        xSingleTweet.length <= 280
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }`}
-                    >
-                      {xSingleTweet.length} / 280
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void handleCopy("x-single", xSingleTweet, "Tweet único")
-                      }
-                      className="text-[11px] text-cyan-300 hover:text-white inline-flex items-center gap-1 font-semibold"
-                    >
-                      {copiedKey === "x-single" ? (
-                        <Check className="w-3 h-3" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      Copiar
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  id="x-single-tweet"
-                  rows={3}
-                  value={xSingleTweet}
-                  onChange={(e) => setXSingleTweet(e.target.value)}
-                  className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-white leading-relaxed focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              {/* 4-5 Tweet Thread */}
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-200">
-                    Hilo Estructurado ({xThreadTweets.length} tweets)
-                  </span>
-                  {xThreadTweets.length < 6 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setXThreadTweets((prev) => [
-                          ...prev,
-                          `${prev.length + 1}/ Punto extra derivado del sistema: comenta "${leadMagnetKeyword}" para ver el flujo completo.`,
-                        ])
-                      }
-                      className="text-[11px] text-amber-300 hover:text-white inline-flex items-center gap-1 font-semibold"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Añadir Tweet
-                    </button>
-                  )}
-                </div>
-
-                <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                  {xThreadTweets.map((tweet, idx) => {
-                    const overLimit = tweet.length > 280;
-                    return (
-                      <div
-                        key={`tweet-${idx}`}
-                        className={`rounded-lg border p-2.5 space-y-1.5 ${
-                          overLimit
-                            ? "border-rose-500/60 bg-rose-950/20"
-                            : "border-slate-800 bg-slate-950/80"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-mono font-bold text-amber-300">
-                            Tweet {idx + 1} / {xThreadTweets.length}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`font-mono font-bold ${
-                                overLimit ? "text-rose-400" : "text-emerald-400"
-                              }`}
-                            >
-                              {tweet.length} / 280
-                            </span>
-                            {xThreadTweets.length > 3 && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setXThreadTweets((prev) =>
-                                    prev.filter((_, i) => i !== idx)
-                                  )
-                                }
-                                aria-label={`Eliminar tweet ${idx + 1}`}
-                                className="text-slate-500 hover:text-rose-400"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <textarea
-                          rows={2}
-                          value={tweet}
-                          onChange={(e) =>
-                            setXThreadTweets((prev) =>
-                              prev.map((t, i) => (i === idx ? e.target.value : t))
-                            )
-                          }
-                          aria-label={`Texto del tweet ${idx + 1}`}
-                          className="w-full rounded bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
-          </div>
-
-          {/* OpenSEO & HookLab Section */}
-          <div className="grid xl:grid-cols-12 gap-5">
-            {/* HookLab Selector */}
-            <section
-              aria-label="HookLab Selector de Gancho"
-              className="xl:col-span-6 bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-3"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-bold text-violet-300 flex items-center gap-2">
-                    <Zap className="w-4 h-4" />
-                    HookLab: Variantes de Gancho (Elige Ganador)
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    El gancho seleccionado alimenta el Teleprompter, Exportador y tus posts.
-                  </p>
-                </div>
-                {contrarianHookEnabled && (
-                  <span className="px-2 py-0.5 rounded bg-violet-500/20 border border-violet-500/40 text-[10px] font-mono text-violet-200">
-                    Prioridad Contrarian
-                  </span>
-                )}
-              </div>
-
-              <div className="space-y-2.5">
-                {hookVariants.map((hook, idx) => {
-                  const isWinner = selectedHookIndex === idx;
-                  return (
-                    <div
-                      key={`${hook.category}-${idx}`}
-                      className={`rounded-xl border p-3 transition ${
-                        isWinner
-                          ? "border-violet-400 bg-violet-500/10"
-                          : "border-slate-800 bg-slate-950/80 hover:border-slate-700"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono font-bold text-cyan-300">
-                            {hook.category}
-                          </span>
-                          <span className="text-[11px] font-mono text-emerald-300">
-                            Hold 3s est.: {hook.estimated_hold_rate}%
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedHookIndex(idx);
-                              regenerateWrittenPosts(blocks, hook.hook_text);
-                            }}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
-                              isWinner
-                                ? "bg-violet-400 text-slate-950"
-                                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                            }`}
-                          >
-                            {isWinner ? "✓ Ganador Activo" : "Elegir Ganador"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleApplyHookToBlock1(hook.hook_text)}
-                            className="px-2 py-1 rounded-md border border-slate-700 bg-slate-900 text-[11px] text-slate-300 hover:border-cyan-400 hover:text-white transition"
-                            title="Copiar este gancho al Bloque 1 del guión"
-                          >
-                            Usar en Bloque 1
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-xs font-semibold text-white leading-snug">
-                        &ldquo;{hook.hook_text}&rdquo;
-                      </p>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Pattern Interrupt:{" "}
-                        <span className="text-slate-300">{hook.pattern_interrupt}</span>
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* OpenSEO YouTube & TikTok */}
-            <section
-              aria-label="OpenSEO YouTube y TikTok"
-              className="xl:col-span-6 bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-bold text-emerald-300 flex items-center gap-2">
-                    <Search className="w-4 h-4" />
-                    OpenSEO: Keywords YouTube &amp; TikTok Search
-                  </h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Indexación semántica en los primeros 60 chars (YouTube móvil) y 100 chars (TikTok).
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleCopy(
-                      "seo-keywords",
-                      seoKeywords.join(", "),
-                      "Keywords OpenSEO"
-                    )
-                  }
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-bold text-emerald-200 transition"
-                >
-                  {copiedKey === "seo-keywords" ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  Copiar Keywords
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <label
-                      htmlFor="openseo-yt-title"
-                      className="font-semibold text-slate-200"
-                    >
-                      Título YouTube Móvil (&lt;60 chars)
-                    </label>
-                    <span
-                      className={`font-mono text-[11px] font-bold ${
-                        ytSeoTitle.length < 60
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }`}
-                    >
-                      {ytSeoTitle.length} / 60
-                    </span>
-                  </div>
-                  <input
-                    id="openseo-yt-title"
-                    type="text"
-                    value={ytSeoTitle}
-                    onChange={(e) => setYtSeoTitle(e.target.value)}
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <label
-                      htmlFor="openseo-tiktok-hook"
-                      className="font-semibold text-slate-200"
-                    >
-                      Primeros 100 chars (TikTok Search SEO)
-                    </label>
-                    <span className="font-mono text-[11px] text-cyan-300">
-                      {tiktokSearchHook.length} / 100
-                    </span>
-                  </div>
-                  <input
-                    id="openseo-tiktok-hook"
-                    type="text"
-                    value={tiktokSearchHook}
-                    onChange={(e) => setTiktokSearchHook(e.target.value)}
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-
-                <div>
-                  <span className="block text-xs font-semibold text-slate-200 mb-2">
-                    Keywords SEO Sugeridas
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {seoKeywords.map((kw) => (
-                      <span
-                        key={kw}
-                        className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-950 px-2.5 py-1 text-[11px] font-mono text-cyan-200"
-                      >
-                        <Hash className="w-3 h-3 text-emerald-400" />
-                        {kw}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSeoKeywords((prev) => prev.filter((k) => k !== kw))
-                          }
-                          aria-label={`Quitar keyword ${kw}`}
-                          className="text-slate-500 hover:text-rose-400 ml-0.5"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-
-                  <form onSubmit={handleAddSeoKeyword} className="mt-2.5 flex gap-2">
-                    <input
-                      type="text"
-                      value={customKeywordInput}
-                      onChange={(e) => setCustomKeywordInput(e.target.value)}
-                      placeholder="Añadir keyword SEO (ej. automatización b2b)..."
-                      aria-label="Nueva keyword SEO"
-                      className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-400"
-                    />
-                    <button
-                      type="submit"
-                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
-                    >
-                      Añadir
-                    </button>
-                  </form>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-
-      {/* =================================================================== */}
-      {/* SUBTAB 4: 4. Portadas A/B                                           */}
-      {/* =================================================================== */}
-      <div
-        role="tabpanel"
-        id="script-panel-thumbnails"
-        aria-labelledby="script-subtab-thumbnails"
-        hidden={activeSubTab !== "thumbnails"}
-      >
-        <div className="space-y-5">
-          {/* Packaging-First A/B Variants (1280x720) */}
-          <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-cyan-400" />
-                  Miniaturas y Títulos Alternativos (Variantes A / B · 1280×720)
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Contrasta dos hipótesis visuales antes de exportar para maximizar Watch Time Share en YouTube Test &amp; Compare.
-                </p>
-              </div>
-              {selectedDetail.script?.cta_text && (
-                <span className="text-xs rounded bg-slate-950 border border-slate-800 px-2.5 py-1 text-emerald-300 font-mono">
-                  CTA: {selectedDetail.script.cta_text}
-                </span>
-              )}
-            </div>
-
-            {selectedDetail.project.ab_variants.length > 0 ? (
-              <div className="grid md:grid-cols-2 gap-4 pt-1">
-                {selectedDetail.project.ab_variants.map((variant) => (
-                  <div
-                    key={variant.variant_label}
-                    className="rounded-xl border border-slate-800 bg-slate-950/90 p-3.5 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold text-xs">
-                        Opción {variant.variant_label}
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400">
-                        {variant.thumbnail_dimensions} · {variant.hypothesis || "Test A/B"}
-                      </span>
-                    </div>
-                    <div className="aspect-video rounded-lg border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-cyan-950/40 p-4 flex flex-col justify-between">
-                      <span className="text-[10px] uppercase tracking-widest text-cyan-400 font-semibold">
-                        Concepto de Miniatura
-                      </span>
-                      <p className="text-base font-bold text-white leading-tight">
-                        {variant.title}
-                      </p>
-                      <p className="text-[11px] text-slate-300">
-                        {variant.thumbnail_concept}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center text-xs text-slate-400">
-                <Sparkles className="w-4 h-4 text-cyan-400 mx-auto mb-1.5" />
-                Este proyecto aún no tiene variantes A/B guardadas; usa el Estudio de Portadas Canvas abajo para generar tus portadas 16:9 y 9:16.
-              </div>
-            )}
-          </div>
-
-          {/* Interactive HD Canvas Cover & Thumbnail Studio (9:16 + 16:9) */}
-          <ThumbnailCoverStudio
-            assetCode={selectedDetail.project.asset_code}
-            projectTitle={selectedDetail.project.working_title}
-            abVariants={selectedDetail.project.ab_variants}
+        {activeSubTab === "config" && (
+          <ScriptConfigPanel
+            targetPlatforms={targetPlatforms}
+            preset={preset}
+            goal={goal}
+            wpm={wpm}
+            leadMagnetKeyword={leadMagnetKeyword}
+            manychatTriggers={manychatTriggers}
+            antiSlopEnabled={antiSlopEnabled}
+            contrarianHookEnabled={contrarianHookEnabled}
+            requireVerifiableData={requireVerifiableData}
+            qualityAudit={qualityAudit}
+            onTogglePlatform={handleTogglePlatform}
+            onSetPreset={setPreset}
+            onSetGoal={setGoal}
+            onSetWpm={setWpm}
+            onSetLeadMagnetKeyword={setLeadMagnetKeyword}
+            onSetAntiSlop={setAntiSlopEnabled}
+            onSetContrarianHook={setContrarianHookEnabled}
+            onSetRequireVerifiableData={setRequireVerifiableData}
+            onCleanSlop={handleCleanSlopInBlocks}
           />
-        </div>
+        )}
       </div>
 
-      {/* Quick Substep Navigation Footer */}
-      <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        <button
-          type="button"
-          disabled={!prevSubTab}
-          onClick={() => {
-            if (prevSubTab) selectSubTab(prevSubTab.id);
-          }}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-500 hover:text-white disabled:opacity-40 disabled:pointer-events-none"
-        >
-          <span>
-            ← Subpaso anterior
-            {prevSubTab ? `: ${prevSubTab.shortLabel}` : ""}
-          </span>
-        </button>
-
-        <span className="text-[11px] font-mono text-slate-400">
-          Subpaso {activeSubTabIndex + 1} de {SCRIPT_SUBTABS.length}
-        </span>
-
-        <button
-          type="button"
-          disabled={!nextSubTab}
-          onClick={() => {
-            if (nextSubTab) selectSubTab(nextSubTab.id);
-          }}
-          className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500/15 hover:bg-cyan-500/25 px-3.5 py-2 text-xs font-bold text-cyan-200 transition disabled:opacity-40 disabled:pointer-events-none"
-        >
-          <span>
-            Siguiente subpaso →
-            {nextSubTab ? `: ${nextSubTab.shortLabel}` : ""}
-          </span>
-        </button>
-      </div>
-
-      {/* Fullscreen Teleprompter Dialog */}
+      {/* Full-Screen Teleprompter Modal */}
       <TeleprompterModal
         isOpen={showTeleprompter}
         onClose={() => setShowTeleprompter(false)}
         title={selectedDetail.project.working_title}
         assetCode={selectedDetail.project.asset_code}
-        blocks={timing.blocks}
+        blocks={blocks}
         initialWpm={wpm}
         selectedHookText={activeHook?.hook_text}
-        ctaText={selectedDetail.script?.cta_text}
       />
 
-      {/* 3-in-1 Script Exporter Dialog (PDF/HTML, Notion/MD, TXT+SRT) */}
+      {/* Multi-Format Script Exporter Modal */}
       <ScriptExporterModal
         isOpen={showExporter}
         onClose={() => setShowExporter(false)}
-        assetCode={selectedDetail.project.asset_code}
         title={selectedDetail.project.working_title}
+        assetCode={selectedDetail.project.asset_code}
         preset={preset}
         wpm={wpm}
-        blocks={timing.blocks}
+        blocks={blocks}
         selectedHookText={activeHook?.hook_text}
-        ctaText={selectedDetail.script?.cta_text}
-        abVariants={selectedDetail.project.ab_variants}
+        abVariants={selectedDetail.project.ab_variants ?? []}
       />
     </div>
   );
