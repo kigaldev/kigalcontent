@@ -22,14 +22,14 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/ideas/score-ice",
+        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/ideas/radar-matutino",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"source_origin\": \"n8n_cron\",\n  \"impact\": 9,\n  \"confidence\": 8,\n  \"ease\": 8,\n  \"tam_classification\": \"CORE_80\"\n}",
+        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"context_notes\": \"Radar Matutino: Modelos abiertos Qwen3 y DeepSeek optimizados para MiniPCs de 24GB. Permite orquestar guiones, voces y edición sin cuotas de suscripción mensuales.\",\n  \"source_origin\": \"radar_matutino\",\n  \"source_url\": \"https://news.ycombinator.com\",\n  \"target_platforms\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\", \"X\"],\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"auto_evaluate_ai\": true,\n  \"auto_create_project\": true\n}",
         "options": {}
       },
       "id": "http-eval-ice",
-      "name": "Evaluar Idea (ICE Scorer)",
+      "name": "Radar Matutino Ingest & AI ICE",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [440, 300]

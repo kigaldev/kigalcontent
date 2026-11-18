@@ -548,5 +548,61 @@ class TestFastAPIEndToEnd:
             assert len(interactions) == 2
             assert all(i["public_comment_reply"] for i in interactions)
 
+    def test_ideas_ai_evaluate_and_radar_matutino_ingest(self):
+        with TestClient(app) as client:
+            # 1. AI Evaluate Idea with rich context notes and platform selection
+            eval_resp = client.post(
+                "/api/v1/ideas/ai-evaluate",
+                json={
+                    "concept_title": "Cómo automatizar captación de clientes con Manychat e IA local",
+                    "context_notes": "Noticia y tendencia del día: los creadores que reemplazan enlaces directos en la bio por automatizaciones de comentarios y DM obtienen 3.8x más leads cualificados.",
+                    "target_platforms": ["YouTube", "Instagram", "LinkedIn"],
+                },
+            )
+            assert eval_resp.status_code == 200
+            eval_data = eval_resp.json()
+            assert eval_data["ice_score"] >= 7.0
+            assert eval_data["impact"] >= 5.0
+            assert eval_data["confidence"] >= 5.0
+            assert eval_data["ease"] >= 5.0
+            assert eval_data["rationale"]
+            assert len(eval_data["hook_candidates"]) >= 1
+            assert eval_data["estimated_hold_rate"] >= 50.0
+
+            # 2. Ingest idea from Radar Matutino n8n automation
+            radar_resp = client.post(
+                "/api/v1/ideas/radar-matutino",
+                json={
+                    "concept_title": "Radar Matutino: Automatización con Qwen3 y DeepSeek",
+                    "context_notes": "Modelos abiertos para MiniPCs permiten orquestar guiones y miniaturas sin coste de suscripción recurrente.",
+                    "source_origin": "radar_matutino",
+                    "source_url": "https://news.ycombinator.com",
+                    "target_platforms": ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
+                    "auto_evaluate_ai": True,
+                    "auto_create_project": True,
+                },
+            )
+            assert radar_resp.status_code == 200
+            radar_data = radar_resp.json()
+            assert radar_data["status"] == "INGESTED_AND_PROJECT_CREATED"
+            assert radar_data["threshold_met"] is True
+            assert radar_data["project_id"] is not None
+            assert radar_data["asset_code"] is not None
+            assert radar_data["source_origin"] == "radar_matutino"
+            assert "context_notes" in radar_data
+            assert len(radar_data["target_platforms"]) == 5
+
+            # 3. Verify created project carries context notes, source_origin and platforms in list_projects
+            proj_resp = client.get("/api/v1/projects")
+            assert proj_resp.status_code == 200
+            projects = proj_resp.json()
+            matching = [p for p in projects if p["id"] == radar_data["project_id"]]
+            assert len(matching) == 1
+            radar_proj = matching[0]
+            assert radar_proj["source_origin"] == "radar_matutino"
+            assert radar_proj["context_notes"]
+            assert "TikTok" in radar_proj["target_platforms"]
+
+
 
 

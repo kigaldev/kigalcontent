@@ -56,6 +56,29 @@ async def init_db() -> None:
             await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
         await conn.run_sync(Base.metadata.create_all)
 
+        # Idempotent column check/migrations for SQLite and PostgreSQL
+        dialect = conn.dialect.name
+        columns_to_add = [
+            ("content_projects", "context_notes", "TEXT"),
+            ("content_projects", "source_origin", "VARCHAR(100) DEFAULT 'manual'"),
+            ("content_projects", "target_platforms", "JSON DEFAULT '[]'"),
+            ("ideas", "context_notes", "TEXT"),
+            ("ideas", "target_platforms", "JSON DEFAULT '[]'"),
+        ]
+        for table, col, col_type in columns_to_add:
+            try:
+                if dialect == "postgresql":
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}"
+                    )
+                else:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"
+                    )
+            except Exception:
+                # Column already exists in SQLite
+                pass
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding an AsyncSession."""

@@ -238,6 +238,8 @@ class ICEScoreRequest(BaseModel):
     confidence: float = Field(..., ge=1.0, le=10.0)
     ease: float = Field(..., ge=1.0, le=10.0)
     tam_classification: TAMClassification = TAMClassification.CORE_80
+    context_notes: str | None = None
+    target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
 
 
 class HookCandidate(BaseModel):
@@ -259,6 +261,54 @@ class ICEScoreResponse(BaseModel):
     threshold_met: bool
     tam_classification: TAMClassification
     hook_candidates: list[HookCandidate] = Field(default_factory=list)
+    context_notes: str | None = None
+    target_platforms: list[str] = Field(default_factory=list)
+
+
+class IdeaAIEvaluationRequest(BaseModel):
+    concept_title: str = Field(..., min_length=3, max_length=500)
+    context_notes: str | None = None
+    creator_niche: str | None = None
+    creator_icp: str | None = None
+    target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
+
+
+class IdeaAIEvaluationResponse(BaseModel):
+    impact: float
+    confidence: float
+    ease: float
+    ice_score: float
+    tam_classification: TAMClassification
+    rationale: str
+    suggested_platforms: list[str] = Field(default_factory=list)
+    hook_candidates: list[HookCandidate] = Field(default_factory=list)
+    estimated_hold_rate: float = 75.0
+
+
+class RadarMatutinoIngestRequest(BaseModel):
+    concept_title: str = Field(..., min_length=3, max_length=500)
+    context_notes: str | None = None
+    source_url: str | None = None
+    source_origin: str = "radar_matutino"
+    target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
+    target_duration: DurationPreset = DurationPreset.STANDARD_SHORT
+    conversion_goal: ConversionGoal = ConversionGoal.EMAIL_LEAD_CAPTURE
+    auto_evaluate_ai: bool = True
+    auto_create_project: bool = True
+
+
+class RadarMatutinoIngestResponse(BaseModel):
+    status: str
+    concept_title: str
+    source_origin: str
+    ice_score: float
+    threshold_met: bool
+    project_id: UUID | None = None
+    asset_code: str | None = None
+    idea_id: UUID | None = None
+    target_platforms: list[str] = Field(default_factory=list)
+    context_notes: str | None = None
+    evaluation: IdeaAIEvaluationResponse | None = None
 
 
 # --- Two-Column Script Studio ---
@@ -338,6 +388,9 @@ class ProjectCreateRequest(BaseModel):
     confidence: float = Field(default=8.0, ge=1.0, le=10.0)
     ease: float = Field(default=7.5, ge=1.0, le=10.0)
     auto_generate_script: bool = True
+    context_notes: str | None = None
+    source_origin: str = "manual"
+    target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
 
 
 class FSMTransitionRequest(BaseModel):
@@ -363,6 +416,9 @@ class ProjectSummaryResponse(BaseModel):
     temporal_workflow_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    context_notes: str | None = None
+    source_origin: str | None = None
+    target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
 
 
 # --- HITL Governance ---

@@ -417,8 +417,14 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
 
   const activeHook = hookVariants[selectedHookIndex] ?? hookVariants[0] ?? null;
 
-  // Sync script state when selected project changes
+  // Sync script state and platforms when selected project changes
   useEffect(() => {
+    if (
+      selectedDetail?.project?.target_platforms &&
+      selectedDetail.project.target_platforms.length > 0
+    ) {
+      setTargetPlatforms(selectedDetail.project.target_platforms);
+    }
     if (selectedDetail?.script) {
       setPreset(selectedDetail.script.duration_preset);
       setGoal(selectedDetail.script.conversion_goal);

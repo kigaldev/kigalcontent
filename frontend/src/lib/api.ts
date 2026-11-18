@@ -9,13 +9,18 @@ import type {
   DurationPreset,
   FSMState,
   GitHubRepoItem,
+  IdeaAIEvaluationRequest,
+  IdeaAIEvaluationResponse,
   KigalChatInteraction,
   LeadMagnetItem,
   MediaQCReport,
   N8nWorkflowTemplate,
   ProjectDetail,
+  RadarMatutinoIngestRequest,
+  RadarMatutinoIngestResponse,
   RMTADiagnosisResponse,
   ScriptDocument,
+  ScriptTargetPlatform,
   SocialAccountItem,
   SocialChannel,
   SocialPost,
@@ -160,8 +165,23 @@ export const apiClient = {
     impact: number;
     confidence: number;
     ease: number;
+    context_notes?: string;
+    source_origin?: string;
+    target_platforms?: ScriptTargetPlatform[];
   }) =>
     requestJson<ContentProject>("/projects", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  evaluateIdeaWithAI: (payload: IdeaAIEvaluationRequest) =>
+    requestJson<IdeaAIEvaluationResponse>("/ideas/ai-evaluate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  ingestRadarMatutino: (payload: RadarMatutinoIngestRequest) =>
+    requestJson<RadarMatutinoIngestResponse>("/ideas/radar-matutino", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

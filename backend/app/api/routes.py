@@ -56,8 +56,11 @@ from app.schemas.contracts import (
     GoogleRSASpec,
     HITLTokenIssueRequest,
     HITLTokenIssueResponse,
+    HookCandidate,
     ICEScoreRequest,
     ICEScoreResponse,
+    IdeaAIEvaluationRequest,
+    IdeaAIEvaluationResponse,
     InfrastructureServiceStatus,
     KigalChatAutoSweepResponse,
     KigalChatInteraction,
@@ -76,6 +79,8 @@ from app.schemas.contracts import (
     PreflightCheckResult,
     ProjectCreateRequest,
     ProjectSummaryResponse,
+    RadarMatutinoIngestRequest,
+    RadarMatutinoIngestResponse,
     RMTADiagnosisRequest,
     RMTADiagnosisResponse,
     S3MultipartInitRequest,
@@ -1005,6 +1010,8 @@ async def list_ideas(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]
             "ice_multiplicative": r.ice_multiplicative,
             "tam_classification": r.tam_classification,
             "triage_status": r.triage_status,
+            "context_notes": r.context_notes,
+            "target_platforms": r.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
             "created_at": r.created_at.isoformat(),
         }
         for r in rows
@@ -1035,6 +1042,8 @@ async def score_idea_ice(
         ice_multiplicative=result.ice_multiplicative,
         tam_classification=body.tam_classification.value,
         triage_status=result.status,
+        context_notes=body.context_notes,
+        target_platforms=body.target_platforms,
         research_dossier={"hooks": [h.model_dump(mode="json") for h in result.hook_candidates]},
         semantic_embedding=compute_deterministic_embedding(body.concept_title),
     )
@@ -1064,7 +1073,245 @@ async def score_idea_ice(
     )
     await db.commit()
     result.idea_id = idea.id
+    result.context_notes = body.context_notes
+    result.target_platforms = body.target_platforms
     return result
+
+
+@router.post("/ideas/ai-evaluate", response_model=IdeaAIEvaluationResponse)
+async def ai_evaluate_idea(
+    body: IdeaAIEvaluationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> IdeaAIEvaluationResponse:
+    ws = await _get_default_workspace(db)
+    creator_prof = await get_creator_profile(db)
+    profile_dict = creator_prof.model_dump(mode="json") if creator_prof else None
+
+    router_llm = get_llm_router()
+    eval_result, provider_used = await router_llm.evaluate_idea_with_ai(
+        concept_title=body.concept_title,
+        context_notes=body.context_notes,
+        creator_profile=profile_dict,
+        target_platforms=body.target_platforms,
+    )
+
+    hook_models = [
+        HookCandidate(
+            category=h.get("category", "General"),
+            hook_text=h.get("hook_text", body.concept_title),
+            pattern_interrupt=h.get("pattern_interrupt", "Zoom 115%"),
+            estimated_hold_rate=float(h.get("estimated_hold_rate", 70.0)),
+        )
+        for h in eval_result.get("hook_candidates", [])
+    ]
+
+    await _record_audit(
+        db=db,
+        workspace_id=ws.id,
+        action_type="AI_IDEA_EVALUATION",
+        agent_or_user_id=f"SkillRouter-{provider_used}",
+        security_tier=1,
+        operation_status="SUCCESS",
+        payload={
+            "title": body.concept_title,
+            "ice_score": eval_result["ice_score"],
+            "provider": provider_used,
+        },
+    )
+    await db.commit()
+
+    return IdeaAIEvaluationResponse(
+        impact=eval_result["impact"],
+        confidence=eval_result["confidence"],
+        ease=eval_result["ease"],
+        ice_score=eval_result["ice_score"],
+        tam_classification=TAMClassification(eval_result["tam_classification"]),
+        rationale=eval_result["rationale"],
+        suggested_platforms=eval_result.get("suggested_platforms", body.target_platforms),
+        hook_candidates=hook_models,
+        estimated_hold_rate=eval_result.get("estimated_hold_rate", 75.0),
+    )
+
+
+@router.post("/ideas/radar-matutino", response_model=RadarMatutinoIngestResponse)
+async def ingest_radar_matutino_idea(
+    body: RadarMatutinoIngestRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RadarMatutinoIngestResponse:
+    """
+    Ingest material from Radar Matutino n8n automation or direct webhook.
+    Automatically evaluates with AI, stores rich context, and creates project if ICE >= 7.0.
+    """
+    ws = await _get_default_workspace(db)
+    creator_prof = await get_creator_profile(db)
+    profile_dict = creator_prof.model_dump(mode="json") if creator_prof else None
+
+    router_llm = get_llm_router()
+    eval_result, provider_used = await router_llm.evaluate_idea_with_ai(
+        concept_title=body.concept_title,
+        context_notes=body.context_notes,
+        creator_profile=profile_dict,
+        target_platforms=body.target_platforms,
+    )
+
+    impact = eval_result["impact"]
+    confidence = eval_result["confidence"]
+    ease = eval_result["ease"]
+    ice_score = eval_result["ice_score"]
+    tam_classification = eval_result["tam_classification"]
+    threshold_met = ice_score >= 7.0
+
+    idea = Idea(
+        workspace_id=ws.id,
+        concept_title=body.concept_title,
+        source_origin=body.source_origin,
+        impact_score=impact,
+        confidence_score=confidence,
+        ease_score=ease,
+        ice_score=ice_score,
+        ice_multiplicative=(impact * confidence * ease) / 100.0,
+        tam_classification=tam_classification,
+        triage_status="APPROVED_SCRIPT" if threshold_met else "UNPRIORITIZED",
+        context_notes=body.context_notes,
+        target_platforms=body.target_platforms,
+        research_dossier={
+            "source_url": body.source_url,
+            "rationale": eval_result["rationale"],
+            "hooks": eval_result.get("hook_candidates", []),
+            "hold_rate": eval_result.get("estimated_hold_rate", 70.0),
+        },
+        semantic_embedding=compute_deterministic_embedding(body.concept_title),
+    )
+    db.add(idea)
+    await db.flush()
+
+    project_id = None
+    asset_code = None
+
+    if body.auto_create_project and threshold_met:
+        asset_code = f"KC-{uuid.uuid4().hex[:5].upper()}"
+        initial_state = FSMState.SCRIPTED_PACKAGED
+
+        blocks, ab_variants, cta_text = generate_parametric_script(
+            topic=body.concept_title,
+            preset=body.target_duration,
+            goal=body.conversion_goal,
+        )
+
+        project = ContentProject(
+            workspace_id=ws.id,
+            idea_id=idea.id,
+            asset_code=asset_code,
+            working_title=body.concept_title,
+            target_duration=body.target_duration.value,
+            conversion_goal=body.conversion_goal.value,
+            current_state=initial_state.value,
+            ice_score=ice_score,
+            tam_classification=tam_classification,
+            context_notes=body.context_notes,
+            source_origin=body.source_origin,
+            target_platforms=body.target_platforms,
+            ab_variants=[v.model_dump(mode="json") for v in ab_variants],
+            state_history=[
+                {"from": "INIT", "to": "CAPTURED", "agent": "RadarMatutinoN8N", "tier": 1},
+                {"from": "CAPTURED", "to": initial_state.value, "agent": "ResearcherStrategist", "tier": 1},
+            ],
+            temporal_workflow_id=f"wf-radar-{asset_code.lower()}",
+        )
+        db.add(project)
+        await db.flush()
+        project_id = project.id
+
+        computed_blocks, wc, est_sec, _ = compute_block_metrics(blocks, 140, body.target_duration)
+        db.add(
+            Script(
+                project_id=project.id,
+                script_version=1,
+                duration_preset=body.target_duration.value,
+                conversion_goal=body.conversion_goal.value,
+                wpm_rate=140,
+                two_column_blocks=[b.model_dump(mode="json") for b in computed_blocks],
+                hook_variants=[
+                    {
+                        "category": h.get("category", "General"),
+                        "hook_text": h.get("hook_text", body.concept_title),
+                        "pattern_interrupt": h.get("pattern_interrupt", "Zoom 115%"),
+                        "estimated_hold_rate": float(h.get("estimated_hold_rate", 70.0)),
+                    }
+                    for h in eval_result.get("hook_candidates", [])
+                ],
+                selected_hook_index=0,
+                cta_text=cta_text,
+                word_count=wc,
+                estimated_duration_sec=est_sec,
+            )
+        )
+
+    await _record_audit(
+        db=db,
+        workspace_id=ws.id,
+        action_type="RADAR_MATUTINO_INGEST",
+        agent_or_user_id="n8n_radar_matutino",
+        security_tier=1,
+        operation_status="SUCCESS",
+        payload={
+            "title": body.concept_title,
+            "source_origin": body.source_origin,
+            "ice_score": ice_score,
+            "threshold_met": threshold_met,
+            "project_id": str(project_id) if project_id else None,
+        },
+    )
+    await db.commit()
+
+    await broadcaster.broadcast(
+        "RADAR_MATUTINO_IDEA_RECEIVED",
+        {
+            "idea_id": str(idea.id),
+            "concept_title": body.concept_title,
+            "source_origin": body.source_origin,
+            "ice_score": ice_score,
+            "threshold_met": threshold_met,
+            "project_id": str(project_id) if project_id else None,
+            "asset_code": asset_code,
+            "target_platforms": body.target_platforms,
+            "context_notes": body.context_notes,
+        },
+    )
+
+    hook_models = [
+        HookCandidate(
+            category=h.get("category", "General"),
+            hook_text=h.get("hook_text", body.concept_title),
+            pattern_interrupt=h.get("pattern_interrupt", "Zoom 115%"),
+            estimated_hold_rate=float(h.get("estimated_hold_rate", 70.0)),
+        )
+        for h in eval_result.get("hook_candidates", [])
+    ]
+
+    return RadarMatutinoIngestResponse(
+        status="INGESTED_AND_PROJECT_CREATED" if project_id else "INGESTED_AS_IDEA",
+        concept_title=body.concept_title,
+        source_origin=body.source_origin,
+        ice_score=ice_score,
+        threshold_met=threshold_met,
+        project_id=project_id,
+        asset_code=asset_code,
+        idea_id=idea.id,
+        target_platforms=body.target_platforms,
+        context_notes=body.context_notes,
+        evaluation=IdeaAIEvaluationResponse(
+            impact=impact,
+            confidence=confidence,
+            ease=ease,
+            ice_score=ice_score,
+            tam_classification=TAMClassification(tam_classification),
+            rationale=eval_result["rationale"],
+            suggested_platforms=eval_result.get("suggested_platforms", body.target_platforms),
+            hook_candidates=hook_models,
+            estimated_hold_rate=eval_result.get("estimated_hold_rate", 75.0),
+        ),
+    )
 
 
 @router.get("/hooks")
@@ -1103,6 +1350,9 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectSumma
             temporal_workflow_id=r.temporal_workflow_id,
             created_at=r.created_at,
             updated_at=r.updated_at,
+            context_notes=r.context_notes,
+            source_origin=r.source_origin,
+            target_platforms=r.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
         )
         for r in rows
     ]
@@ -1131,7 +1381,7 @@ async def create_project(
     idea = Idea(
         workspace_id=ws.id,
         concept_title=body.working_title,
-        source_origin="studio_intake",
+        source_origin=body.source_origin,
         impact_score=body.impact,
         confidence_score=body.confidence,
         ease_score=body.ease,
@@ -1139,13 +1389,15 @@ async def create_project(
         ice_multiplicative=ice_res.ice_multiplicative,
         tam_classification=body.tam_classification.value,
         triage_status=ice_res.status,
+        context_notes=body.context_notes,
+        target_platforms=body.target_platforms,
         semantic_embedding=compute_deterministic_embedding(body.working_title),
     )
     db.add(idea)
     await db.flush()
 
     initial_state = FSMState.RESEARCHED_TRIAGED if ice_res.threshold_met else FSMState.ARCHIVED
-    asset_code = f"ACE-{uuid.uuid4().hex[:5].upper()}"
+    asset_code = f"KC-{uuid.uuid4().hex[:5].upper()}"
 
     blocks, ab_variants, cta_text = generate_parametric_script(
         topic=body.working_title,
@@ -1165,6 +1417,9 @@ async def create_project(
         current_state=initial_state.value,
         ice_score=ice_res.ice_score,
         tam_classification=body.tam_classification.value,
+        context_notes=body.context_notes,
+        source_origin=body.source_origin,
+        target_platforms=body.target_platforms,
         ab_variants=[v.model_dump(mode="json") for v in ab_variants],
         state_history=[
             {"from": "INIT", "to": "CAPTURED", "agent": "OrchestratorAgent", "tier": 1},
@@ -1252,6 +1507,9 @@ async def create_project(
         temporal_workflow_id=project.temporal_workflow_id,
         created_at=project.created_at,
         updated_at=project.updated_at,
+        context_notes=project.context_notes,
+        source_origin=project.source_origin,
+        target_platforms=project.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
     )
 
 
@@ -1288,6 +1546,9 @@ async def get_project_detail(project_id: uuid.UUID, db: AsyncSession = Depends(g
             temporal_workflow_id=project.temporal_workflow_id,
             created_at=project.created_at,
             updated_at=project.updated_at,
+            context_notes=project.context_notes,
+            source_origin=project.source_origin,
+            target_platforms=project.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
         ).model_dump(mode="json"),
         "script": _build_script_response(script).model_dump(mode="json") if script else None,
         "video_asset": {

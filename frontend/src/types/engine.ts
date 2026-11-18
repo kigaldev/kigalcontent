@@ -100,6 +100,55 @@ export interface ContentProject {
   temporal_workflow_id: string | null;
   created_at: string;
   updated_at: string;
+  context_notes?: string | null;
+  source_origin?: string;
+  target_platforms?: ScriptTargetPlatform[];
+}
+
+export interface IdeaAIEvaluationRequest {
+  concept_title: string;
+  context_notes?: string;
+  creator_niche?: string;
+  creator_icp?: string;
+  target_platforms?: ScriptTargetPlatform[];
+}
+
+export interface IdeaAIEvaluationResponse {
+  impact: number;
+  confidence: number;
+  ease: number;
+  ice_score: number;
+  tam_classification: "CORE_80" | "EXPANSION_20";
+  rationale: string;
+  suggested_platforms: ScriptTargetPlatform[];
+  hook_candidates: HookCandidate[];
+  estimated_hold_rate: number;
+}
+
+export interface RadarMatutinoIngestRequest {
+  concept_title: string;
+  context_notes?: string;
+  source_url?: string;
+  source_origin?: string;
+  target_platforms?: ScriptTargetPlatform[];
+  target_duration?: DurationPreset;
+  conversion_goal?: ConversionGoal;
+  auto_evaluate_ai?: boolean;
+  auto_create_project?: boolean;
+}
+
+export interface RadarMatutinoIngestResponse {
+  status: string;
+  concept_title: string;
+  source_origin: string;
+  ice_score: number;
+  threshold_met: boolean;
+  project_id?: string | null;
+  asset_code?: string | null;
+  idea_id?: string | null;
+  target_platforms: ScriptTargetPlatform[];
+  context_notes?: string | null;
+  evaluation?: IdeaAIEvaluationResponse;
 }
 
 export interface WordTimestamp {
