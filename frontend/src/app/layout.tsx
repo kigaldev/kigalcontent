@@ -19,7 +19,7 @@ export default function RootLayout({
       <head>
         <meta name="color-scheme" content="dark" />
       </head>
-      <body className="min-h-screen bg-[#08090d] text-slate-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-100">
+      <body className="min-h-screen bg-[var(--kc-canvas)] text-slate-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-100">
         <Providers>{children}</Providers>
       </body>
     </html>

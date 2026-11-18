@@ -384,9 +384,9 @@ export default function KigalContentStudioPage() {
     projects.find((p) => p.id === selectedProjectId) ?? selectedDetail?.project ?? null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#08090d] text-slate-100">
+    <div className="min-h-screen flex flex-col bg-[var(--kc-canvas)] text-slate-100">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 border-b border-[var(--kc-border)] bg-[#08090d]/92 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-[var(--kc-border)] bg-[var(--kc-canvas)]/92 backdrop-blur-md">
         <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3 py-3">
             {/* Brand + Pro Studio OS Badge */}
@@ -427,7 +427,7 @@ export default function KigalContentStudioPage() {
                       <option
                         key={project.id}
                         value={project.id}
-                        className="bg-[#10131c] text-slate-100"
+                        className="bg-[var(--kc-panel)] text-slate-100"
                       >
                         [{project.asset_code}] {project.working_title} —{" "}
                         {HUMAN_STATE_LABELS[project.current_state] ?? project.current_state}
@@ -553,7 +553,7 @@ export default function KigalContentStudioPage() {
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
                         isSelected
                           ? "bg-cyan-400 text-slate-950"
-                          : "bg-[#151926] text-slate-300 border border-[var(--kc-border)]"
+                          : "bg-[var(--kc-surface)] text-slate-300 border border-[var(--kc-border)]"
                       }`}
                     >
                       {tab.stepNumber}

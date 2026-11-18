@@ -1,24 +1,33 @@
 @import "tailwindcss";
 
+@theme {
+  --color-slate-950: #020306;
+  --color-slate-900: #07090e;
+  --color-slate-850: #0b0e16;
+  --color-slate-800: #121622;
+  --color-slate-700: #1a202f;
+  --color-slate-600: #293042;
+}
+
 :root {
   color-scheme: dark;
 
-  /* KigalContent Pro NLE Dark Studio Tokens (Premiere / DaVinci / CapCut / Edits) */
-  --kc-canvas: #08090d;
-  --kc-panel: #10131c;
-  --kc-surface: #151926;
-  --kc-border: #232838;
+  /* KigalContent Pro NLE Dark Studio Tokens (Premiere / DaVinci Resolve Studio OLED Pitch Black) */
+  --kc-canvas: #020306;
+  --kc-panel: #07090e;
+  --kc-surface: #0b0e16;
+  --kc-border: #151a26;
   --kc-accent: #22d3ee;
   --kc-text: #f1f5f9;
   --kc-text-muted: #94a3b8;
 
   /* Derived tints via color-mix(in oklab, ...) — never in oklch with neutrals */
-  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 78%, var(--kc-panel));
-  --kc-border-specular: color-mix(in oklab, var(--kc-border) 72%, white 18%);
-  --kc-specular-highlight: color-mix(in oklab, white 9%, transparent);
+  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 82%, var(--kc-panel));
+  --kc-border-specular: color-mix(in oklab, var(--kc-border) 70%, white 14%);
+  --kc-specular-highlight: color-mix(in oklab, white 6%, transparent);
   --kc-accent-soft: color-mix(in oklab, var(--kc-accent) 16%, transparent);
   --kc-accent-border: color-mix(in oklab, var(--kc-accent) 44%, var(--kc-border));
-  --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border) 55%, white 32%);
+  --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border) 60%, white 25%);
 
   accent-color: var(--kc-accent);
   scrollbar-color: var(--kc-scrollbar-thumb) var(--kc-canvas);
