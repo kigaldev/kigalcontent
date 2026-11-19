@@ -151,9 +151,8 @@ class SocialCopyCraftEngine:
         notes = (context_notes or "").lower()
 
         if "hero24" in notes or "hero24" in hook.lower() or "artificial" in notes or "engagement" in notes:
+            hook = "Las publicaciones que hice con IA tuvieron buenas visitas, pero cero engagement real."
             body_lines = [
-                hook,
-                "",
                 "Hace tiempo que no publico por aquí, y quería ser transparente con el motivo.",
                 "",
                 "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi íntegramente con IA. "
@@ -183,8 +182,6 @@ class SocialCopyCraftEngine:
         else:
             hashtags = ["#Sistemas", "#Automatizacion", "#LiderazgoDigital"]
             body_lines = [
-                hook,
-                "",
                 "La mayoría de los operadores confunden volumen de horas con apalancamiento real.",
                 "",
                 "Lo que aplican los equipos de alto rendimiento en 2026:",

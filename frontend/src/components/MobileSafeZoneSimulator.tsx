@@ -135,6 +135,7 @@ export function MobileSafeZoneSimulator({
   const [showGDriveModal, setShowGDriveModal] = useState(false);
   const [gdriveUrl, setGdriveUrl] = useState("");
   const [isImportingGDrive, setIsImportingGDrive] = useState(false);
+  const [showVideoToolsOverride, setShowVideoToolsOverride] = useState(false);
 
   const handleImportGoogleDrive = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -343,31 +344,68 @@ export function MobileSafeZoneSimulator({
         </button>
       </div>
 
-      {/* Format Notice: If Text Only */}
-      {selectedDetail.project.content_format === "TEXT_ONLY" && (
-        <div className="rounded-xl border border-violet-500/60 bg-[#0c0e22] p-4 text-xs text-slate-200 shadow-xl space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-violet-300 font-bold text-sm">
-              <FileText className="w-4 h-4 text-violet-400" />
-              <span>Publicación configurada en formato: Solo Post Escrito / Carrusel</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-200 border border-violet-500/40 uppercase">
-                Opcional para Video
-              </span>
+      {/* Format Notice: If Text Only — show written draft preview instead of video config */}
+      {selectedDetail.project.content_format === "TEXT_ONLY" && !showVideoToolsOverride ? (
+        <div className="rounded-2xl border-2 border-violet-500/50 bg-[#0b0e20] p-6 space-y-5 shadow-2xl">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-violet-500/20 pb-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-violet-300 font-bold text-base">
+                <FileText className="w-5 h-5 text-violet-400" />
+                <span>Paso 3 Omitido: Publicación Solo Texto / Escrita</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Este proyecto no requiere grabación 9:16, poda de silencios ni nivelación LUFS. Aquí tienes el borrador listo antes de pasar a Publicar:
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab("publishing-hitl")}
-              className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
-            >
-              <span>Avanzar a Paso 4: Textos y Publicación</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowVideoToolsOverride(true)}
+                className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 hover:border-slate-500 text-slate-300 text-xs font-medium transition"
+              >
+                Añadir video 9:16 de todas formas
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("publishing-hitl")}
+                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+              >
+                <span>Ir a Paso 4: Publicar</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-          <p className="text-slate-300 text-xs leading-relaxed">
-            Esta publicación para <strong>LinkedIn / X</strong> no requiere grabación de video, edición 9:16 ni nivelación sonora LUFS (-14 dB). El texto estructurado, los ganchos y el carrusel de diapositivas PDF ya están redactados en el <strong>Paso 2</strong> y listos para autorizar en el <strong>Paso 4</strong>. Si deseas acompañarla de un clip de video de apoyo, puedes subirlo y validarlo a continuación.
-          </p>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {(selectedDetail.social_posts ?? [])
+              .filter((p) =>
+                (selectedDetail.project.target_platforms ?? []).some(
+                  (tp) => tp.toLowerCase() === p.channel.toLowerCase()
+                )
+              )
+              .map((post) => (
+                <div
+                  key={post.id}
+                  className="rounded-xl border border-slate-700/80 bg-[#050811] p-4 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-cyan-300">{post.channel}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      Borrador Listo
+                    </span>
+                  </div>
+                  {post.title && (
+                    <p className="text-xs font-bold text-white">{post.title}</p>
+                  )}
+                  <p className="text-xs text-slate-300 whitespace-pre-line leading-relaxed line-clamp-6">
+                    {post.post_body}
+                  </p>
+                </div>
+              ))}
+          </div>
         </div>
-      )}
+      ) : (
+        <>
 
       {/* Explanatory Banner */}
       {showExplanation && (
@@ -832,6 +870,8 @@ export function MobileSafeZoneSimulator({
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

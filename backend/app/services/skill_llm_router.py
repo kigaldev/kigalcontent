@@ -848,13 +848,19 @@ class HybridLLMRouter:
                 },
             ]
         else:
-            suggested_title = current_title or (last_user_msg[:65].capitalize() if last_user_msg else "Nueva Estrategia de Contenido")
+            raw_clean = re.sub(
+                r"^(redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(un\s+)?(post|publicaci[oó]n|video|hilo|guion)\s+(en|para|sobre)?\s*(linkedin|instagram|tiktok|youtube|x|twitter)?\s*(indicando|explicando|hablando|que|sobre)?\s*",
+                "",
+                last_user_msg.strip(),
+                flags=re.IGNORECASE,
+            ).strip()
+            suggested_title = current_title or (raw_clean[:65].capitalize() if raw_clean else "Nueva Estrategia de Contenido")
             reply_text = (
                 f"💡 He analizado tu idea: **{suggested_title}**.\n\n"
                 f"Para que destaque en **{', '.join(detected_platforms)}**, te recomiendo centrarte en una historia concreta o lección operativa en lugar de teoría general. "
                 f"Al ser formato **{('Solo Texto / Post Escrito' if detected_format == 'TEXT_ONLY' else 'Video + Post Escrito')}**, optimizaremos la primera línea antes del botón *'ver más'* para retener al lector."
             )
-            context_brief = current_context or last_user_msg
+            context_brief = current_context or raw_clean or last_user_msg
             hooks = [
                 {
                     "category": "Contraintuitivo",

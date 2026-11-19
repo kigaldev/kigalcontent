@@ -134,6 +134,14 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     if (selectedDetail?.social_posts) {
       setPosts(selectedDetail.social_posts);
     }
+    if (selectedDetail?.project?.target_platforms?.length) {
+      const allowed = selectedDetail.project.target_platforms.filter((p): p is SocialChannel =>
+        ["YouTube", "Instagram", "TikTok", "LinkedIn"].includes(p)
+      );
+      if (allowed.length > 0) {
+        setSelectedChannels(allowed);
+      }
+    }
   }, [selectedDetail]);
 
   const handleSubTabKeyDown = (
@@ -459,181 +467,276 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         hidden={activeSubTab !== "copy-native"}
       >
         <div className="space-y-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            {posts.map((post) => {
-              const isSelected = selectedChannels.includes(post.channel);
-              const sigMeta = NATIVE_SIGNATURE_BY_CHANNEL[post.channel];
-              const isVideoProcessed = Boolean(selectedDetail.video_asset?.qc_passed);
-              const isExactNativeMatch = Boolean(
-                isVideoProcessed &&
-                  appliedSignaturePlatform &&
-                  appliedSignaturePlatform.toLowerCase() === post.channel.toLowerCase()
-              );
-              const isGenericVerified = Boolean(
-                isVideoProcessed && !appliedSignaturePlatform
-              );
+          {(() => {
+            const targetPlats = selectedDetail.project.target_platforms ?? [];
+            const visiblePosts =
+              targetPlats.length > 0
+                ? posts.filter((p) =>
+                    targetPlats.some((tp) => tp.toLowerCase() === p.channel.toLowerCase())
+                  )
+                : posts;
+            const isTextOnly = selectedDetail.project.content_format === "TEXT_ONLY";
 
-              return (
-                <div
-                  key={post.id}
-                  className={`nle-panel p-4 space-y-3 transition ${
-                    isSelected
-                      ? "border-cyan-500/50 shadow-lg shadow-cyan-500/5"
-                      : "opacity-75"
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="inline-flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleChannel(post.channel)}
-                        className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-400"
-                      />
-                      <span className="text-sm font-bold text-white">
-                        {post.channel}
-                      </span>
-                    </label>
+            return (
+              <div className={`grid gap-5 ${visiblePosts.length === 1 ? "lg:grid-cols-12" : "md:grid-cols-2"}`}>
+                {visiblePosts.map((post) => {
+                  const isSelected = selectedChannels.includes(post.channel);
+                  const sigMeta = NATIVE_SIGNATURE_BY_CHANNEL[post.channel];
+                  const isVideoProcessed = Boolean(selectedDetail.video_asset?.qc_passed);
+                  const isExactNativeMatch = Boolean(
+                    isVideoProcessed &&
+                      appliedSignaturePlatform &&
+                      appliedSignaturePlatform.toLowerCase() === post.channel.toLowerCase()
+                  );
+                  const isGenericVerified = Boolean(
+                    isVideoProcessed && !appliedSignaturePlatform
+                  );
+                  const visualMode = String(post.metadata_payload?.visual_mode || "CAROUSEL_PDF");
+                  const visualAssetUrl = post.metadata_payload?.visual_asset_url as string | undefined;
 
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 ${
-                          post.preflight_passed
-                            ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
-                            : "bg-rose-500/20 text-rose-300 border border-rose-500/50"
+                  return (
+                    <React.Fragment key={post.id}>
+                      <div
+                        className={`nle-panel p-4 space-y-3 transition ${
+                          visiblePosts.length === 1 ? "lg:col-span-6" : ""
+                        } ${
+                          isSelected
+                            ? "border-cyan-500/50 shadow-lg shadow-cyan-500/5"
+                            : "opacity-75"
                         }`}
                       >
-                        {post.preflight_passed ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3" /> Reglas cumplidas
-                          </>
-                        ) : (
-                          <>
-                            <AlertTriangle className="w-3 h-3" /> Requiere ajuste
-                          </>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="inline-flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleChannel(post.channel)}
+                              className="rounded border-slate-700 text-cyan-500 focus:ring-cyan-400"
+                            />
+                            <span className="text-sm font-bold text-white">
+                              {post.channel}
+                            </span>
+                          </label>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1 ${
+                                post.preflight_passed
+                                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40"
+                                  : "bg-rose-500/20 text-rose-300 border border-rose-500/50"
+                              }`}
+                            >
+                              {post.preflight_passed ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3" /> Reglas cumplidas
+                                </>
+                              ) : (
+                                <>
+                                  <AlertTriangle className="w-3 h-3" /> Requiere ajuste
+                                </>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Native Fingerprint Verification Badge (hidden on TEXT_ONLY) */}
+                        {!isTextOnly && (
+                          <div
+                            className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] ${
+                              isExactNativeMatch || (!sigMeta.supportsEditorSignature && isVideoProcessed)
+                                ? "border-emerald-500/35 bg-emerald-950/25 text-emerald-300"
+                                : isGenericVerified
+                                ? "border-cyan-500/30 bg-cyan-950/20 text-cyan-200"
+                                : "border-[var(--kc-border)] bg-[var(--kc-canvas)]/70 text-slate-400"
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-1.5 min-w-0">
+                              <Fingerprint className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
+                              <span className="truncate font-medium">
+                                {isExactNativeMatch
+                                  ? `Huella Nativa Aplicada: ${
+                                      qcNativeProfile?.encoder || sigMeta.editorLabel
+                                    }`
+                                  : !sigMeta.supportsEditorSignature && isVideoProcessed
+                                  ? `Huella limpia (-map_metadata -1 · Rec.709)`
+                                  : isVideoProcessed && appliedSignaturePlatform
+                                  ? `MP4 limpio (-map_metadata -1) · Perfil activo: ${appliedSignaturePlatform}`
+                                  : isGenericVerified
+                                  ? `Master bt709 listo · Firma sugerida: ${sigMeta.editorLabel}`
+                                  : `Sin procesar · Firma objetivo: ${sigMeta.editorLabel}`}
+                              </span>
+                            </span>
+                            <span className="font-mono text-[10px] shrink-0 opacity-85">
+                              {isExactNativeMatch ? "VERIFICADA" : "bt709"}
+                            </span>
+                          </div>
                         )}
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* Native Fingerprint Verification Badge per Card */}
-                  <div
-                    className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] ${
-                      isExactNativeMatch || (!sigMeta.supportsEditorSignature && isVideoProcessed)
-                        ? "border-emerald-500/35 bg-emerald-950/25 text-emerald-300"
-                        : isGenericVerified
-                        ? "border-cyan-500/30 bg-cyan-950/20 text-cyan-200"
-                        : "border-[var(--kc-border)] bg-[var(--kc-canvas)]/70 text-slate-400"
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5 min-w-0">
-                      <Fingerprint className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
-                      <span className="truncate font-medium">
-                        {isExactNativeMatch
-                          ? `Huella Nativa Aplicada: ${
-                              qcNativeProfile?.encoder || sigMeta.editorLabel
-                            }`
-                          : !sigMeta.supportsEditorSignature && isVideoProcessed
-                          ? `Huella limpia (-map_metadata -1 · Rec.709)`
-                          : isVideoProcessed && appliedSignaturePlatform
-                          ? `MP4 limpio (-map_metadata -1) · Perfil activo: ${appliedSignaturePlatform}`
-                          : isGenericVerified
-                          ? `Master bt709 listo · Firma sugerida: ${sigMeta.editorLabel}`
-                          : `Sin procesar · Firma objetivo: ${sigMeta.editorLabel}`}
-                      </span>
-                    </span>
-                    <span className="font-mono text-[10px] shrink-0 opacity-85">
-                      {isExactNativeMatch ? "VERIFICADA" : "bt709"}
-                    </span>
-                  </div>
+                        <p className="text-[11px] text-slate-400">
+                          {CHANNEL_TIPS[post.channel]}
+                        </p>
 
-                  <p className="text-[11px] text-slate-400">
-                    {CHANNEL_TIPS[post.channel]}
-                  </p>
+                        {(post.channel === "YouTube" || post.channel === "Instagram" || post.channel === "LinkedIn") && (
+                          <label className="block text-xs text-slate-300">
+                            <div className="flex justify-between mb-1">
+                              <span>
+                                {post.channel === "YouTube"
+                                  ? "Título en YouTube (menos de 60 letras)"
+                                  : post.channel === "LinkedIn"
+                                  ? "Gancho de apertura (antes de '...ver más')"
+                                  : "Gancho primera línea (menos de 120 letras)"}
+                              </span>
+                              <span className="font-mono text-cyan-300 font-bold">
+                                {(post.title ?? "").length} caracteres
+                              </span>
+                            </div>
+                            <input
+                              type="text"
+                              value={post.title ?? ""}
+                              onChange={(e) =>
+                                handleFieldChange(post.id, "title", e.target.value)
+                              }
+                              className="w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                            />
+                          </label>
+                        )}
 
-                  {(post.channel === "YouTube" || post.channel === "Instagram") && (
-                    <label className="block text-xs text-slate-300">
-                      <div className="flex justify-between mb-1">
-                        <span>
-                          {post.channel === "YouTube"
-                            ? "Título en YouTube (menos de 60 letras)"
-                            : "Gancho primera línea (menos de 120 letras)"}
-                        </span>
-                        <span className="font-mono text-cyan-300 font-bold">
-                          {(post.title ?? "").length} caracteres
-                        </span>
+                        <label className="block text-xs text-slate-300">
+                          <div className="flex justify-between mb-1">
+                            <span>Texto de la publicación (Copy)</span>
+                            <span className="font-mono text-slate-400">
+                              {post.post_body.length} caracteres
+                            </span>
+                          </div>
+                          <textarea
+                            rows={6}
+                            value={post.post_body}
+                            onChange={(e) =>
+                              handleFieldChange(post.id, "post_body", e.target.value)
+                            }
+                            className="w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-cyan-400"
+                          />
+                        </label>
+
+                        {post.channel === "LinkedIn" && (
+                          <label className="block text-xs text-slate-300">
+                            Primer Comentario Automático (Enlace a tu web o recurso)
+                            <input
+                              type="text"
+                              value={post.first_comment ?? ""}
+                              onChange={(e) =>
+                                handleFieldChange(
+                                  post.id,
+                                  "first_comment",
+                                  e.target.value
+                                )
+                              }
+                              placeholder="Ej. Descarga el recurso gratis aquí: https://..."
+                              className="mt-1 w-full rounded-lg bg-[var(--kc-canvas)] border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-200"
+                            />
+                          </label>
+                        )}
+
+                        {post.preflight_warnings.length > 0 && (
+                          <ul className="space-y-1 text-xs text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5">
+                            {post.preflight_warnings.map((w, idx) => (
+                              <li key={idx}>• {w}</li>
+                            ))}
+                          </ul>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[11px] text-slate-500">
+                            {isSelected ? "Seleccionada para publicar" : "No marcada"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleSavePost(post)}
+                            className="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-slate-950 transition"
+                          >
+                            Guardar Cambios
+                          </button>
+                        </div>
                       </div>
-                      <input
-                        type="text"
-                        value={post.title ?? ""}
-                        onChange={(e) =>
-                          handleFieldChange(post.id, "title", e.target.value)
-                        }
-                        className="w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
-                      />
-                    </label>
-                  )}
 
-                  <label className="block text-xs text-slate-300">
-                    <div className="flex justify-between mb-1">
-                      <span>Texto de la publicación (Copy)</span>
-                      <span className="font-mono text-slate-400">
-                        {post.post_body.length} caracteres
-                      </span>
-                    </div>
-                    <textarea
-                      rows={5}
-                      value={post.post_body}
-                      onChange={(e) =>
-                        handleFieldChange(post.id, "post_body", e.target.value)
-                      }
-                      className="w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-cyan-400"
-                    />
-                  </label>
+                      {/* Live Visual Feed Preview when single channel (e.g. LinkedIn only) */}
+                      {visiblePosts.length === 1 && (
+                        <div className="lg:col-span-6 nle-panel p-5 space-y-4 border-sky-500/30">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div>
+                              <h4 className="text-sm font-bold text-white">
+                                Borrador Visual en {post.channel}
+                              </h4>
+                              <p className="text-[11px] text-slate-400">
+                                Así se visualizará tu publicación en el feed antes de aprobar la salida.
+                              </p>
+                            </div>
+                            <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-300 text-[10px] font-bold">
+                              {visualMode === "NONE"
+                                ? "Solo Texto"
+                                : visualMode === "IMAGE_INFOGRAPHIC"
+                                ? "Con Imagen / Infografía"
+                                : "Con Carrusel PDF"}
+                            </span>
+                          </div>
 
-                  {post.channel === "LinkedIn" && (
-                    <label className="block text-xs text-slate-300">
-                      Primer Comentario Automático (Enlace a tu web o recurso)
-                      <input
-                        type="text"
-                        value={post.first_comment ?? ""}
-                        onChange={(e) =>
-                          handleFieldChange(
-                            post.id,
-                            "first_comment",
-                            e.target.value
-                          )
-                        }
-                        placeholder="Ej. Descarga el recurso gratis aquí: https://..."
-                        className="mt-1 w-full rounded-lg bg-[var(--kc-canvas)] border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-200"
-                      />
-                    </label>
-                  )}
+                          <div className="rounded-xl border border-slate-700/90 bg-[#0d121d] p-4 space-y-3 shadow-xl">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold text-sm">
+                                K
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold text-white">
+                                  Kike Gallego · Tú
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  Ahora · 🌐 Público
+                                </div>
+                              </div>
+                            </div>
 
-                  {post.preflight_warnings.length > 0 && (
-                    <ul className="space-y-1 text-xs text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5">
-                      {post.preflight_warnings.map((w, idx) => (
-                        <li key={idx}>• {w}</li>
-                      ))}
-                    </ul>
-                  )}
+                            <div className="text-xs text-slate-100 whitespace-pre-line leading-relaxed space-y-2">
+                              {post.title && (
+                                <p className="font-semibold text-white">{post.title}</p>
+                              )}
+                              <p>{post.post_body}</p>
+                            </div>
 
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-[11px] text-slate-500">
-                      {isSelected ? "Seleccionada para publicar" : "No marcada"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSavePost(post)}
-                      className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
-                    >
-                      Guardar Cambios
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                            {visualMode === "IMAGE_INFOGRAPHIC" && visualAssetUrl && (
+                              <div className="rounded-lg border border-slate-700 overflow-hidden bg-[#020306] flex justify-center">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={visualAssetUrl}
+                                  alt="Preview visual"
+                                  className="max-h-[260px] w-auto object-contain"
+                                />
+                              </div>
+                            )}
+
+                            {visualMode === "CAROUSEL_PDF" && (
+                              <div className="rounded-lg border border-sky-500/30 bg-sky-950/20 px-3 py-2.5 text-[11px] text-sky-200 flex items-center justify-between">
+                                <span>📄 Documento adjunto: Carrusel de 5 diapositivas (PDF)</span>
+                                <span className="font-mono text-[10px] text-sky-400">4:5</span>
+                              </div>
+                            )}
+
+                            {post.first_comment && (
+                              <div className="border-t border-slate-800 pt-2.5 text-[11px] text-slate-300">
+                                <span className="text-[10px] font-bold text-cyan-400 block mb-0.5">
+                                  💬 Primer comentario programado:
+                                </span>
+                                {post.first_comment}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <div className="flex flex-wrap items-center justify-end gap-3">
             <button

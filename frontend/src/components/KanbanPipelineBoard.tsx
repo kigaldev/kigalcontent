@@ -22,6 +22,7 @@ import {
   Shield,
   Sparkles,
   Target,
+  Trash2,
   Twitter,
   User,
   Video,
@@ -163,6 +164,29 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
   const [evaluatingAI, setEvaluatingAI] = useState(false);
   const [aiEvaluation, setAiEvaluation] = useState<IdeaAIEvaluationResponse | null>(null);
   const [ingestingRadar, setIngestingRadar] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteProject = async (proj: ContentProject) => {
+    setDeletingId(proj.id);
+    try {
+      if (backendOnline) {
+        await apiClient.deleteProject(proj.id);
+        await onRefresh();
+      } else {
+        setProjects(projects.filter((p) => p.id !== proj.id));
+      }
+      if (selectedProjectId === proj.id) {
+        setSelectedProjectId(null);
+      }
+      setConfirmDeleteId(null);
+      showToast("info", `Idea "${proj.asset_code}" eliminada.`);
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Error al eliminar la idea");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const liveIce = useMemo(
     () => Math.round(((impact + confidence + ease) / 3) * 10) / 10,
@@ -1419,27 +1443,66 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                           className="text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1"
                         >
                           <Sparkles className="w-3 h-3" />
-                          <span>{format === "TEXT_ONLY" ? "Ver Contenido" : "Ir al Guión"}</span>
+                          <span>{format === "TEXT_ONLY" ? "Ver Borrador" : "Ir al Guión"}</span>
                         </button>
 
-                        {next && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleAdvanceState(proj);
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-[11px] font-medium text-slate-200 transition"
-                          >
-                            {next === "HITL_PENDING_PRODUCTION" ||
-                            next === "PUBLISHED_LIVE" ? (
-                              <Shield className="w-3 h-3 text-amber-400" />
-                            ) : (
-                              <ArrowRight className="w-3 h-3" />
-                            )}
-                            Avanzar
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {confirmDeleteId === proj.id ? (
+                            <div
+                              className="inline-flex items-center gap-1 bg-rose-950/80 border border-rose-500/60 rounded px-1.5 py-0.5"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                disabled={deletingId === proj.id}
+                                onClick={() => void handleDeleteProject(proj)}
+                                className="text-[10px] font-bold text-rose-300 hover:text-white px-1"
+                                title="Confirmar eliminación"
+                              >
+                                {deletingId === proj.id ? "..." : "Borrar"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="text-[10px] text-slate-400 hover:text-white px-1"
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(proj.id);
+                              }}
+                              className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition"
+                              title="Desechar / eliminar esta idea"
+                              aria-label={`Eliminar idea ${proj.asset_code}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {next && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleAdvanceState(proj);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-[11px] font-medium text-slate-200 transition"
+                            >
+                              {next === "HITL_PENDING_PRODUCTION" ||
+                              next === "PUBLISHED_LIVE" ? (
+                                <Shield className="w-3 h-3 text-amber-400" />
+                              ) : (
+                                <ArrowRight className="w-3 h-3" />
+                              )}
+                              Avanzar
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </article>
                   );

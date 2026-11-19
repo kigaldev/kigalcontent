@@ -60,23 +60,23 @@ interface TabDefinition {
   icon: typeof KanbanSquare;
 }
 
-const STUDIO_TABS: TabDefinition[] = [
+const PIPELINE_STEPS: TabDefinition[] = [
   {
     id: "pipeline",
     stepNumber: 1,
     label: "Ideas",
     shortLabel: "Ideas",
     stepName: "Ideas",
-    summary: "Evalúa y prioriza las mejores ideas antes de grabar.",
+    summary: "Evalúa y prioriza las mejores ideas antes de crear.",
     icon: KanbanSquare,
   },
   {
     id: "script-studio",
     stepNumber: 2,
-    label: "Guiones",
-    shortLabel: "Guión",
-    stepName: "Guiones",
-    summary: "Escribe el guión, calcula el tiempo y usa el teleprompter.",
+    label: "Guión / Publicación",
+    shortLabel: "Borrador",
+    stepName: "Guión / Publicación",
+    summary: "Edita el guión o borrador de publicación, ganchos y formato visual.",
     icon: FileText,
   },
   {
@@ -94,27 +94,39 @@ const STUDIO_TABS: TabDefinition[] = [
     label: "Publicar",
     shortLabel: "Publicar",
     stepName: "Publicar",
-    summary: "Prepara textos por red, KigalChat Auto-DM y autoriza la publicación.",
+    summary: "Vista previa por red, KigalChat Auto-DM y autorización final.",
     icon: Send,
   },
+];
+
+const UTILITY_TABS: Array<{
+  id: ActiveStudioTab;
+  label: string;
+  summary: string;
+  icon: typeof Megaphone;
+}> = [
   {
     id: "ads-studio",
-    stepNumber: 5,
     label: "Ads",
-    shortLabel: "Ads",
-    stepName: "Ads",
-    summary: "Campañas para Meta Ads, Google Ads y YouTube Ads",
+    summary: "Campañas de pago para Meta Ads, Google Ads y YouTube Ads.",
     icon: Megaphone,
   },
   {
     id: "analytics-rmta",
-    stepNumber: 6,
     label: "Resultados",
-    shortLabel: "Métricas",
-    stepName: "Resultados",
-    summary: "Analiza la retención y el aprendizaje de tus videos.",
+    summary: "Analiza la retención y el aprendizaje de tus publicaciones.",
     icon: BarChart3,
   },
+];
+
+const ALL_TABS: TabDefinition[] = [
+  ...PIPELINE_STEPS,
+  ...UTILITY_TABS.map((u, idx) => ({
+    ...u,
+    stepNumber: 5 + idx,
+    shortLabel: u.label,
+    stepName: u.label,
+  })),
 ];
 
 type DockTab = "n8n" | "apis";
@@ -158,11 +170,23 @@ export default function KigalContentStudioPage() {
   const dockDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const isBootstrappingRef = useRef(false);
 
-  const currentTabIndex = STUDIO_TABS.findIndex((t) => t.id === activeTab);
-  const currentTab = STUDIO_TABS[currentTabIndex] ?? STUDIO_TABS[0];
-  const prevTab = currentTabIndex > 0 ? STUDIO_TABS[currentTabIndex - 1] : null;
+  const activeProject =
+    projects.find((p) => p.id === selectedProjectId) ?? selectedDetail?.project ?? null;
+  const isTextOnlyProject = activeProject?.content_format === "TEXT_ONLY";
+
+  const effectiveSteps = isTextOnlyProject
+    ? PIPELINE_STEPS.filter((s) => s.id !== "mobile-simulator")
+    : PIPELINE_STEPS;
+
+  const currentTab =
+    ALL_TABS.find((t) => t.id === activeTab) ?? PIPELINE_STEPS[0];
+  const currentStepIndex = effectiveSteps.findIndex((t) => t.id === activeTab);
+  const prevTab =
+    currentStepIndex > 0 ? effectiveSteps[currentStepIndex - 1] : null;
   const nextTab =
-    currentTabIndex < STUDIO_TABS.length - 1 ? STUDIO_TABS[currentTabIndex + 1] : null;
+    currentStepIndex >= 0 && currentStepIndex < effectiveSteps.length - 1
+      ? effectiveSteps[currentStepIndex + 1]
+      : null;
 
   const loadWorkspaceData = useCallback(
     async (explicitProjectId?: string) => {
@@ -283,11 +307,30 @@ export default function KigalContentStudioPage() {
             payload?: Record<string, unknown>;
           };
           const eventName = parsed.event ?? "actividad";
-          const summary = parsed.payload?.working_title
-            ? `${String(parsed.payload.working_title)}`
-            : parsed.payload?.to_state
-            ? `${String(parsed.payload.from_state ?? "")} -> ${String(parsed.payload.to_state)}`
-            : JSON.stringify(parsed.payload ?? {}).slice(0, 80);
+          const rawMessage = String(parsed.payload?.message ?? "");
+          // Ignore noisy connection/subscription handshakes when idle
+          if (
+            eventName === "system" ||
+            rawMessage.toLowerCase().includes("subscribed to")
+          ) {
+            return;
+          }
+
+          let summary = "";
+          if (eventName === "project_created" && parsed.payload?.working_title) {
+            summary = `Nueva idea creada: ${String(parsed.payload.working_title)}`;
+          } else if (eventName === "project_deleted" && parsed.payload?.asset_code) {
+            summary = `Idea ${String(parsed.payload.asset_code)} eliminada`;
+          } else if (parsed.payload?.to_state) {
+            const dest = String(parsed.payload.to_state);
+            summary = `Proyecto movido a ${HUMAN_STATE_LABELS[dest as keyof typeof HUMAN_STATE_LABELS] ?? dest}`;
+          } else if (parsed.payload?.working_title) {
+            summary = `Actualizado: ${String(parsed.payload.working_title)}`;
+          } else if (rawMessage) {
+            summary = rawMessage;
+          }
+
+          if (!summary) return;
 
           pushLiveEvent({
             event: eventName,
@@ -322,18 +365,18 @@ export default function KigalContentStudioPage() {
   ) => {
     let nextIndex = index;
     if (e.key === "ArrowRight") {
-      nextIndex = (index + 1) % STUDIO_TABS.length;
+      nextIndex = (index + 1) % PIPELINE_STEPS.length;
     } else if (e.key === "ArrowLeft") {
-      nextIndex = (index - 1 + STUDIO_TABS.length) % STUDIO_TABS.length;
+      nextIndex = (index - 1 + PIPELINE_STEPS.length) % PIPELINE_STEPS.length;
     } else if (e.key === "Home") {
       nextIndex = 0;
     } else if (e.key === "End") {
-      nextIndex = STUDIO_TABS.length - 1;
+      nextIndex = PIPELINE_STEPS.length - 1;
     } else {
       return;
     }
     e.preventDefault();
-    const targetTab = STUDIO_TABS[nextIndex];
+    const targetTab = PIPELINE_STEPS[nextIndex];
     setActiveTab(targetTab.id);
     tabRefs.current[nextIndex]?.focus();
     tabRefs.current[nextIndex]?.scrollIntoView({
@@ -373,9 +416,6 @@ export default function KigalContentStudioPage() {
       dockDetailsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
-
-  const activeProject =
-    projects.find((p) => p.id === selectedProjectId) ?? selectedDetail?.project ?? null;
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--kc-canvas)] text-slate-100">
@@ -505,6 +545,29 @@ export default function KigalContentStudioPage() {
                 <span className="hidden sm:inline">Actualizar</span>
               </button>
 
+              <div className="inline-flex items-center rounded-full border border-violet-500/40 bg-violet-950/30 p-0.5 gap-0.5">
+                {UTILITY_TABS.map((ut) => {
+                  const UIcon = ut.icon;
+                  const active = activeTab === ut.id;
+                  return (
+                    <button
+                      key={ut.id}
+                      type="button"
+                      onClick={() => setActiveTab(ut.id)}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
+                        active
+                          ? "bg-violet-500 text-slate-950 shadow-sm"
+                          : "text-violet-200 hover:bg-violet-500/20 hover:text-white"
+                      }`}
+                      title={ut.summary}
+                    >
+                      <UIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>{ut.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               <button
                 type="button"
                 onClick={handleOpenAutomationDock}
@@ -518,16 +581,17 @@ export default function KigalContentStudioPage() {
             </div>
           </div>
 
-          {/* 6-Tab Single-Row Studio Navigation */}
+          {/* 4-Step Content Creation Navigation */}
           <div className="flex items-center justify-between gap-4 border-t border-[var(--kc-border)]/70 pt-1">
             <div
               role="tablist"
               aria-label="Pasos de creación de contenido"
               className="flex items-center gap-1 sm:gap-2"
             >
-              {STUDIO_TABS.map((tab, index) => {
+              {PIPELINE_STEPS.map((tab, index) => {
                 const Icon = tab.icon;
                 const isSelected = activeTab === tab.id;
+                const isSkippedStep = isTextOnlyProject && tab.id === "mobile-simulator";
                 return (
                   <button
                     key={tab.id}
@@ -550,13 +614,22 @@ export default function KigalContentStudioPage() {
                     className={`inline-flex items-center gap-2 px-3 py-2.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
                       isSelected
                         ? "text-cyan-300"
+                        : isSkippedStep
+                        ? "text-slate-600 hover:text-slate-400 line-through decoration-slate-600/60"
                         : "text-slate-400 hover:text-slate-200"
                     }`}
+                    title={
+                      isSkippedStep
+                        ? "Omitido automáticamente en publicaciones de Solo Texto (puedes abrirlo si decides añadir video)"
+                        : tab.summary
+                    }
                   >
                     <span
                       className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
                         isSelected
                           ? "bg-cyan-400 text-slate-950"
+                          : isSkippedStep
+                          ? "bg-slate-900 text-slate-600 border border-slate-800"
                           : "bg-[var(--kc-surface)] text-slate-300 border border-[var(--kc-border)]"
                       }`}
                     >
@@ -568,6 +641,11 @@ export default function KigalContentStudioPage() {
                     />
                     <span className="hidden md:inline">{tab.label}</span>
                     <span className="md:hidden">{tab.shortLabel}</span>
+                    {isSkippedStep && (
+                      <span className="hidden lg:inline rounded bg-slate-800/80 px-1.5 py-0.5 text-[9px] text-slate-500 no-underline">
+                        Omitido
+                      </span>
+                    )}
                   </button>
                 );
               })}

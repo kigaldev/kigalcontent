@@ -456,3 +456,22 @@ export interface AdCampaignResponse {
     utm_url: string;
   }>;
 }
+
+export type LinkedInVisualMode = "CAROUSEL_PDF" | "IMAGE_INFOGRAPHIC" | "NONE";
+
+export interface SocialVisualGenerateRequest {
+  title: string;
+  body: string;
+  visual_type: "INFOGRAPHIC" | "IMAGE";
+  provider: "nano_banana" | "gpt_images" | "svg_local";
+  prompt?: string;
+  author_name?: string;
+}
+
+export interface SocialVisualGenerateResponse {
+  image_url: string;
+  provider: string;
+  visual_type: string;
+  prompt: string;
+  note: string;
+}

@@ -178,6 +178,12 @@ export const apiClient = {
       body: JSON.stringify(payload),
     }),
 
+  deleteProject: (projectId: string) =>
+    requestJson<{ deleted: boolean; project_id: string; asset_code: string }>(
+      `/projects/${projectId}`,
+      { method: "DELETE" }
+    ),
+
   chatRefineIdea: (payload: IdeaChatRefineRequest) =>
     requestJson<IdeaChatRefineResponse>("/ideas/chat-refine", {
       method: "POST",
@@ -376,10 +382,30 @@ export const apiClient = {
       post_body?: string;
       first_comment?: string | null;
       hashtags?: string[];
+      metadata_payload?: Record<string, unknown>;
     }
   ) =>
     requestJson<SocialPost>(`/social/posts/${postId}`, {
       method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  generateSocialVisual: (payload: {
+    title: string;
+    body: string;
+    visual_type: "INFOGRAPHIC" | "IMAGE";
+    provider: "nano_banana" | "gpt_images" | "svg_local";
+    prompt?: string;
+    author_name?: string;
+  }) =>
+    requestJson<{
+      image_url: string;
+      provider: string;
+      visual_type: string;
+      prompt: string;
+      note: string;
+    }>("/social/generate-visual", {
+      method: "POST",
       body: JSON.stringify(payload),
     }),
 

@@ -1648,6 +1648,19 @@ async def get_project_detail(project_id: uuid.UUID, db: AsyncSession = Depends(g
     }
 
 
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    project = (await db.execute(select(ContentProject).where(ContentProject.id == project_id))).scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    asset_code = project.asset_code
+    await db.delete(project)
+    await db.commit()
+    await _ws_broadcast("project_deleted", {"project_id": str(project_id), "asset_code": asset_code})
+    return {"deleted": True, "project_id": str(project_id), "asset_code": asset_code}
+
+
 @router.post("/hitl/issue-token", response_model=HITLTokenIssueResponse)
 async def issue_hitl_token(
     body: HITLTokenIssueRequest,
@@ -2126,6 +2139,10 @@ async def update_social_post(
         post.first_comment = payload["first_comment"]
     if "hashtags" in payload:
         post.hashtags = payload["hashtags"]
+    if "metadata_payload" in payload and isinstance(payload["metadata_payload"], dict):
+        merged_meta = dict(post.metadata_payload or {})
+        merged_meta.update(payload["metadata_payload"])
+        post.metadata_payload = merged_meta
 
     pf = validate_preflight(
         SocialChannel(post.channel),
@@ -2141,6 +2158,131 @@ async def update_social_post(
     await db.commit()
     await db.refresh(post)
     return SocialPostResponse.model_validate(post)
+
+
+@router.post("/social/generate-visual")
+async def generate_social_visual(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Generate an infographic or editorial image for LinkedIn / social posts.
+    Supports Nano Banana (Gemini Imagen), GPT Images (OpenAI), or instant local SVG infographic rendering.
+    """
+    import base64
+    import html
+    import os
+    import textwrap
+    import httpx
+
+    title = str(payload.get("title") or "KigalContent").strip()
+    body = str(payload.get("body") or "").strip()
+    visual_type = str(payload.get("visual_type") or "INFOGRAPHIC").upper()
+    provider = str(payload.get("provider") or "svg_local").lower()
+    custom_prompt = str(payload.get("prompt") or "").strip()
+
+    profile = await get_creator_profile(db)
+    author_name = str(payload.get("author_name") or profile.name or "Kike Gallego")
+
+    # Extract clean bullet points from the actual post body
+    raw_paras = [p.strip() for p in body.split("\n") if p.strip() and not p.strip().startswith("#")]
+    key_points = [p[:115] + ("…" if len(p) > 115 else "") for p in raw_paras[:4]]
+    if not key_points:
+        key_points = ["Contenido diseñado desde el editor de KigalContent Studio."]
+
+    ai_prompt = custom_prompt or (
+        f"Editorial minimalist {visual_type.lower()} for LinkedIn in Spanish, dark navy & cyan Pro Studio aesthetic, "
+        f"clean typography, topic: '{title[:120]}'. Key concepts: {'; '.join(key_points[:3])}. "
+        f"No gibberish text, crisp modern geometric layout, 4:5 portrait."
+    )
+
+    image_url: str | None = None
+    used_provider = "svg_local"
+    provider_note = "Infografía vectorial generada al instante desde el texto de tu publicación."
+
+    if provider == "gpt_images" and os.environ.get("OPENAI_API_KEY"):
+        try:
+            async with httpx.AsyncClient(timeout=35.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/images/generations",
+                    headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+                    json={"model": "dall-e-3", "prompt": ai_prompt, "size": "1024x1024", "n": 1},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    image_url = data["data"][0]["url"]
+                    used_provider = "gpt_images"
+                    provider_note = "Imagen generada con GPT Images (OpenAI)."
+        except Exception as exc:
+            logger.warning("GPT Images fallback to SVG: %s", exc)
+
+    if not image_url and provider == "nano_banana":
+        gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if gemini_key:
+            try:
+                async with httpx.AsyncClient(timeout=35.0) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={gemini_key}",
+                        json={"instances": [{"prompt": ai_prompt}], "parameters": {"sampleCount": 1, "aspectRatio": "3:4"}},
+                    )
+                    if resp.status_code == 200:
+                        preds = resp.json().get("predictions", [])
+                        if preds and preds[0].get("bytesBase64Encoded"):
+                            image_url = f"data:image/png;base64,{preds[0]['bytesBase64Encoded']}"
+                            used_provider = "nano_banana"
+                            provider_note = "Imagen generada con Nano Banana (Google Gemini Imagen)."
+            except Exception as exc:
+                logger.warning("Nano Banana fallback to SVG: %s", exc)
+
+    if not image_url:
+        # Render crisp 1080x1350 SVG Infographic from the user's real post content
+        wrapped_title = textwrap.wrap(title, width=32)[:3]
+        title_svg = "".join(
+            f'<text x="80" y="{210 + i * 56}" fill="#f8fafc" font-family="Inter, system-ui, sans-serif" font-size="44" font-weight="800">{html.escape(line)}</text>'
+            for i, line in enumerate(wrapped_title)
+        )
+        cards_svg = ""
+        start_y = 420
+        for idx, pt in enumerate(key_points[:4]):
+            cy = start_y + idx * 195
+            lines = textwrap.wrap(pt, width=48)[:3]
+            lines_svg = "".join(
+                f'<text x="155" y="{cy + 62 + li * 34}" fill="#cbd5e1" font-family="Inter, system-ui, sans-serif" font-size="25" font-weight="500">{html.escape(l)}</text>'
+                for li, l in enumerate(lines)
+            )
+            cards_svg += f"""
+            <rect x="75" y="{cy}" width="930" height="165" rx="18" fill="#0d1526" stroke="#1e293b" stroke-width="2"/>
+            <circle cx="115" cy="{cy + 58}" r="20" fill="#06b6d4" fill-opacity="0.18" stroke="#22d3ee" stroke-width="2"/>
+            <text x="115" y="{cy + 66}" text-anchor="middle" fill="#22d3ee" font-family="monospace" font-size="20" font-weight="700">0{idx + 1}</text>
+            {lines_svg}
+            """
+
+        svg_doc = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#040711"/>
+              <stop offset="100%" stop-color="#0b1326"/>
+            </linearGradient>
+          </defs>
+          <rect width="1080" height="1350" fill="url(#bg)"/>
+          <rect x="75" y="90" width="240" height="38" rx="19" fill="#0891b2" fill-opacity="0.2" stroke="#22d3ee" stroke-opacity="0.5"/>
+          <text x="195" y="116" text-anchor="middle" fill="#67e8f9" font-family="monospace" font-size="18" font-weight="700">{html.escape(visual_type)}</text>
+          {title_svg}
+          <line x1="80" y1="385" x2="260" y2="385" stroke="#22d3ee" stroke-width="4" stroke-linecap="round"/>
+          {cards_svg}
+          <text x="80" y="1280" fill="#94a3b8" font-family="Inter, system-ui, sans-serif" font-size="24" font-weight="600">{html.escape(author_name)}</text>
+          <text x="1000" y="1280" text-anchor="end" fill="#22d3ee" font-family="monospace" font-size="20" font-weight="700">KigalContent Studio</text>
+        </svg>"""
+        b64 = base64.b64encode(svg_doc.encode("utf-8")).decode("ascii")
+        image_url = f"data:image/svg+xml;base64,{b64}"
+
+    return {
+        "image_url": image_url,
+        "provider": used_provider,
+        "visual_type": visual_type,
+        "prompt": ai_prompt,
+        "note": provider_note,
+    }
 
 
 @router.post("/social/publish")

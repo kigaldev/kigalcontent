@@ -56,6 +56,7 @@ import type {
   ConversionGoal,
   DurationPreset,
   HookCandidate,
+  LinkedInVisualMode,
   ScriptTargetPlatform,
   TwoColumnScriptBlock,
 } from "@/types/engine";
@@ -115,6 +116,25 @@ function extractSentences(blocks: TwoColumnScriptBlock[]): string[] {
     .map((s) => s.trim());
 }
 
+function sanitizePromptArtifacts(text: string): string {
+  return text
+    .replace(/^Contexto afinado por Copiloto Estratega:\s*/i, "")
+    .replace(/^Publicaci[oó]n en LinkedIn sobre[^:\n]*:\s*/i, "")
+    .replace(/^(redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(un\s+)?(post|publicaci[oó]n|video|hilo|guion)\s+(en|para|sobre)?\s*(linkedin|instagram|tiktok|youtube|x|twitter)?\s*(indicando|explicando|hablando|que|sobre)?\s*/i, "")
+    .trim();
+}
+
+function isTemplateSlopHook(text: string): boolean {
+  const low = text.toLowerCase();
+  return (
+    low.startsWith("deja de publicar más en") ||
+    low.startsWith("deja de escalar horas en") ||
+    low.startsWith("el patrón oculto detrás de") ||
+    low.startsWith("estás perdiendo el 80%") ||
+    low.startsWith("redactar un post")
+  );
+}
+
 function buildLinkedInDraft(params: {
   title: string;
   hookText: string;
@@ -125,8 +145,8 @@ function buildLinkedInDraft(params: {
   contextNotes?: string | null;
 }) {
   const { title, hookText, blocks, keyword, deliveryUrl, antiSlop, contextNotes } = params;
-  const rawHook = hookText || title || "Por qué tu sistema de contenido no convierte.";
-  const hook = clampText(stripUrls(rawHook), 132);
+  const cleanTitle = sanitizePromptArtifacts(title);
+  const cleanHookCandidate = sanitizePromptArtifacts(hookText);
 
   const notesLower = (contextNotes || "").toLowerCase();
   const isPersonalOrHero =
@@ -140,9 +160,12 @@ function buildLinkedInDraft(params: {
     title.toLowerCase().includes("nueva etapa");
 
   if (isPersonalOrHero && contextNotes) {
+    const hook =
+      cleanHookCandidate && !isTemplateSlopHook(cleanHookCandidate) && cleanHookCandidate !== cleanTitle
+        ? clampText(stripUrls(cleanHookCandidate), 132)
+        : "Las publicaciones que hice con IA tuvieron buenas visitas, pero cero engagement real.";
+
     const bodyLines = [
-      hook,
-      "",
       "Hace tiempo que no publico por aquí, y quería compartir con total transparencia el motivo.",
       "",
       "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi en su totalidad con IA. " +
@@ -170,12 +193,18 @@ function buildLinkedInDraft(params: {
     return { hook, body, firstComment };
   }
 
+  const hook =
+    cleanHookCandidate && !isTemplateSlopHook(cleanHookCandidate)
+      ? clampText(stripUrls(cleanHookCandidate), 132)
+      : clampText(stripUrls(cleanTitle || "Lo que cambia cuando aplicas criterio real frente al volumen."), 132);
+
   if (contextNotes && contextNotes.trim().length > 60) {
-    const cleanContext = stripUrls(contextNotes.trim());
-    const paragraphs = cleanContext.split(/\n\s*\n/).filter(Boolean);
+    const cleanContext = sanitizePromptArtifacts(stripUrls(contextNotes.trim()));
+    const paragraphs = cleanContext
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/^[-•]\s*(Objetivo|Tesis|Llamada a la acción|Reflexión transparente|Nuevo enfoque|Anuncio|CTA B2B):\s*/gim, "").trim())
+      .filter(Boolean);
     const bodyLines = [
-      hook,
-      "",
       ...paragraphs,
       "",
       `💬 Comenta o escríbeme por mensaje privado para compartir impresiones o recibir más detalles.`,
@@ -199,7 +228,7 @@ function buildLinkedInDraft(params: {
 
   const openingLine = antiSlop
     ? `La mayoría mide volumen; los equipos rentables miden retención y sistema.`
-    : `Análisis operativo sobre ${clampText(title, 65)}:`;
+    : `Análisis operativo sobre ${clampText(cleanTitle, 65)}:`;
 
   const bodyLines = [
     openingLine,
@@ -414,6 +443,9 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
   const [linkedInHook, setLinkedInHook] = useState("");
   const [linkedInBody, setLinkedInBody] = useState("");
   const [linkedInFirstComment, setLinkedInFirstComment] = useState("");
+  const [linkedInVisualMode, setLinkedInVisualMode] = useState<LinkedInVisualMode>("CAROUSEL_PDF");
+  const [linkedInVisualUrl, setLinkedInVisualUrl] = useState<string | null>(null);
+  const [savingLinkedIn, setSavingLinkedIn] = useState(false);
 
   // X / Twitter
   const [xSingleTweet, setXSingleTweet] = useState("");
@@ -595,7 +627,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     ]
   );
 
-  // Auto-populate when project detail loads
+  // Auto-populate when project detail loads (prefer saved SocialPost over template regeneration)
   const projectKey = selectedDetail?.project?.id;
   useEffect(() => {
     if (!projectKey) return;
@@ -604,6 +636,31 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       selectedDetail?.script?.hook_variants?.[selectedDetail?.script?.selected_hook_index ?? 0]
         ?.hook_text ?? selectedDetail?.project?.working_title
     );
+
+    const savedLi = selectedDetail?.social_posts?.find((p) => p.channel === "LinkedIn");
+    if (savedLi) {
+      const cleanSavedHook = sanitizePromptArtifacts(savedLi.title || "");
+      let cleanSavedBody = savedLi.post_body || "";
+      if (cleanSavedHook && cleanSavedBody.startsWith(cleanSavedHook)) {
+        cleanSavedBody = cleanSavedBody.slice(cleanSavedHook.length).replace(/^\s+/, "");
+      }
+      if (cleanSavedHook && !isTemplateSlopHook(cleanSavedHook)) {
+        setLinkedInHook(cleanSavedHook);
+      }
+      if (cleanSavedBody.trim()) {
+        setLinkedInBody(cleanSavedBody);
+      }
+      if (savedLi.first_comment) {
+        setLinkedInFirstComment(savedLi.first_comment);
+      }
+      const savedMode = savedLi.metadata_payload?.visual_mode as LinkedInVisualMode | undefined;
+      if (savedMode) setLinkedInVisualMode(savedMode);
+      const savedUrl = savedLi.metadata_payload?.visual_asset_url as string | undefined;
+      setLinkedInVisualUrl(savedUrl ?? null);
+    } else {
+      setLinkedInVisualMode("CAROUSEL_PDF");
+      setLinkedInVisualUrl(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey]);
 
@@ -741,6 +798,88 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       return;
     }
     setBlocks((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveLinkedInDraft = async (
+    overrideVisualMode?: LinkedInVisualMode,
+    overrideVisualUrl?: string | null
+  ) => {
+    if (!selectedDetail?.project) return;
+    setSavingLinkedIn(true);
+    const modeToSave = overrideVisualMode ?? linkedInVisualMode;
+    const urlToSave = overrideVisualUrl !== undefined ? overrideVisualUrl : linkedInVisualUrl;
+    const fullPostBody = linkedInBody.trim();
+
+    try {
+      const existingLi = selectedDetail.social_posts?.find((p) => p.channel === "LinkedIn");
+      if (backendOnline) {
+        let updatedPost = existingLi;
+        if (existingLi) {
+          updatedPost = await apiClient.updateSocialPost(existingLi.id, {
+            title: linkedInHook.trim(),
+            post_body: fullPostBody,
+            first_comment: linkedInFirstComment.trim(),
+            metadata_payload: {
+              visual_mode: modeToSave,
+              visual_asset_url: urlToSave,
+            },
+          });
+        } else {
+          const createdPosts = await apiClient.generateSocialCopy({
+            project_id: selectedDetail.project.id,
+            headline: linkedInHook.trim() || selectedDetail.project.working_title,
+            core_value: fullPostBody,
+            debate_question: "¿Qué opinas al respecto?",
+            conversion_goal: goal,
+          });
+          const createdLi = createdPosts.find((p) => p.channel === "LinkedIn");
+          if (createdLi) {
+            updatedPost = await apiClient.updateSocialPost(createdLi.id, {
+              title: linkedInHook.trim(),
+              post_body: fullPostBody,
+              first_comment: linkedInFirstComment.trim(),
+              metadata_payload: {
+                visual_mode: modeToSave,
+                visual_asset_url: urlToSave,
+              },
+            });
+          }
+        }
+        if (updatedPost) {
+          const nextPosts = selectedDetail.social_posts?.some((p) => p.id === updatedPost!.id)
+            ? selectedDetail.social_posts.map((p) => (p.id === updatedPost!.id ? updatedPost! : p))
+            : [...(selectedDetail.social_posts ?? []), updatedPost];
+          setSelectedDetail({ ...selectedDetail, social_posts: nextPosts });
+        }
+        await onRefresh();
+        showToast("success", "✅ Cambios de LinkedIn y formato visual guardados en el proyecto.");
+      } else {
+        const localPosts = (selectedDetail.social_posts ?? []).map((p) =>
+          p.channel === "LinkedIn"
+            ? {
+                ...p,
+                title: linkedInHook.trim(),
+                post_body: fullPostBody,
+                first_comment: linkedInFirstComment.trim(),
+                metadata_payload: {
+                  ...(p.metadata_payload ?? {}),
+                  visual_mode: modeToSave,
+                  visual_asset_url: urlToSave,
+                },
+              }
+            : p
+        );
+        setSelectedDetail({ ...selectedDetail, social_posts: localPosts });
+        showToast("info", "✅ Borrador de LinkedIn guardado localmente.");
+      }
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Error al guardar el borrador de LinkedIn"
+      );
+    } finally {
+      setSavingLinkedIn(false);
+    }
   };
 
   const handleSaveScript = async () => {
@@ -1264,15 +1403,22 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
             <LinkedInPlatformVisor
               assetCode={selectedDetail.project.asset_code}
               projectTitle={selectedDetail.project.working_title}
+              authorName={creatorProfile?.name || "Kike Gallego"}
               abVariants={selectedDetail.project.ab_variants ?? []}
               blocks={blocks}
               activeHook={activeHook}
               linkedInHook={linkedInHook}
               linkedInBody={linkedInBody}
               linkedInFirstComment={linkedInFirstComment}
+              visualMode={linkedInVisualMode}
+              visualAssetUrl={linkedInVisualUrl}
+              saving={savingLinkedIn}
               onUpdateHook={setLinkedInHook}
               onUpdateBody={setLinkedInBody}
               onUpdateFirstComment={setLinkedInFirstComment}
+              onChangeVisualMode={setLinkedInVisualMode}
+              onUpdateVisualAssetUrl={setLinkedInVisualUrl}
+              onSave={handleSaveLinkedInDraft}
               onCopy={handleCopy}
               copiedKey={copiedKey}
               onSyncFromMaster={() => {
