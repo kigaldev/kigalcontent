@@ -311,14 +311,39 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
       }
 
       if (backendOnline) {
-        await apiClient.publishSocial({
+        const res = await apiClient.publishSocial({
           project_id: selectedProjectId,
           channels: selectedChannels,
           hitl_token: token,
           actor: "creator",
         });
         await onRefresh();
-        showToast("success", `¡Publicación exitosa en: ${selectedChannels.join(", ")}!`);
+        const pubs = res.publications ?? [];
+        const liveChannels = pubs
+          .filter((p) => p.mode === "live_oauth2")
+          .map((p) => p.channel)
+          .filter(Boolean);
+        const sandboxChannels = pubs
+          .filter((p) => p.mode !== "live_oauth2")
+          .map((p) => p.channel)
+          .filter(Boolean);
+
+        if (liveChannels.length > 0 && sandboxChannels.length === 0) {
+          showToast(
+            "success",
+            `🚀 ¡Publicado EN VIVO en: ${liveChannels.join(", ")}!`
+          );
+        } else if (liveChannels.length > 0 && sandboxChannels.length > 0) {
+          showToast(
+            "info",
+            `🚀 Publicado en vivo: ${liveChannels.join(", ")}. ⚠️ En modo simulación (sin token guardado): ${sandboxChannels.join(", ")}.`
+          );
+        } else {
+          showToast(
+            "error",
+            `⚠️ Solo se simuló en Sandbox (${selectedChannels.join(", ")}). No hay un Access Token guardado en el servidor: ve a 'Automatizaciones y APIs → Conexiones Oficiales', guarda tu token y pulsa 'Probar Conexión'.`
+          );
+        }
       } else {
         showToast(
           "success",

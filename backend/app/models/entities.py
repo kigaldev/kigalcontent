@@ -271,3 +271,13 @@ class AuditLog(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     ip_source: Mapped[str | None] = mapped_column(String(45), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SocialCredential(Base):
+    __tablename__ = "social_credentials"
+
+    channel: Mapped[str] = mapped_column(String(50), primary_key=True)
+    access_token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    person_urn: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

@@ -509,6 +509,10 @@ class LinkedInUGCConnector(BaseSocialConnector):
     channel = SocialChannel.LINKEDIN
     api_base = "https://api.linkedin.com/v2/ugcPosts"
 
+    def __init__(self, access_token: str = "", person_urn: str = "") -> None:
+        super().__init__(access_token)
+        self.person_urn = person_urn
+
     async def _resolve_person_urn(self, client: httpx.AsyncClient, configured_urn: str) -> str:
         if configured_urn and configured_urn != "urn:li:person:creator-001" and configured_urn.startswith("urn:li:"):
             return configured_urn
@@ -549,7 +553,14 @@ class LinkedInUGCConnector(BaseSocialConnector):
         full_text = f"{title}\n\n{body}".strip() if (title and not body.startswith(title)) else body
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            author_urn = await self._resolve_person_urn(client, settings.linkedin_person_urn)
+            preferred_urn = self.person_urn or settings.linkedin_person_urn
+            author_urn = await self._resolve_person_urn(client, preferred_urn)
+            if not author_urn or author_urn == "urn:li:person:creator-001":
+                raise ValueError(
+                    "No se pudo resolver tu LinkedIn Person URN automáticamente. "
+                    "Asegúrate de que tu token tenga los permisos 'openid'/'profile' y 'w_member_social', "
+                    "o introduce tu Person URN (urn:li:person:...) en Conexiones Oficiales."
+                )
             ugc_body = {
                 "author": author_urn,
                 "lifecycleState": "PUBLISHED",
@@ -575,12 +586,19 @@ class LinkedInUGCConnector(BaseSocialConnector):
             }
 
 
-def get_connector_for_channel(channel: SocialChannel) -> BaseSocialConnector:
+def get_connector_for_channel(
+    channel: SocialChannel,
+    access_token_override: str | None = None,
+    person_urn_override: str | None = None,
+) -> BaseSocialConnector:
     settings = get_settings()
     mapping: dict[SocialChannel, BaseSocialConnector] = {
-        SocialChannel.YOUTUBE: YouTubeDataConnector(settings.youtube_access_token),
-        SocialChannel.INSTAGRAM: MetaGraphConnector(settings.instagram_access_token),
-        SocialChannel.TIKTOK: TikTokContentConnector(settings.tiktok_access_token),
-        SocialChannel.LINKEDIN: LinkedInUGCConnector(settings.linkedin_access_token),
+        SocialChannel.YOUTUBE: YouTubeDataConnector(access_token_override or settings.youtube_access_token),
+        SocialChannel.INSTAGRAM: MetaGraphConnector(access_token_override or settings.instagram_access_token),
+        SocialChannel.TIKTOK: TikTokContentConnector(access_token_override or settings.tiktok_access_token),
+        SocialChannel.LINKEDIN: LinkedInUGCConnector(
+            access_token_override or settings.linkedin_access_token,
+            person_urn=person_urn_override or settings.linkedin_person_urn,
+        ),
     }
     return mapping[channel]

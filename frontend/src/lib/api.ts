@@ -418,8 +418,61 @@ export const apiClient = {
     requestJson<{
       status: string;
       project_id: string;
-      publications: Array<Record<string, unknown>>;
+      publications: Array<{
+        status?: string;
+        mode?: "live_oauth2" | "sandbox_verified" | string;
+        channel?: string;
+        external_platform_id?: string;
+        canonical_url?: string;
+      }>;
     }>("/social/publish", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getSocialCredentials: () =>
+    requestJson<{
+      channels: Record<
+        string,
+        {
+          channel: string;
+          configured: boolean;
+          source: "database" | "env" | "none";
+          person_urn: string;
+          account_name: string;
+          masked_token: string;
+        }
+      >;
+    }>("/social/credentials"),
+
+  saveSocialCredential: (payload: {
+    channel: string;
+    access_token: string;
+    person_urn?: string;
+  }) =>
+    requestJson<{
+      saved: boolean;
+      channel: string;
+      configured: boolean;
+      person_urn: string;
+      account_name: string;
+    }>("/social/credentials", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  testSocialCredential: (payload: {
+    channel: string;
+    access_token?: string;
+    person_urn?: string;
+  }) =>
+    requestJson<{
+      ok: boolean;
+      channel: string;
+      account_name?: string;
+      person_urn?: string;
+      message: string;
+    }>("/social/credentials/test", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

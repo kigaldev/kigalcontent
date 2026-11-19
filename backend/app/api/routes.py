@@ -29,6 +29,7 @@ from app.models.entities import (
     LearnedRule,
     PerformanceSnapshot,
     Script,
+    SocialCredential,
     SocialPost,
     VideoAsset,
     Workspace,
@@ -2285,6 +2286,190 @@ async def generate_social_visual(
     }
 
 
+async def _get_effective_social_credential(
+    db: AsyncSession, channel_key: str
+) -> tuple[str, str, str, str | None]:
+    """Return (access_token, person_urn, source, account_name) checking DB first, then env settings."""
+    key = channel_key.lower()
+    row = (
+        await db.execute(select(SocialCredential).where(SocialCredential.channel == key))
+    ).scalar_one_or_none()
+    settings = get_settings()
+
+    env_map = {
+        "youtube": (settings.youtube_access_token, ""),
+        "instagram": (settings.instagram_access_token, ""),
+        "tiktok": (settings.tiktok_access_token, ""),
+        "linkedin": (settings.linkedin_access_token, settings.linkedin_person_urn),
+    }
+    env_token, env_urn = env_map.get(key, ("", ""))
+
+    if row and row.access_token and row.access_token.strip():
+        return (
+            row.access_token.strip(),
+            (row.person_urn or env_urn or "").strip(),
+            "database",
+            row.account_name,
+        )
+    if env_token and env_token.strip() and not env_token.startswith("test_"):
+        return env_token.strip(), (env_urn or "").strip(), "env", None
+    return "", (env_urn or "").strip(), "none", None
+
+
+@router.get("/social/credentials")
+async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """List connection status (masked) for YouTube, Instagram, TikTok, and LinkedIn."""
+    channels = ("youtube", "instagram", "tiktok", "linkedin")
+    result: dict[str, Any] = {}
+    for ch in channels:
+        token, urn, source, account_name = await _get_effective_social_credential(db, ch)
+        masked = f"{token[:6]}…{token[-4:]}" if len(token) > 12 else ("••••" if token else "")
+        result[ch] = {
+            "channel": ch,
+            "configured": bool(token),
+            "source": source,
+            "person_urn": urn if (urn and urn != "urn:li:person:creator-001") else "",
+            "account_name": account_name or "",
+            "masked_token": masked,
+        }
+    return {"channels": result}
+
+
+@router.put("/social/credentials")
+async def save_social_credential(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Persist an OAuth2 access token (and optional LinkedIn Person URN) in PostgreSQL."""
+    ch = str(payload.get("channel") or "").strip().lower()
+    if ch not in ("youtube", "instagram", "tiktok", "linkedin"):
+        raise HTTPException(status_code=400, detail="Canal no soportado.")
+
+    token = str(payload.get("access_token") or "").strip()
+    person_urn = str(payload.get("person_urn") or "").strip() or None
+
+    row = (
+        await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))
+    ).scalar_one_or_none()
+
+    if row is None:
+        row = SocialCredential(channel=ch, access_token=token, person_urn=person_urn)
+        db.add(row)
+    else:
+        if token:
+            row.access_token = token
+        if person_urn is not None:
+            row.person_urn = person_urn
+
+    await db.commit()
+    await db.refresh(row)
+    return {
+        "saved": True,
+        "channel": ch,
+        "configured": bool(row.access_token),
+        "person_urn": row.person_urn or "",
+        "account_name": row.account_name or "",
+    }
+
+
+@router.post("/social/credentials/test")
+async def test_social_credential(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Test a social channel OAuth2 token live against the official API."""
+    import httpx
+
+    ch = str(payload.get("channel") or "").strip().lower()
+    provided_token = str(payload.get("access_token") or "").strip()
+    provided_urn = str(payload.get("person_urn") or "").strip()
+
+    saved_token, saved_urn, _, _ = await _get_effective_social_credential(db, ch)
+    token = provided_token or saved_token
+    if not token:
+        return {
+            "ok": False,
+            "channel": ch,
+            "message": f"No hay ningún token de {ch.capitalize()} guardado ni introducido. Pega tu Access Token y pulsa Guardar.",
+        }
+
+    if ch == "linkedin":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resolved_urn = provided_urn or (saved_urn if saved_urn != "urn:li:person:creator-001" else "")
+            account_name = ""
+
+            # 1. Try OpenID Connect /v2/userinfo
+            r_ui = await client.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r_ui.status_code == 200:
+                data = r_ui.json()
+                sub = data.get("sub")
+                if sub:
+                    resolved_urn = f"urn:li:person:{sub}"
+                account_name = data.get("name") or data.get("email") or ""
+            else:
+                # 2. Fallback to /v2/me
+                r_me = await client.get(
+                    "https://api.linkedin.com/v2/me",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if r_me.status_code == 200:
+                    data = r_me.json()
+                    lid = data.get("id")
+                    if lid:
+                        resolved_urn = f"urn:li:person:{lid}"
+                    first = data.get("localizedFirstName", "")
+                    last = data.get("localizedLastName", "")
+                    account_name = f"{first} {last}".strip()
+                else:
+                    return {
+                        "ok": False,
+                        "channel": "linkedin",
+                        "status_code": r_ui.status_code,
+                        "message": (
+                            f"LinkedIn rechazó el token (HTTP {r_ui.status_code}). "
+                            f"Comprueba que no esté caducado y tenga los permisos 'openid', 'profile' y 'w_member_social'. "
+                            f"Detalle: {r_ui.text[:200]}"
+                        ),
+                    }
+
+            # Persist verified token + resolved URN + account name
+            row = (
+                await db.execute(select(SocialCredential).where(SocialCredential.channel == "linkedin"))
+            ).scalar_one_or_none()
+            if row is None:
+                row = SocialCredential(
+                    channel="linkedin",
+                    access_token=token,
+                    person_urn=resolved_urn or None,
+                    account_name=account_name or None,
+                )
+                db.add(row)
+            else:
+                row.access_token = token
+                if resolved_urn:
+                    row.person_urn = resolved_urn
+                if account_name:
+                    row.account_name = account_name
+            await db.commit()
+
+            return {
+                "ok": True,
+                "channel": "linkedin",
+                "account_name": account_name,
+                "person_urn": resolved_urn,
+                "message": f"✅ Conectado en vivo con LinkedIn ({account_name or 'Cuenta verificada'} · {resolved_urn}). Token guardado en el servidor.",
+            }
+
+    return {
+        "ok": True,
+        "channel": ch,
+        "message": f"Token de {ch.capitalize()} recibido. Pulsa Guardar Token para persistirlo en el servidor.",
+    }
+
+
 @router.post("/social/publish")
 async def execute_social_publish(
     body: SocialPublishExecuteRequest,
@@ -2306,7 +2491,12 @@ async def execute_social_publish(
         if not sp:
             raise HTTPException(status_code=404, detail=f"No prepared post found for {ch.value}.")
 
-        connector = get_connector_for_channel(ch)
+        eff_token, eff_urn, _, _ = await _get_effective_social_credential(db, ch.value.lower())
+        connector = get_connector_for_channel(
+            ch,
+            access_token_override=eff_token or None,
+            person_urn_override=eff_urn or None,
+        )
         try:
             pub_res = await connector.publish(
                 project_id=str(project.id),
@@ -2696,24 +2886,25 @@ async def get_system_connections_status(
         action_required=None,
     )
 
-    # 6. Social Channels
+    # 6. Social Channels (check PostgreSQL social_credentials + env settings)
     social_channels: dict[str, InfrastructureServiceStatus] = {}
-    tokens = {
-        "YouTube": settings.youtube_access_token,
-        "Instagram": settings.instagram_access_token,
-        "TikTok": settings.tiktok_access_token,
-        "LinkedIn": settings.linkedin_access_token,
-    }
-    for ch_name, token in tokens.items():
-        is_live = bool(token and token.strip() and not token.startswith("test_"))
+    for ch_name in ("YouTube", "Instagram", "TikTok", "LinkedIn"):
+        eff_token, eff_urn, source, account_name = await _get_effective_social_credential(db, ch_name.lower())
+        is_live = bool(eff_token)
+        detail_msg = (
+            f"Credencial en vivo ({source})"
+            + (f" · {account_name}" if account_name else "")
+            + (f" · {eff_urn}" if eff_urn and ch_name == "LinkedIn" and eff_urn != "urn:li:person:creator-001" else "")
+            + ". Publicación directa autorizada."
+            if is_live
+            else "Modo Sandbox / Simulación seguro activo. Publicaciones simuladas sin tocar cuenta real."
+        )
         social_channels[ch_name] = InfrastructureServiceStatus(
             service_name=ch_name,
             status="CONNECTED" if is_live else "SANDBOX_MOCK",
             provider=f"API Oficial {ch_name}",
-            details="Credencial en vivo detectada. Publicación directa autorizada."
-            if is_live
-            else "Modo Sandbox / Simulación seguro activo. Publicaciones simuladas sin tocar cuenta real.",
-            action_required=None if is_live else f"Añadir token oficial de {ch_name} cuando quieras publicar en vivo.",
+            details=detail_msg,
+            action_required=None if is_live else f"Añadir y guardar token oficial de {ch_name} en Conexiones Oficiales.",
         )
 
     all_ready = (

@@ -21,6 +21,7 @@ import {
   Zap,
   Save,
 } from "lucide-react";
+import { apiClient } from "@/lib/api";
 
 interface SocialChannelGuide {
   id: "youtube" | "instagram" | "tiktok" | "linkedin";
@@ -277,16 +278,112 @@ const DEFAULT_LOCAL_MODELS: RecommendedLocalModel[] = [
 ];
 
 export const SocialCredentialsSettings: React.FC = () => {
-  const [activeChannelId, setActiveChannelId] = useState<"youtube" | "instagram" | "tiktok" | "linkedin">("youtube");
+  const [activeChannelId, setActiveChannelId] = useState<"youtube" | "instagram" | "tiktok" | "linkedin">("linkedin");
   const [tokens, setTokens] = useState<Record<string, string>>({
     youtube: "",
     instagram: "",
     tiktok: "",
     linkedin: "",
   });
+  const [linkedinPersonUrn, setLinkedinPersonUrn] = useState("");
+  const [serverCreds, setServerCreds] = useState<
+    Record<
+      string,
+      {
+        configured: boolean;
+        source: string;
+        person_urn: string;
+        account_name: string;
+        masked_token: string;
+      }
+    >
+  >({});
+  const [savingCred, setSavingCred] = useState(false);
+  const [testingCred, setTestingCred] = useState(false);
+  const [credFeedback, setCredFeedback] = useState<{ ok: boolean; message: string } | null>(null);
   const [isSandboxMode, setIsSandboxMode] = useState(true);
   const [showTutorial, setShowTutorial] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const loadSocialCredentials = async () => {
+    try {
+      const data = await apiClient.getSocialCredentials();
+      if (data?.channels) {
+        setServerCreds(data.channels);
+        if (data.channels.linkedin?.person_urn) {
+          setLinkedinPersonUrn(data.channels.linkedin.person_urn);
+        }
+        const anyConfigured = Object.values(data.channels).some((c) => c.configured);
+        if (anyConfigured) setIsSandboxMode(false);
+      }
+    } catch {
+      // silent offline fallback
+    }
+  };
+
+  useEffect(() => {
+    void loadSocialCredentials();
+  }, []);
+
+  const handleSaveChannelToken = async () => {
+    const tokenVal = tokens[activeChannelId]?.trim() || "";
+    if (!tokenVal && !serverCreds[activeChannelId]?.configured) {
+      setCredFeedback({
+        ok: false,
+        message: "Introduce primero tu Access Token oficial antes de guardar.",
+      });
+      return;
+    }
+    setSavingCred(true);
+    setCredFeedback(null);
+    try {
+      await apiClient.saveSocialCredential({
+        channel: activeChannelId,
+        access_token: tokenVal,
+        person_urn: activeChannelId === "linkedin" ? linkedinPersonUrn.trim() || undefined : undefined,
+      });
+      setTokens((prev) => ({ ...prev, [activeChannelId]: "" }));
+      await loadSocialCredentials();
+      setCredFeedback({
+        ok: true,
+        message: `✅ Token de ${activeGuide.name} guardado en el servidor. Pulsa 'Probar Conexión' para verificar permisos en vivo.`,
+      });
+    } catch (err) {
+      setCredFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error guardando credencial en el servidor.",
+      });
+    } finally {
+      setSavingCred(false);
+    }
+  };
+
+  const handleTestChannelToken = async () => {
+    setTestingCred(true);
+    setCredFeedback(null);
+    try {
+      const res = await apiClient.testSocialCredential({
+        channel: activeChannelId,
+        access_token: tokens[activeChannelId]?.trim() || undefined,
+        person_urn: activeChannelId === "linkedin" ? linkedinPersonUrn.trim() || undefined : undefined,
+      });
+      if (res.person_urn && activeChannelId === "linkedin") {
+        setLinkedinPersonUrn(res.person_urn);
+      }
+      if (res.ok) {
+        setTokens((prev) => ({ ...prev, [activeChannelId]: "" }));
+        await loadSocialCredentials();
+      }
+      setCredFeedback({ ok: res.ok, message: res.message });
+    } catch (err) {
+      setCredFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error verificando conexión con la API oficial.",
+      });
+    } finally {
+      setTestingCred(false);
+    }
+  };
 
   // Hybrid Skill-Aware LLM Router state
   const [llmProvider, setLlmProvider] = useState<LLMProviderMode>("auto");
@@ -735,12 +832,16 @@ export const SocialCredentialsSettings: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {CHANNELS_GUIDE.map((ch) => {
           const isSelected = activeChannelId === ch.id;
-          const hasToken = Boolean(tokens[ch.id]);
+          const serverInfo = serverCreds[ch.id];
+          const hasToken = Boolean(serverInfo?.configured || tokens[ch.id]?.trim());
           return (
             <button
               type="button"
               key={ch.id}
-              onClick={() => setActiveChannelId(ch.id)}
+              onClick={() => {
+                setActiveChannelId(ch.id);
+                setCredFeedback(null);
+              }}
               className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-2 ${
                 isSelected
                   ? `bg-slate-850 ${ch.brandColor} border-2 shadow-lg`
@@ -754,16 +855,20 @@ export const SocialCredentialsSettings: React.FC = () => {
                 </div>
                 <span
                   className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                    hasToken
+                    serverInfo?.configured
                       ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                      : hasToken
+                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                       : "bg-slate-800 text-slate-400"
                   }`}
                 >
-                  {hasToken ? "Configurado" : "Sin Clave"}
+                  {serverInfo?.configured ? "En Vivo" : hasToken ? "Sin Guardar" : "Sin Clave"}
                 </span>
               </div>
-              <span className="text-[10px] text-slate-400">
-                {isSandboxMode ? "Simulación Sandbox" : "API Oficial v21"}
+              <span className="text-[10px] text-slate-400 truncate">
+                {serverInfo?.configured
+                  ? serverInfo.account_name || `Conectado (${serverInfo.source})`
+                  : "Simulación Sandbox"}
               </span>
             </button>
           );
@@ -800,40 +905,85 @@ export const SocialCredentialsSettings: React.FC = () => {
         </div>
 
         {/* Credential Input */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <label className="block text-xs font-semibold text-slate-200 flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <Key className="w-3.5 h-3.5 text-cyan-400" />
               {activeGuide.credentialName}
             </span>
-            <span className="text-[11px] text-slate-400 font-normal">
-              {isSandboxMode
-                ? "Opcional en Modo Sandbox (puedes dejarlo vacío)"
-                : "Obligatorio para publicar en vivo"}
+            <span className="text-[11px] font-normal">
+              {serverCreds[activeChannelId]?.configured ? (
+                <span className="text-emerald-300 font-semibold">
+                  ✓ Guardado en servidor ({serverCreds[activeChannelId].masked_token})
+                </span>
+              ) : (
+                <span className="text-amber-300">Sin token guardado en servidor</span>
+              )}
             </span>
           </label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <input
               type="password"
               value={tokens[activeChannelId]}
               onChange={(e) =>
                 setTokens((prev) => ({ ...prev, [activeChannelId]: e.target.value }))
               }
-              placeholder={activeGuide.credentialPlaceholder}
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+              placeholder={
+                serverCreds[activeChannelId]?.configured
+                  ? "Deja vacío para mantener el token actual o pega uno nuevo para sustituirlo..."
+                  : activeGuide.credentialPlaceholder
+              }
+              className="flex-1 min-w-[220px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
             />
             <button
               type="button"
-              onClick={() => {
-                alert(`Conexión con ${activeGuide.name} verificada con éxito.`);
-              }}
-              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+              onClick={() => void handleSaveChannelToken()}
+              disabled={savingCred}
+              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-bold transition inline-flex items-center gap-1.5"
             >
-              Probar Conexión
+              <Save className="w-3.5 h-3.5" />
+              {savingCred ? "Guardando..." : "Guardar Token"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleTestChannelToken()}
+              disabled={testingCred}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-200 text-xs font-semibold border border-slate-700 transition inline-flex items-center gap-1.5"
+            >
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              {testingCred ? "Verificando..." : "Probar Conexión"}
             </button>
           </div>
+
+          {activeChannelId === "linkedin" && (
+            <label className="block text-xs text-slate-300 pt-1">
+              <span className="text-[11px] font-semibold text-slate-300 block mb-1">
+                LinkedIn Person URN (se rellena automáticamente al pulsar &ldquo;Probar Conexión&rdquo;)
+              </span>
+              <input
+                type="text"
+                value={linkedinPersonUrn}
+                onChange={(e) => setLinkedinPersonUrn(e.target.value)}
+                placeholder="urn:li:person:xxxxxxxx (opcional, auto-detectado)"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-200 font-mono focus:outline-none focus:border-cyan-400"
+              />
+            </label>
+          )}
+
+          {credFeedback && (
+            <div
+              className={`rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed ${
+                credFeedback.ok
+                  ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-200"
+                  : "border-rose-500/40 bg-rose-950/30 text-rose-200"
+              }`}
+            >
+              {credFeedback.message}
+            </div>
+          )}
+
           <p className="text-[11px] text-slate-400">
-            🔒 Tu token se almacena encriptado en el servidor y nunca se comparte con terceros.
+            🔒 Tu token se guarda en la base de datos PostgreSQL del servidor y se verifica en vivo contra la API oficial.
           </p>
         </div>
 
