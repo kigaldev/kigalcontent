@@ -3,7 +3,9 @@
 import React, { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
+  Copy,
   Fingerprint,
   HelpCircle,
   KeyRound,
@@ -16,6 +18,8 @@ import {
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import { runLocalPreflight } from "@/lib/utils";
+import { copyPreservingLineBreaks } from "@/lib/unicodeFormat";
+import { RichTextToolbar } from "@/components/RichTextToolbar";
 import type { SocialChannel, SocialPost } from "@/types/engine";
 import { KigalChatDMAutomationHub } from "@/components/KigalChatDMAutomationHub";
 
@@ -129,6 +133,19 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     "LinkedIn",
   ]);
   const [publishing, setPublishing] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const bodyTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+
+  const handleCopyFormatted = async (key: string, text: string, label: string) => {
+    const ok = await copyPreservingLineBreaks(text);
+    if (ok) {
+      setCopiedKey(key);
+      showToast("success", `✅ ${label} copiado conservando saltos de línea y formato.`);
+      setTimeout(() => setCopiedKey((cur) => (cur === key ? null : cur)), 2500);
+    } else {
+      showToast("error", "No se pudo copiar al portapapeles.");
+    }
+  };
 
   useEffect(() => {
     if (selectedDetail?.social_posts) {
@@ -601,22 +618,34 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                           </label>
                         )}
 
-                        <label className="block text-xs text-slate-300">
-                          <div className="flex justify-between mb-1">
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between text-xs text-slate-300">
                             <span>Texto de la publicación (Copy)</span>
                             <span className="font-mono text-slate-400">
                               {post.post_body.length} caracteres
                             </span>
                           </div>
+                          <RichTextToolbar
+                            value={post.post_body}
+                            onChange={(nextVal) => handleFieldChange(post.id, "post_body", nextVal)}
+                            inputRef={{
+                              get current() {
+                                return bodyTextareaRefs.current[post.id] ?? null;
+                              },
+                            }}
+                          />
                           <textarea
-                            rows={6}
+                            ref={(el) => {
+                              bodyTextareaRefs.current[post.id] = el;
+                            }}
+                            rows={7}
                             value={post.post_body}
                             onChange={(e) =>
                               handleFieldChange(post.id, "post_body", e.target.value)
                             }
                             className="w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-cyan-400"
                           />
-                        </label>
+                        </div>
 
                         {post.channel === "LinkedIn" && (
                           <label className="block text-xs text-slate-300">
@@ -645,39 +674,91 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                           </ul>
                         )}
 
-                        <div className="flex items-center justify-between pt-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                           <span className="text-[11px] text-slate-500">
                             {isSelected ? "Seleccionada para publicar" : "No marcada"}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => handleSavePost(post)}
-                            className="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-slate-950 transition"
-                          >
-                            Guardar Cambios
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const fullText =
+                                  post.title && !post.post_body.startsWith(post.title)
+                                    ? `${post.title}\n\n${post.post_body}`
+                                    : post.post_body;
+                                void handleCopyFormatted(
+                                  `copy-card-${post.id}`,
+                                  fullText,
+                                  `Publicación de ${post.channel}`
+                                );
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-xs font-semibold text-sky-200 transition"
+                            >
+                              {copiedKey === `copy-card-${post.id}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              <span>Copiar con Formato</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSavePost(post)}
+                              className="px-3 py-1.5 rounded bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-slate-950 transition"
+                            >
+                              Guardar Cambios
+                            </button>
+                          </div>
                         </div>
                       </div>
 
                       {/* Live Visual Feed Preview when single channel (e.g. LinkedIn only) */}
                       {visiblePosts.length === 1 && (
                         <div className="lg:col-span-6 nle-panel p-5 space-y-4 border-sky-500/30">
-                          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                             <div>
                               <h4 className="text-sm font-bold text-white">
                                 Borrador Visual en {post.channel}
                               </h4>
                               <p className="text-[11px] text-slate-400">
-                                Así se visualizará tu publicación en el feed antes de aprobar la salida.
+                                Copia el texto tal como se ve aquí (conserva saltos de línea, negritas y emojis).
                               </p>
                             </div>
-                            <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-300 text-[10px] font-bold">
-                              {visualMode === "NONE"
-                                ? "Solo Texto"
-                                : visualMode === "IMAGE_INFOGRAPHIC"
-                                ? "Con Imagen / Infografía"
-                                : "Con Carrusel PDF"}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-300 text-[10px] font-bold">
+                                {visualMode === "NONE"
+                                  ? "Solo Texto"
+                                  : visualMode === "IMAGE_INFOGRAPHIC"
+                                  ? "Con Imagen / Infografía"
+                                  : "Con Carrusel PDF"}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const fullText =
+                                    post.title && !post.post_body.startsWith(post.title)
+                                      ? `${post.title}\n\n${post.post_body}`
+                                      : post.post_body;
+                                  void handleCopyFormatted(
+                                    `preview-copy-${post.id}`,
+                                    fullText,
+                                    `Borrador de ${post.channel}`
+                                  );
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold transition shadow"
+                              >
+                                {copiedKey === `preview-copy-${post.id}` ? (
+                                  <Check className="w-3.5 h-3.5" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                                <span>
+                                  {copiedKey === `preview-copy-${post.id}`
+                                    ? "¡Copiado!"
+                                    : "Copiar Publicación"}
+                                </span>
+                              </button>
+                            </div>
                           </div>
 
                           <div className="rounded-xl border border-slate-700/90 bg-[#0d121d] p-4 space-y-3 shadow-xl">

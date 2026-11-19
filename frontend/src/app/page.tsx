@@ -210,14 +210,21 @@ export default function KigalContentStudioPage() {
         setAuditLogs(fetchedLogs);
         setAnalytics(fetchedAnalytics);
 
-        const targetId =
-          explicitProjectId ??
-          useEngineStore.getState().selectedProjectId ??
-          fetchedProjects[0]?.id;
+        const candidateId =
+          explicitProjectId ?? useEngineStore.getState().selectedProjectId;
+        const targetId = fetchedProjects.some((p) => p.id === candidateId)
+          ? candidateId
+          : fetchedProjects[0]?.id;
 
         if (targetId) {
+          if (targetId !== useEngineStore.getState().selectedProjectId) {
+            setSelectedProjectId(targetId);
+          }
           const detail = await apiClient.getProjectDetail(targetId);
           setSelectedDetail(detail);
+        } else {
+          setSelectedProjectId(null);
+          setSelectedDetail(null);
         }
       } catch {
         setBackendOnline(false);

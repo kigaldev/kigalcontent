@@ -47,6 +47,7 @@ import { XPlatformVisor } from "@/components/script-studio/XPlatformVisor";
 import { ScriptConfigPanel } from "@/components/script-studio/ScriptConfigPanel";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
+import { copyPreservingLineBreaks } from "@/lib/unicodeFormat";
 import {
   CONVERSION_GOAL_META,
   DURATION_PRESET_META,
@@ -163,27 +164,27 @@ function buildLinkedInDraft(params: {
     const hook =
       cleanHookCandidate && !isTemplateSlopHook(cleanHookCandidate) && cleanHookCandidate !== cleanTitle
         ? clampText(stripUrls(cleanHookCandidate), 132)
-        : "Las publicaciones que hice con IA tuvieron buenas visitas, pero cero engagement real.";
+        : "Las publicaciones que hice con IA tuvieron buenas visitas, pero 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 𝗿𝗲𝗮𝗹. 💡";
 
     const bodyLines = [
-      "Hace tiempo que no publico por aquí, y quería compartir con total transparencia el motivo.",
+      "Hace tiempo que no publico por aquí, y quería compartir con total transparencia el motivo. 👋",
       "",
       "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi en su totalidad con IA. " +
-        "Tuvieron buen número de visualizaciones, pero la realidad fue clara: cero engagement y una sensación completamente artificial.",
+        "Tuvieron buen número de visualizaciones, pero la realidad fue clara: 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 y una sensación completamente artificial.",
       "",
       "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
       "",
-      "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 100% natural, " +
-        "con presencia asidua y compartiendo aprendizajes reales de trinchera. Agradezco de corazón todo vuestro feedback y apoyo en este camino.",
+      "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 𝟭𝟬𝟬% 𝗻𝗮𝘁𝘂𝗿𝗮𝗹, " +
+        "con presencia asidua y compartiendo aprendizajes reales de trinchera. Agradezco de corazón todo vuestro feedback y apoyo en este camino. 🙌",
       "",
-      "Uno de los proyectos en los que estoy inmerso actualmente es mi papel como Growth Country Lead para HERO24 en España. " +
+      "Uno de los proyectos en los que estoy inmerso actualmente es mi papel como 𝗚𝗿𝗼𝘄𝘁𝗵 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 𝗟𝗲𝗮𝗱 para 𝗛𝗘𝗥𝗢𝟮𝟰 en España. 🚀 " +
         "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, " +
         "eliminando intermediarios innecesarios y digitalizando la captación.",
       "",
-      "Si tienes una empresa de servicios en España y estás interesado en abrir un nuevo canal de captación de clientes " +
-        "para tu negocio de forma totalmente gratuita, escríbeme por mensaje privado o déjame un comentario y lo comentamos.",
+      "👉 Si tienes una empresa de servicios en España y estás interesado en abrir un nuevo canal de captación de clientes " +
+        "para tu negocio de forma 𝘁𝗼𝘁𝗮𝗹𝗺𝗲𝗻𝘁𝗲 𝗴𝗿𝗮𝘁𝘂𝗶𝘁𝗮, escríbeme por mensaje privado o déjame un comentario y lo comentamos.",
       "",
-      "¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
+      "💬 ¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
       "",
       "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
     ];
@@ -370,27 +371,7 @@ function extractSeoKeywords(
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fallback below
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
+  return copyPreservingLineBreaks(text);
 }
 
 export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {

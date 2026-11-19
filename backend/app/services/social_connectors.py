@@ -151,26 +151,26 @@ class SocialCopyCraftEngine:
         notes = (context_notes or "").lower()
 
         if "hero24" in notes or "hero24" in hook.lower() or "artificial" in notes or "engagement" in notes:
-            hook = "Las publicaciones que hice con IA tuvieron buenas visitas, pero cero engagement real."
+            hook = "Las publicaciones que hice con IA tuvieron buenas visitas, pero 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 𝗿𝗲𝗮𝗹. 💡"
             body_lines = [
-                "Hace tiempo que no publico por aquí, y quería ser transparente con el motivo.",
+                "Hace tiempo que no publico por aquí, y quería ser transparente con el motivo. 👋",
                 "",
                 "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi íntegramente con IA. "
-                "Tuvieron buen número de visualizaciones, pero la realidad fue aplastante: cero engagement y una sensación completamente artificial.",
+                "Tuvieron buen número de visualizaciones, pero la realidad fue aplastante: 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 y una sensación completamente artificial.",
                 "",
                 "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
                 "",
-                "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 100% natural, "
-                "con presencia asidua y compartiendo aprendizajes de trinchera. Agradezco de corazón todo vuestro feedback.",
+                "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 𝟭𝟬𝟬% 𝗻𝗮𝘁𝘂𝗿𝗮𝗹, "
+                "con presencia asidua y compartiendo aprendizajes de trinchera. Agradezco de corazón todo vuestro feedback. 🙌",
                 "",
-                "Uno de los proyectos en los que estoy inmerso es mi rol como Growth Country Lead para HERO24 en España. "
+                "Uno de los proyectos en los que estoy inmerso es mi rol como 𝗚𝗿𝗼𝘄𝘁𝗵 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 𝗟𝗲𝗮𝗱 para 𝗛𝗘𝗥𝗢𝟮𝟰 en España. 🚀 "
                 "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, "
                 "eliminando intermediarios innecesarios y digitalizando la captación.",
                 "",
-                "Si tienes una empresa de servicios en España y te interesa abrir un nuevo canal de captación de clientes "
-                "para tu negocio de forma totalmente gratuita, escríbeme por mensaje privado o déjame un comentario.",
+                "👉 Si tienes una empresa de servicios en España y te interesa abrir un nuevo canal de captación de clientes "
+                "para tu negocio de forma 𝘁𝗼𝘁𝗮𝗹𝗺𝗲𝗻𝘁𝗲 𝗴𝗿𝗮𝘁𝘂𝗶𝘁𝗮, escríbeme por mensaje privado o déjame un comentario.",
                 "",
-                "¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
+                "💬 ¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
                 "",
                 "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
             ]

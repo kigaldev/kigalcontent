@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useRef, useState, useMemo } from "react";
+import { RichTextToolbar } from "@/components/RichTextToolbar";
 import {
   AlertTriangle,
   Briefcase,
@@ -74,6 +75,8 @@ export function LinkedInPlatformVisor({
   copiedKey,
   onSyncFromMaster,
 }: LinkedInPlatformVisorProps) {
+  const hookInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [visualProvider, setVisualProvider] = useState<"svg_local" | "nano_banana" | "gpt_images">("svg_local");
   const [visualType, setVisualType] = useState<"INFOGRAPHIC" | "IMAGE">("INFOGRAPHIC");
   const [visualPrompt, setVisualPrompt] = useState("");
@@ -265,7 +268,14 @@ export function LinkedInPlatformVisor({
                   {linkedInHook.length} / 135 chars
                 </span>
               </div>
+              <RichTextToolbar
+                value={linkedInHook}
+                onChange={onUpdateHook}
+                inputRef={hookInputRef}
+                compact
+              />
               <input
+                ref={hookInputRef}
                 id="li-hook-input"
                 type="text"
                 value={linkedInHook}
@@ -299,7 +309,13 @@ export function LinkedInPlatformVisor({
                   )}
                 </span>
               </div>
+              <RichTextToolbar
+                value={linkedInBody}
+                onChange={onUpdateBody}
+                inputRef={bodyTextareaRef}
+              />
               <textarea
+                ref={bodyTextareaRef}
                 id="li-body-input"
                 rows={11}
                 value={linkedInBody}

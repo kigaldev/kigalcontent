@@ -170,14 +170,23 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
   const handleDeleteProject = async (proj: ContentProject) => {
     setDeletingId(proj.id);
     try {
+      if (selectedProjectId === proj.id) {
+        setSelectedProjectId(null);
+      }
       if (backendOnline) {
-        await apiClient.deleteProject(proj.id);
+        try {
+          await apiClient.deleteProject(proj.id);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "";
+          // If already absent on server (404), still remove from local list cleanly
+          if (!msg.toLowerCase().includes("not found") && !msg.includes("404")) {
+            throw err;
+          }
+        }
+        setProjects(projects.filter((p) => p.id !== proj.id));
         await onRefresh();
       } else {
         setProjects(projects.filter((p) => p.id !== proj.id));
-      }
-      if (selectedProjectId === proj.id) {
-        setSelectedProjectId(null);
       }
       setConfirmDeleteId(null);
       showToast("info", `Idea "${proj.asset_code}" eliminada.`);
