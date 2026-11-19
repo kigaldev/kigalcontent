@@ -50,6 +50,12 @@ class TAMClassification(str, Enum):
     EXPANSION_20 = "EXPANSION_20"
 
 
+class ContentFormat(str, Enum):
+    TEXT_AND_VIDEO = "TEXT_AND_VIDEO"   # Guión A/V en dos columnas + Copy escrito
+    TEXT_ONLY = "TEXT_ONLY"             # Solo publicación escrita (LinkedIn, X, carrusel PDF)
+    VIDEO_ONLY = "VIDEO_ONLY"           # Solo video vertical/horizontal
+
+
 # --- Creator Profile (Context Engine) ---
 
 class ConversionGoalSpec(BaseModel):
@@ -311,6 +317,32 @@ class RadarMatutinoIngestResponse(BaseModel):
     evaluation: IdeaAIEvaluationResponse | None = None
 
 
+class IdeaChatMessage(BaseModel):
+    role: str = "user"  # user, assistant, system
+    content: str
+    timestamp: str | None = None
+
+
+class IdeaChatRefineRequest(BaseModel):
+    messages: list[IdeaChatMessage]
+    current_title: str | None = None
+    current_context: str | None = None
+    target_platforms: list[str] = Field(default_factory=lambda: ["LinkedIn", "X", "YouTube", "Instagram", "TikTok"])
+    preferred_format: ContentFormat = ContentFormat.TEXT_AND_VIDEO
+
+
+class IdeaChatRefineResponse(BaseModel):
+    reply: str
+    suggested_title: str | None = None
+    suggested_context_notes: str | None = None
+    suggested_format: ContentFormat = ContentFormat.TEXT_AND_VIDEO
+    suggested_platforms: list[str] = Field(default_factory=list)
+    suggested_hooks: list[HookCandidate] = Field(default_factory=list)
+    calculated_ice: float | None = None
+    tam_recommendation: TAMClassification = TAMClassification.CORE_80
+    ready_to_create: bool = False
+
+
 # --- Two-Column Script Studio ---
 
 class TwoColumnScriptBlock(BaseModel):
@@ -391,6 +423,7 @@ class ProjectCreateRequest(BaseModel):
     context_notes: str | None = None
     source_origin: str = "manual"
     target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
+    content_format: ContentFormat = ContentFormat.TEXT_AND_VIDEO
 
 
 class FSMTransitionRequest(BaseModel):
@@ -419,6 +452,7 @@ class ProjectSummaryResponse(BaseModel):
     context_notes: str | None = None
     source_origin: str | None = None
     target_platforms: list[str] = Field(default_factory=lambda: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"])
+    content_format: ContentFormat = ContentFormat.TEXT_AND_VIDEO
 
 
 # --- HITL Governance ---

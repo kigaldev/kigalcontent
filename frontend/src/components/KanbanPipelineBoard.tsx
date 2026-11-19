@@ -3,22 +3,29 @@
 import React, { useMemo, useState } from "react";
 import {
   ArrowRight,
+  Bot,
   Briefcase,
   Calculator,
   Check,
   Clock,
   FileText,
+  Film,
   HelpCircle,
   Instagram,
   Layers,
   Loader2,
+  MessageSquare,
   PlaySquare,
   PlusCircle,
   Radio,
+  Send,
   Shield,
   Sparkles,
   Target,
   Twitter,
+  User,
+  Video,
+  X as CloseIcon,
   Zap,
 } from "lucide-react";
 import { useEngineStore } from "@/store/useEngineStore";
@@ -30,11 +37,14 @@ import {
   HUMAN_STATE_LABELS,
 } from "@/lib/utils";
 import type {
+  ContentFormat,
   ContentProject,
   ConversionGoal,
   DurationPreset,
   FSMState,
   IdeaAIEvaluationResponse,
+  IdeaChatMessage,
+  IdeaChatRefineResponse,
   ScriptTargetPlatform,
 } from "@/types/engine";
 
@@ -121,6 +131,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
   // Idea Form State
   const [title, setTitle] = useState("");
   const [contextNotes, setContextNotes] = useState("");
+  const [contentFormat, setContentFormat] = useState<ContentFormat>("TEXT_AND_VIDEO");
   const [selectedPlatforms, setSelectedPlatforms] = useState<ScriptTargetPlatform[]>([
     "YouTube",
     "Instagram",
@@ -128,6 +139,18 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
     "LinkedIn",
     "X",
   ]);
+
+  // Copiloto Estratega IA State
+  const [showChatCopilot, setShowChatCopilot] = useState(false);
+  const [chatMessages, setChatMessages] = useState<IdeaChatMessage[]>([
+    {
+      role: "assistant",
+      content: "¡Hola! Soy tu Copiloto Estratega de Contenido (cargado con Anti-slop, HookLab, Storytelling y psicología de audiencias). Cuéntame qué idea tienes en mente, qué cambio o experiencia quieres compartir, o qué objetivo buscas, y te ayudaré a estructurarla sin frases robóticas ni fórmulas artificiales.",
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [latestRefinedIdea, setLatestRefinedIdea] = useState<IdeaChatRefineResponse | null>(null);
   const [duration, setDuration] = useState<DurationPreset>("STANDARD_SHORT");
   const [goal, setGoal] = useState<ConversionGoal>("EMAIL_LEAD_CAPTURE");
   const [tam, setTam] = useState<"CORE_80" | "EXPANSION_20">("CORE_80");
@@ -187,6 +210,158 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
       }
       return [...prev, pId];
     });
+  };
+
+  const handleSendChatMessage = async (overrideText?: string) => {
+    const textToSend = (overrideText ?? chatInput).trim();
+    if (!textToSend || chatLoading) return;
+
+    const userMsg: IdeaChatMessage = { role: "user", content: textToSend };
+    const updatedMessages = [...chatMessages, userMsg];
+    setChatMessages(updatedMessages);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      if (backendOnline) {
+        const res = await apiClient.chatRefineIdea({
+          messages: updatedMessages,
+          current_title: title.trim() || undefined,
+          current_context: contextNotes.trim() || undefined,
+          target_platforms: selectedPlatforms,
+          preferred_format: contentFormat,
+        });
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: res.reply },
+        ]);
+        setLatestRefinedIdea(res);
+      } else {
+        // Fallback local copilot
+        const mockReply: IdeaChatRefineResponse = {
+          reply: `Excelente propuesta. Para "${textToSend}", la clave está en evitar clichés ("en este mundo cambiante...") y abrir con un gancho directo y vulnerable. He configurado una estrategia de alto engagement con formato adecuado y ganchos contrastados.`,
+          suggested_title: textToSend.length > 55 ? `${textToSend.slice(0, 52)}...` : textToSend,
+          suggested_context_notes: `Contexto afinado por Copiloto Estratega:\n- Objetivo: Publicación honesta y humana sin clichés de IA.\n- Tesis: Cambio de etapa profesional, aprendizaje de engagement real y foco en valor tangible para empresas de servicios.\n- Llamada a la acción: Conversación constructiva o contacto directo sin enlaces en el cuerpo.`,
+          suggested_format: "TEXT_ONLY",
+          suggested_platforms: ["LinkedIn", "X"],
+          suggested_hooks: [
+            {
+              category: "Vulnerable",
+              hook_text: "Hace meses que no publicaba por aquí, y la razón es simple: me cansé de las publicaciones artificiales.",
+              pattern_interrupt: "Pausa y tono sincero",
+              estimated_hold_rate: 82.0,
+            },
+            {
+              category: "Contrarian",
+              hook_text: "Nuestras últimas publicaciones con IA tuvieron buenas visitas, pero CERO engagement real. Esto es lo que aprendí.",
+              pattern_interrupt: "Confesión directa",
+              estimated_hold_rate: 79.5,
+            },
+          ],
+          calculated_ice: 8.8,
+          tam_recommendation: "CORE_80",
+          ready_to_create: true,
+        };
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: mockReply.reply },
+        ]);
+        setLatestRefinedIdea(mockReply);
+      }
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Error comunicando con el Copiloto Estratega"
+      );
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Ha ocurrido un error al conectar con el motor de IA. Puedes intentar de nuevo o redactar directamente tu idea en el formulario.",
+        },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const handleApplyStrategyToForm = (strat: IdeaChatRefineResponse, autoCreate = false) => {
+    const sTitle = strat.suggested_title || title || "Nueva Idea Estratégica";
+    const sNotes = strat.suggested_context_notes || contextNotes || "";
+    const sIce = strat.calculated_ice ?? 8.5;
+
+    setTitle(sTitle);
+    setContextNotes(sNotes);
+    setContentFormat(strat.suggested_format);
+    if (strat.suggested_platforms && strat.suggested_platforms.length > 0) {
+      setSelectedPlatforms(strat.suggested_platforms);
+    }
+    setImpact(sIce);
+    setConfidence(Math.min(10, Math.max(1, sIce - 0.3)));
+    setEase(Math.min(10, Math.max(1, sIce - 0.5)));
+    setTam(strat.tam_recommendation);
+
+    if (autoCreate) {
+      void (async () => {
+        setCreating(true);
+        try {
+          if (backendOnline) {
+            const created = await apiClient.createProject({
+              working_title: sTitle,
+              target_duration: duration,
+              conversion_goal: goal,
+              tam_classification: strat.tam_recommendation,
+              impact: sIce,
+              confidence: Math.min(10, Math.max(1, sIce - 0.3)),
+              ease: Math.min(10, Math.max(1, sIce - 0.5)),
+              context_notes: sNotes,
+              source_origin: "copiloto_chat",
+              target_platforms: strat.suggested_platforms,
+              content_format: strat.suggested_format,
+            });
+            await onRefresh();
+            setSelectedProjectId(created.id);
+            setShowChatCopilot(false);
+            showToast("success", `🚀 Proyecto "${created.working_title}" creado con éxito desde el Copiloto.`);
+          } else {
+            const mock: ContentProject = {
+              id: crypto.randomUUID(),
+              asset_code: `KC-${Math.floor(100 + Math.random() * 900)}`,
+              working_title: sTitle,
+              target_duration: duration,
+              conversion_goal: goal,
+              current_state: "SCRIPTED_PACKAGED",
+              ice_score: sIce,
+              tam_classification: strat.tam_recommendation,
+              context_notes: sNotes,
+              source_origin: "copiloto_chat",
+              target_platforms: strat.suggested_platforms,
+              content_format: strat.suggested_format,
+              ab_variants: [],
+              state_history: [],
+              temporal_workflow_id: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            setProjects([mock, ...projects]);
+            setSelectedProjectId(mock.id);
+            setShowChatCopilot(false);
+            showToast("info", `🚀 Proyecto creado localmente desde el Copiloto.`);
+          }
+        } catch (e) {
+          showToast("error", e instanceof Error ? e.message : "Error creando proyecto");
+        } finally {
+          setCreating(false);
+        }
+      })();
+    } else {
+      setShowChatCopilot(false);
+      setShowCreateForm(true);
+      showToast(
+        "success",
+        "✨ Estrategia volcada al formulario. Revisa los datos y haz clic en 'Guardar Idea'."
+      );
+    }
   };
 
   const handleAIEvaluate = async () => {
@@ -337,6 +512,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           context_notes: contextNotes.trim() || undefined,
           source_origin: "manual",
           target_platforms: selectedPlatforms,
+          content_format: contentFormat,
         });
         await onRefresh();
         setSelectedProjectId(created.id);
@@ -357,6 +533,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           context_notes: contextNotes.trim() || undefined,
           source_origin: "manual",
           target_platforms: selectedPlatforms,
+          content_format: contentFormat,
           ab_variants: [],
           state_history: [],
           temporal_workflow_id: null,
@@ -512,6 +689,22 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
           <button
             type="button"
+            onClick={() => setShowChatCopilot((v) => !v)}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border font-bold text-xs transition shadow-md ${
+              showChatCopilot
+                ? "bg-gradient-to-r from-violet-600 to-cyan-600 text-white border-cyan-400 ring-2 ring-cyan-400/40"
+                : "bg-slate-900/90 hover:bg-slate-800 border-violet-500/50 text-violet-300 hover:text-white"
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-violet-400 animate-pulse" />
+            <span>{showChatCopilot ? "Cerrar Copiloto" : "💬 Copiloto Estratega IA"}</span>
+            <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 uppercase font-mono">
+              Anti-slop
+            </span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShowGuide((v) => !v)}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white text-xs font-medium transition"
           >
@@ -560,6 +753,197 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
         </div>
       )}
 
+      {/* Copiloto Estratega IA Panel (Conversational Ideation) */}
+      {showChatCopilot && (
+        <div className="rounded-2xl border-2 border-violet-500/60 bg-[#080d1c] shadow-2xl p-4 sm:p-5 space-y-4 animate-fadeIn">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-700/80">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-violet-600 to-cyan-500 flex items-center justify-center text-white shadow-md">
+                <Bot className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Copiloto Estratega de Contenido</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/40 uppercase font-mono">
+                    Anti-slop & Conversión
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Intercambia ideas, define tu enfoque y recibe una estructura narrativa honesta antes de crear el proyecto.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowChatCopilot(false)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="Cerrar Copiloto"
+            >
+              <CloseIcon className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Quick Prompt Suggestions */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+              Sugerencias rápidas para comenzar:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                "He comenzado como Growth Lead en HERO24 y quiero un post honesto en LinkedIn sobre mi autocrítica con la IA",
+                "Quiero captar empresas de servicios en España con un Lead Magnet gratuito y abrir nuevo canal",
+                "Post de solo texto para LinkedIn y X: 3 errores que destruyen el alcance orgánico",
+                "Quiero una idea sobre automatización con Manychat sin sonar a bot ni a plantilla de IA",
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => void handleSendChatMessage(suggestion)}
+                  disabled={chatLoading}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-violet-500/60 text-slate-300 hover:text-violet-200 text-[11px] text-left transition disabled:opacity-50"
+                >
+                  💡 &quot;{suggestion}&quot;
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Messages Stream */}
+          <div className="max-h-[340px] overflow-y-auto space-y-3 pr-1 py-1">
+            {chatMessages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                {msg.role === "assistant" && (
+                  <div className="h-6 w-6 rounded-full bg-violet-600/30 border border-violet-500/40 flex-shrink-0 flex items-center justify-center text-violet-300 mt-0.5">
+                    <Bot className="w-3.5 h-3.5" />
+                  </div>
+                )}
+                <div
+                  className={`max-w-[85%] rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-cyan-600 text-slate-950 font-medium rounded-tr-none shadow-md"
+                      : "bg-[#050811] border border-slate-700/80 text-slate-200 rounded-tl-none space-y-1"
+                  }`}
+                >
+                  <p className="whitespace-pre-line">{msg.content}</p>
+                </div>
+                {msg.role === "user" && (
+                  <div className="h-6 w-6 rounded-full bg-cyan-600/30 border border-cyan-500/40 flex-shrink-0 flex items-center justify-center text-cyan-300 mt-0.5">
+                    <User className="w-3.5 h-3.5" />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {chatLoading && (
+              <div className="flex gap-2.5 items-center text-xs text-violet-300 bg-[#050811] border border-slate-700/80 rounded-xl px-3.5 py-2.5 w-fit">
+                <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+                <span>Estructurando estrategia sin clichés con HookLab y perfil de creador...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Refined Strategy Proposal Card (if generated) */}
+          {latestRefinedIdea && (
+            <div className="rounded-xl border border-emerald-500/50 bg-[#051119] p-3.5 space-y-3 animate-fadeIn">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/20 pb-2">
+                <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-xs">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span>Estrategia Lista: &quot;{latestRefinedIdea.suggested_title}&quot;</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px]">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 font-bold">
+                    {latestRefinedIdea.suggested_format === "TEXT_ONLY"
+                      ? "📝 Solo Texto (LinkedIn/X)"
+                      : latestRefinedIdea.suggested_format === "VIDEO_ONLY"
+                      ? "🎥 Solo Video Corto"
+                      : "🎬 Video + Post Escrito"}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 font-mono">
+                    Prioridad ~{(latestRefinedIdea.calculated_ice ?? 8.5).toFixed(1)}/10
+                  </span>
+                </div>
+              </div>
+
+              {/* Story beats / Hooks */}
+              {latestRefinedIdea.suggested_hooks && latestRefinedIdea.suggested_hooks.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                    Ganchos de Apertura Sugeridos:
+                  </span>
+                  <div className="grid gap-1 sm:grid-cols-2">
+                    {latestRefinedIdea.suggested_hooks.slice(0, 2).map((h, i) => (
+                      <div
+                        key={i}
+                        className="p-2 rounded bg-[#02060c] border border-slate-800 text-[11px] text-slate-300 italic"
+                      >
+                        &quot;{h.hook_text}&quot;
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleApplyStrategyToForm(latestRefinedIdea, false)}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>✨ Aplicar al Formulario de Idea</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleApplyStrategyToForm(latestRefinedIdea, true)}
+                  disabled={creating}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 transition shadow disabled:opacity-50"
+                >
+                  {creating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  )}
+                  <span>🚀 Crear Proyecto Inmediatamente</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Chat Input Box */}
+          <div className="flex gap-2 pt-1">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleSendChatMessage();
+                }
+              }}
+              placeholder="Explica qué quieres comunicar o qué dudas tienes (Ej. 'Quiero un post para empresas de servicios explicando mi nuevo rol')..."
+              className="flex-1 rounded-xl bg-[#04060d] border border-slate-700/90 px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400 placeholder:text-slate-500"
+              disabled={chatLoading}
+            />
+            <button
+              type="button"
+              onClick={() => void handleSendChatMessage()}
+              disabled={chatLoading || !chatInput.trim()}
+              className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Enviar</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Create New Video Idea Form */}
       {showCreateForm && (
         <form
@@ -567,6 +951,82 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           className="bg-[#07090e] border border-cyan-500/40 rounded-xl p-5 grid gap-5 lg:grid-cols-3 shadow-2xl"
         >
           <div className="lg:col-span-2 space-y-4">
+            {/* Content Format Selector */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-200 mb-2 flex items-center justify-between">
+                <span>Formato de Contenido</span>
+                <span className="text-[10px] text-cyan-400 font-normal">
+                  {contentFormat === "TEXT_ONLY" && "📝 Solo Post Escrito / Carrusel (LinkedIn, X)"}
+                  {contentFormat === "TEXT_AND_VIDEO" && "🎬 Video Corto 9:16 + Post Escrito"}
+                  {contentFormat === "VIDEO_ONLY" && "🎥 Solo Video Corto 9:16 (TikTok, Reels, Shorts)"}
+                </span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setContentFormat("TEXT_AND_VIDEO")}
+                  className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 ${
+                    contentFormat === "TEXT_AND_VIDEO"
+                      ? "bg-cyan-950/50 border-cyan-400 text-white shadow-md ring-1 ring-cyan-400/40"
+                      : "bg-[#020306] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-lg ${contentFormat === "TEXT_AND_VIDEO" ? "bg-cyan-500/20 text-cyan-300" : "bg-slate-800 text-slate-400"}`}>
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">Video + Post Escrito</div>
+                    <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                      Short 9:16 + Copy multicanal
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContentFormat("TEXT_ONLY");
+                    if (!selectedPlatforms.includes("LinkedIn")) setSelectedPlatforms((prev) => [...prev, "LinkedIn"]);
+                  }}
+                  className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 ${
+                    contentFormat === "TEXT_ONLY"
+                      ? "bg-violet-950/50 border-violet-400 text-white shadow-md ring-1 ring-violet-400/40"
+                      : "bg-[#020306] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-lg ${contentFormat === "TEXT_ONLY" ? "bg-violet-500/20 text-violet-300" : "bg-slate-800 text-slate-400"}`}>
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">Solo Post Escrito</div>
+                    <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                      LinkedIn & X (Sin grabar video)
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setContentFormat("VIDEO_ONLY")}
+                  className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 ${
+                    contentFormat === "VIDEO_ONLY"
+                      ? "bg-amber-950/50 border-amber-400 text-white shadow-md ring-1 ring-amber-400/40"
+                      : "bg-[#020306] border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-lg ${contentFormat === "VIDEO_ONLY" ? "bg-amber-500/20 text-amber-300" : "bg-slate-800 text-slate-400"}`}>
+                    <Film className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">Solo Video Corto</div>
+                    <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                      TikTok, Reels y Shorts 9:16
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             {/* Title */}
             <div>
               <label className="block text-xs font-semibold text-slate-200 mb-1.5">
@@ -803,19 +1263,19 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           return (
             <section
               key={col.state}
-              className={`bg-[#07090e] border ${col.colorClass} rounded-xl p-3 flex flex-col min-h-[240px] shadow-sm`}
+              className={`${col.bgClass || "bg-[#090e1c]"} border-2 ${col.colorClass || "border-slate-800"} rounded-xl p-3.5 flex flex-col min-h-[260px] shadow-xl backdrop-blur-sm transition-colors`}
             >
-              <header className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-800/80">
+              <header className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-700/80">
                 <div>
-                  <h3 className="text-xs font-bold text-slate-200">
+                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
                     {col.title}
                   </h3>
-                  <span className="text-[10px] text-slate-400">
+                  <span className="text-[10px] text-slate-400 font-medium">
                     {HUMAN_STATE_LABELS[col.state] ?? col.state}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="px-2 py-0.5 rounded-full bg-slate-800 text-xs font-mono text-slate-300">
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold ${col.headerBadgeClass || "bg-slate-800 text-slate-200"}`}>
                     {items.length}
                   </span>
                 </div>
@@ -823,8 +1283,8 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
               <div className="space-y-3 flex-1">
                 {items.length === 0 && (
-                  <div className="h-24 rounded-lg border border-dashed border-slate-800/80 flex items-center justify-center text-xs text-slate-500 text-center px-2">
-                    No hay videos en esta fase
+                  <div className="h-28 rounded-xl border border-dashed border-slate-700/60 bg-[#050811]/40 flex flex-col items-center justify-center text-xs text-slate-500 text-center px-3">
+                    <p>No hay proyectos en esta fase</p>
                   </div>
                 )}
 
@@ -838,23 +1298,50 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                     proj.target_platforms && proj.target_platforms.length > 0
                       ? proj.target_platforms
                       : (["YouTube", "Instagram", "TikTok", "LinkedIn", "X"] as ScriptTargetPlatform[]);
+                  const format = proj.content_format || "TEXT_AND_VIDEO";
 
                   return (
                     <article
                       key={proj.id}
-                      className={`rounded-lg border p-3 transition cursor-pointer ${
+                      className={`rounded-xl border p-3.5 transition-all duration-150 cursor-pointer ${
                         isSelected
-                          ? "bg-slate-800/90 border-cyan-400 shadow-lg shadow-cyan-500/10"
-                          : "bg-[#020306] border-slate-800 hover:border-slate-700"
+                          ? "bg-[#111c33] border-cyan-400 shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-400/60"
+                          : "bg-[#0b101e] border-slate-700/90 hover:border-cyan-400/70 hover:bg-[#10172a] shadow-md"
                       }`}
                       onClick={() => setSelectedProjectId(proj.id)}
                     >
-                      {/* Top Badges: Asset Code, Radar Pill & ICE Score */}
-                      <div className="flex items-center justify-between gap-1.5 mb-1.5 flex-wrap">
+                      {/* Top Badges: Asset Code, Format Pill, Radar Pill & ICE Score */}
+                      <div className="flex items-center justify-between gap-1.5 mb-2 flex-wrap">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[11px] font-mono font-bold text-cyan-300">
                             {proj.asset_code}
                           </span>
+                          {/* Format badge */}
+                          {format === "TEXT_ONLY" ? (
+                            <span
+                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-500/60 flex items-center gap-1"
+                              title="Publicación solo escrita / carrusel (sin video)"
+                            >
+                              <FileText className="w-2.5 h-2.5 text-violet-400" />
+                              Solo Texto
+                            </span>
+                          ) : format === "VIDEO_ONLY" ? (
+                            <span
+                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-500/60 flex items-center gap-1"
+                              title="Solo video corto 9:16"
+                            >
+                              <Film className="w-2.5 h-2.5 text-amber-400" />
+                              Solo Video
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-500/60 flex items-center gap-1"
+                              title="Video 9:16 + Publicación escrita"
+                            >
+                              <Layers className="w-2.5 h-2.5 text-cyan-400" />
+                              Video + Post
+                            </span>
+                          )}
                           {isRadar && (
                             <span
                               className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1"
@@ -866,57 +1353,62 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                           )}
                         </div>
                         <span
-                          className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                          className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
                           title="Prioridad de 1 a 10"
                         >
                           Prioridad {proj.ice_score.toFixed(1)}/10
                         </span>
                       </div>
 
-                      <h4 className="text-xs font-semibold text-slate-100 leading-snug mb-2 line-clamp-2">
+                      <h4 className="text-xs font-semibold text-white leading-snug mb-2 line-clamp-2">
                         {proj.working_title}
                       </h4>
 
                       {/* Context Notes Excerpt if present */}
                       {proj.context_notes && (
-                        <p className="text-[10px] text-slate-400 line-clamp-1 italic mb-2 bg-slate-900/50 px-1.5 py-0.5 rounded border border-slate-800/60">
+                        <p className="text-[10px] text-slate-300 line-clamp-2 italic mb-2.5 bg-[#050811] px-2 py-1 rounded border border-slate-700/70">
                           {proj.context_notes}
                         </p>
                       )}
 
-                      {/* Platforms Pills */}
+                      {/* Platforms Pills with distinctive brand borders */}
                       <div className="flex flex-wrap items-center gap-1 mb-2.5">
-                        {platforms.map((plat) => (
-                          <span
-                            key={plat}
-                            className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800/80 text-slate-300 border border-slate-700/60"
-                          >
-                            {plat === "YouTube"
-                              ? "YT"
-                              : plat === "Instagram"
-                              ? "IG"
-                              : plat === "TikTok"
-                              ? "TT"
-                              : plat === "LinkedIn"
-                              ? "LI"
-                              : "X"}
-                          </span>
-                        ))}
+                        {platforms.map((plat) => {
+                          const platMeta = AVAILABLE_PLATFORMS.find((p) => p.id === plat);
+                          return (
+                            <span
+                              key={plat}
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                plat === "LinkedIn"
+                                  ? "bg-blue-950/60 text-blue-300 border-blue-600/70"
+                                  : plat === "YouTube"
+                                  ? "bg-red-950/60 text-red-300 border-red-600/70"
+                                  : plat === "Instagram"
+                                  ? "bg-pink-950/60 text-pink-300 border-pink-600/70"
+                                  : plat === "TikTok"
+                                  ? "bg-cyan-950/60 text-cyan-300 border-cyan-600/70"
+                                  : "bg-slate-800 text-slate-200 border-slate-600"
+                              }`}
+                            >
+                              {platMeta?.shortLabel ?? plat}
+                            </span>
+                          );
+                        })}
                       </div>
 
                       {/* Specs Tags */}
                       <div className="flex flex-wrap gap-1.5 text-[10px] mb-3">
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
                           <Clock className="w-3 h-3 text-cyan-400" />
                           {DURATION_PRESET_META[proj.target_duration].shortLabel}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
                           <Target className="w-3 h-3 text-violet-400" />
                           {CONVERSION_GOAL_META[proj.conversion_goal].badge}
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-700/80">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -927,7 +1419,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                           className="text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1"
                         >
                           <Sparkles className="w-3 h-3" />
-                          Ir al Guión
+                          <span>{format === "TEXT_ONLY" ? "Ver Contenido" : "Ir al Guión"}</span>
                         </button>
 
                         {next && (

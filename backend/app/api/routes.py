@@ -39,6 +39,7 @@ from app.schemas.contracts import (
     AdCreativeVariant,
     AuditLogResponse,
     ConversionGoal,
+    ContentFormat,
     CreatorProfileSchema,
     CreatorProfileUpdateRequest,
     DurationPreset,
@@ -61,6 +62,9 @@ from app.schemas.contracts import (
     ICEScoreResponse,
     IdeaAIEvaluationRequest,
     IdeaAIEvaluationResponse,
+    IdeaChatMessage,
+    IdeaChatRefineRequest,
+    IdeaChatRefineResponse,
     InfrastructureServiceStatus,
     KigalChatAutoSweepResponse,
     KigalChatInteraction,
@@ -1133,6 +1137,54 @@ async def ai_evaluate_idea(
     )
 
 
+@router.post("/ideas/chat-refine", response_model=IdeaChatRefineResponse)
+async def chat_refine_idea(
+    body: IdeaChatRefineRequest,
+    db: AsyncSession = Depends(get_db),
+) -> IdeaChatRefineResponse:
+    """
+    Conversational strategist co-pilot for refining raw creator concepts into compelling publications.
+    Supports bouncing ideas back and forth, determining if video is needed (TEXT_ONLY vs TEXT_AND_VIDEO),
+    and formulating genuine, anti-slop copy.
+    """
+    ws = await _get_default_workspace(db)
+    creator_prof = await get_creator_profile(db)
+    profile_dict = creator_prof.model_dump(mode="json") if creator_prof else None
+
+    router_llm = get_llm_router()
+    messages_payload = [m.model_dump() for m in body.messages]
+    result = await router_llm.chat_refine_idea(
+        messages=messages_payload,
+        creator_profile=profile_dict,
+        current_title=body.current_title,
+        current_context=body.current_context,
+        target_platforms=body.target_platforms,
+        preferred_format=body.preferred_format.value,
+    )
+
+    hook_models = [
+        HookCandidate(
+            category=h.get("category", "Estrategia"),
+            hook_text=h.get("hook_text", body.current_title or "Gancho sugerido"),
+            pattern_interrupt=h.get("pattern_interrupt", "Corte limpio"),
+            estimated_hold_rate=float(h.get("estimated_hold_rate", 75.0)),
+        )
+        for h in result.get("suggested_hooks", [])
+    ]
+
+    return IdeaChatRefineResponse(
+        reply=result["reply"],
+        suggested_title=result.get("suggested_title"),
+        suggested_context_notes=result.get("suggested_context_notes"),
+        suggested_format=ContentFormat(result.get("suggested_format", ContentFormat.TEXT_AND_VIDEO.value)),
+        suggested_platforms=result.get("suggested_platforms", body.target_platforms),
+        suggested_hooks=hook_models,
+        calculated_ice=result.get("calculated_ice"),
+        tam_recommendation=TAMClassification(result.get("tam_recommendation", TAMClassification.CORE_80.value)),
+        ready_to_create=bool(result.get("ready_to_create", True)),
+    )
+
+
 @router.post("/ideas/radar-matutino", response_model=RadarMatutinoIngestResponse)
 async def ingest_radar_matutino_idea(
     body: RadarMatutinoIngestRequest,
@@ -1353,6 +1405,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectSumma
             context_notes=r.context_notes,
             source_origin=r.source_origin,
             target_platforms=r.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
+            content_format=ContentFormat(getattr(r, "content_format", None) or ContentFormat.TEXT_AND_VIDEO.value),
         )
         for r in rows
     ]
@@ -1420,6 +1473,7 @@ async def create_project(
         context_notes=body.context_notes,
         source_origin=body.source_origin,
         target_platforms=body.target_platforms,
+        content_format=body.content_format.value,
         ab_variants=[v.model_dump(mode="json") for v in ab_variants],
         state_history=[
             {"from": "INIT", "to": "CAPTURED", "agent": "OrchestratorAgent", "tier": 1},
@@ -1457,6 +1511,7 @@ async def create_project(
             thesis_points=["Aplica sistemas medibles", "Elimina pausas muertas >400ms"],
             chapters=[{"time": "00:00", "title": "Gancho"}, {"time": "00:25", "title": "Marco"}],
             goal=body.conversion_goal,
+            context_notes=body.context_notes,
         ):
             ch = SocialChannel(post_dict["channel"])
             pf = validate_preflight(ch, post_dict)
@@ -1510,6 +1565,7 @@ async def create_project(
         context_notes=project.context_notes,
         source_origin=project.source_origin,
         target_platforms=project.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
+        content_format=ContentFormat(getattr(project, "content_format", None) or ContentFormat.TEXT_AND_VIDEO.value),
     )
 
 
@@ -1549,6 +1605,7 @@ async def get_project_detail(project_id: uuid.UUID, db: AsyncSession = Depends(g
             context_notes=project.context_notes,
             source_origin=project.source_origin,
             target_platforms=project.target_platforms or ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
+            content_format=ContentFormat(getattr(project, "content_format", None) or ContentFormat.TEXT_AND_VIDEO.value),
         ).model_dump(mode="json"),
         "script": _build_script_response(script).model_dump(mode="json") if script else None,
         "video_asset": {

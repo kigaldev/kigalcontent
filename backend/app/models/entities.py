@@ -125,6 +125,7 @@ class ContentProject(Base):
     context_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_origin: Mapped[str] = mapped_column(String(100), nullable=False, default="manual")
     target_platforms: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    content_format: Mapped[str] = mapped_column(String(50), nullable=False, default="TEXT_AND_VIDEO")
     ab_variants: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     state_history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     temporal_workflow_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

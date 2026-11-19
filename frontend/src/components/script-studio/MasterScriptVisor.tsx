@@ -153,7 +153,7 @@ export function MasterScriptVisor({
               isOverLimit ? "text-rose-400" : isUnderLimit ? "text-amber-400" : "text-emerald-400"
             }`}
           >
-            {timingDelta > 0 ? `+${timingDelta}s` : `${timingDelta}s`}
+            {timingDelta > 0 ? `+${timingDelta.toFixed(1)}s` : `${timingDelta.toFixed(1)}s`}
           </p>
           <p className="text-[10px] text-slate-400">
             {isOverLimit

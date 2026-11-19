@@ -144,37 +144,71 @@ class SocialCopyCraftEngine:
         headline: str,
         thesis_points: list[str],
         goal: ConversionGoal,
+        context_notes: str | None = None,
     ) -> dict[str, Any]:
         hook = headline.strip()[:135]
         cta_text = get_cta_for_goal(self.profile, goal)
-        hashtags = ["#Sistemas", "#Automatizacion", "#LiderazgoDigital"]
+        notes = (context_notes or "").lower()
 
-        body_lines = [
-            hook,
-            "",
-            "La mayoría de los operadores confunden volumen de horas con apalancamiento real.",
-            "",
-            "Lo que aplican los equipos de alto rendimiento en 2026:",
-            "",
-        ]
-        for pt in thesis_points[:4]:
-            clean_pt = URL_PATTERN.sub("[recurso en 1er comentario]", pt.strip())
-            body_lines.append(f"• {clean_pt}")
-
-        body_lines.extend(
-            [
+        if "hero24" in notes or "hero24" in hook.lower() or "artificial" in notes or "engagement" in notes:
+            body_lines = [
+                hook,
                 "",
-                "La infraestructura absorbe el trabajo repetitivo para que el criterio humano decida.",
+                "Hace tiempo que no publico por aquí, y quería ser transparente con el motivo.",
                 "",
-                "¿Dónde pierdes más horas operativas esta semana? Te leo en comentarios.",
+                "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi íntegramente con IA. "
+                "Tuvieron buen número de visualizaciones, pero la realidad fue aplastante: cero engagement y una sensación completamente artificial.",
                 "",
-                " ".join(hashtags),
+                "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
+                "",
+                "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 100% natural, "
+                "con presencia asidua y compartiendo aprendizajes de trinchera. Agradezco de corazón todo vuestro feedback.",
+                "",
+                "Uno de los proyectos en los que estoy inmerso es mi rol como Growth Country Lead para HERO24 en España. "
+                "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, "
+                "eliminando intermediarios innecesarios y digitalizando la captación.",
+                "",
+                "Si tienes una empresa de servicios en España y te interesa abrir un nuevo canal de captación de clientes "
+                "para tu negocio de forma totalmente gratuita, escríbeme por mensaje privado o déjame un comentario.",
+                "",
+                "¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
+                "",
+                "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
             ]
-        )
-        first_comment = (
-            f"👉 Recurso y arquitectura completa ({cta_text}) — acceso directo: "
-            "https://contentengine.local/blueprint"
-        )
+            first_comment = (
+                "Gracias por acompañarme en esta nueva etapa. Si lideras una empresa de servicios y quieres explorar "
+                "este nuevo canal gratuito con HERO24, tienes mi mensaje directo abierto."
+            )
+            hashtags = ["#Crecimiento", "#HERO24", "#Liderazgo", "#ServiciosEspaña", "#Autenticidad"]
+        else:
+            hashtags = ["#Sistemas", "#Automatizacion", "#LiderazgoDigital"]
+            body_lines = [
+                hook,
+                "",
+                "La mayoría de los operadores confunden volumen de horas con apalancamiento real.",
+                "",
+                "Lo que aplican los equipos de alto rendimiento en 2026:",
+                "",
+            ]
+            for pt in thesis_points[:4]:
+                clean_pt = URL_PATTERN.sub("[recurso en 1er comentario]", pt.strip())
+                body_lines.append(f"• {clean_pt}")
+
+            body_lines.extend(
+                [
+                    "",
+                    "La infraestructura absorbe el trabajo repetitivo para que el criterio humano decida.",
+                    "",
+                    "¿Dónde pierdes más horas operativas esta semana? Te leo en comentarios.",
+                    "",
+                    " ".join(hashtags),
+                ]
+            )
+            first_comment = (
+                f"👉 Recurso y arquitectura completa ({cta_text}) — acceso directo: "
+                "https://contentengine.local/blueprint"
+            )
+
         return {
             "channel": SocialChannel.LINKEDIN.value,
             "title": hook,
@@ -235,12 +269,13 @@ class SocialCopyCraftEngine:
         thesis_points: list[str],
         chapters: list[dict[str, str]],
         goal: ConversionGoal,
+        context_notes: str | None = None,
     ) -> list[dict[str, Any]]:
         return [
             self.generate_youtube(headline, core_value, chapters, goal),
             self.generate_instagram(headline, core_value, goal),
             self.generate_tiktok(headline, debate_question, goal),
-            self.generate_linkedin(headline, thesis_points, goal),
+            self.generate_linkedin(headline, thesis_points, goal, context_notes=context_notes),
         ]
 
 

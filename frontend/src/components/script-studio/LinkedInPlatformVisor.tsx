@@ -54,8 +54,49 @@ export function LinkedInPlatformVisor({
     return /https?:\/\/\S+/i.test(linkedInBody);
   }, [linkedInBody]);
 
-  // Generate 5-slide carousel blueprint from script blocks
+  // Generate 5-slide carousel blueprint from script blocks or contextual narrative
   const carouselSlides = useMemo(() => {
+    const isHeroOrPersonal =
+      linkedInBody.toLowerCase().includes("hero24") ||
+      linkedInBody.toLowerCase().includes("artificial") ||
+      projectTitle.toLowerCase().includes("hero24") ||
+      projectTitle.toLowerCase().includes("nueva etapa");
+
+    if (isHeroOrPersonal) {
+      return [
+        {
+          num: 1,
+          title: linkedInHook || "Por qué dejé de publicar contenido 100% IA",
+          type: "PORTADA",
+          desc: "La lección honesta sobre visitas vacías vs conversaciones reales.",
+        },
+        {
+          num: 2,
+          title: "El error de la IA sin criterio",
+          type: "APRENDIZAJE",
+          desc: "Tuvimos miles de visualizaciones, pero exactamente cero engagement y un resultado artificial.",
+        },
+        {
+          num: 3,
+          title: "Mi nueva etapa profesional",
+          type: "ENFOQUE",
+          desc: "Volver al contenido natural, humano y cercano, compartiendo aprendizajes de trinchera.",
+        },
+        {
+          num: 4,
+          title: "HERO24 en España",
+          type: "PROYECTO",
+          desc: "Como Growth Country Lead, digitalizamos y abrimos un nuevo canal de captación para empresas de servicios.",
+        },
+        {
+          num: 5,
+          title: "¿Tienes una empresa de servicios?",
+          type: "COLABORACIÓN",
+          desc: "Escríbeme por DM para sumarte al canal gratuito o hablemos en comentarios.",
+        },
+      ];
+    }
+
     const slides = [
       {
         num: 1,
@@ -89,7 +130,7 @@ export function LinkedInPlatformVisor({
       },
     ];
     return slides;
-  }, [linkedInHook, projectTitle, blocks]);
+  }, [linkedInHook, projectTitle, blocks, linkedInBody]);
 
   const [activeSlide, setActiveSlide] = useState(0);
 

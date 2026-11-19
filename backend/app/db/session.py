@@ -62,6 +62,7 @@ async def init_db() -> None:
             ("content_projects", "context_notes", "TEXT"),
             ("content_projects", "source_origin", "VARCHAR(100) DEFAULT 'manual'"),
             ("content_projects", "target_platforms", "JSON DEFAULT '[]'"),
+            ("content_projects", "content_format", "VARCHAR(50) DEFAULT 'TEXT_AND_VIDEO'"),
             ("ideas", "context_notes", "TEXT"),
             ("ideas", "target_platforms", "JSON DEFAULT '[]'"),
         ]

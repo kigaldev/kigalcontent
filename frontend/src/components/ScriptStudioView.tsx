@@ -122,10 +122,70 @@ function buildLinkedInDraft(params: {
   keyword: string;
   deliveryUrl: string;
   antiSlop: boolean;
+  contextNotes?: string | null;
 }) {
-  const { title, hookText, blocks, keyword, deliveryUrl, antiSlop } = params;
+  const { title, hookText, blocks, keyword, deliveryUrl, antiSlop, contextNotes } = params;
   const rawHook = hookText || title || "Por qué tu sistema de contenido no convierte.";
   const hook = clampText(stripUrls(rawHook), 132);
+
+  const notesLower = (contextNotes || "").toLowerCase();
+  const isPersonalOrHero =
+    notesLower.includes("hero24") ||
+    notesLower.includes("artificial") ||
+    notesLower.includes("engagement") ||
+    notesLower.includes("reenfocado") ||
+    notesLower.includes("estudiantes") ||
+    notesLower.includes("country lead") ||
+    title.toLowerCase().includes("hero24") ||
+    title.toLowerCase().includes("nueva etapa");
+
+  if (isPersonalOrHero && contextNotes) {
+    const bodyLines = [
+      hook,
+      "",
+      "Hace tiempo que no publico por aquí, y quería compartir con total transparencia el motivo.",
+      "",
+      "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi en su totalidad con IA. " +
+        "Tuvieron buen número de visualizaciones, pero la realidad fue clara: cero engagement y una sensación completamente artificial.",
+      "",
+      "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
+      "",
+      "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 100% natural, " +
+        "con presencia asidua y compartiendo aprendizajes reales de trinchera. Agradezco de corazón todo vuestro feedback y apoyo en este camino.",
+      "",
+      "Uno de los proyectos en los que estoy inmerso actualmente es mi papel como Growth Country Lead para HERO24 en España. " +
+        "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, " +
+        "eliminando intermediarios innecesarios y digitalizando la captación.",
+      "",
+      "Si tienes una empresa de servicios en España y estás interesado en abrir un nuevo canal de captación de clientes " +
+        "para tu negocio de forma totalmente gratuita, escríbeme por mensaje privado o déjame un comentario y lo comentamos.",
+      "",
+      "¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
+      "",
+      "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
+    ];
+
+    const body = bodyLines.join("\n");
+    const firstComment = `Gracias por acompañarme en esta nueva etapa. Si lideras una empresa de servicios y quieres explorar este nuevo canal gratuito con HERO24, tienes mi mensaje directo abierto.`;
+    return { hook, body, firstComment };
+  }
+
+  if (contextNotes && contextNotes.trim().length > 60) {
+    const cleanContext = stripUrls(contextNotes.trim());
+    const paragraphs = cleanContext.split(/\n\s*\n/).filter(Boolean);
+    const bodyLines = [
+      hook,
+      "",
+      ...paragraphs,
+      "",
+      `💬 Comenta o escríbeme por mensaje privado para compartir impresiones o recibir más detalles.`,
+    ];
+    return {
+      hook,
+      body: bodyLines.join("\n"),
+      firstComment: `👇 Acceso o más detalles sobre esta publicación: ${deliveryUrl || "https://contentengine.local/recurso"}`,
+    };
+  }
 
   const takeaways = blocks
     .slice(0, 4)
@@ -425,6 +485,13 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
     ) {
       setTargetPlatforms(selectedDetail.project.target_platforms);
     }
+    if (selectedDetail?.project?.content_format === "TEXT_ONLY") {
+      if (selectedDetail.project.target_platforms?.includes("LinkedIn")) {
+        setActiveSubTab("linkedin");
+      } else if (selectedDetail.project.target_platforms?.includes("X")) {
+        setActiveSubTab("x");
+      }
+    }
     if (selectedDetail?.script) {
       setPreset(selectedDetail.script.duration_preset);
       setGoal(selectedDetail.script.conversion_goal);
@@ -500,6 +567,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
         keyword: kw,
         deliveryUrl: activeLeadMagnetDeliveryUrl,
         antiSlop: antiSlopEnabled,
+        contextNotes: selectedDetail.project.context_notes,
       });
       setLinkedInHook(li.hook);
       setLinkedInBody(li.body);

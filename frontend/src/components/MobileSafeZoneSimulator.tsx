@@ -4,10 +4,12 @@ import React, { useState } from "react";
 import dynamic from "next/dynamic";
 import {
   AlertOctagon,
+  ArrowRight,
   CheckCircle2,
   Cpu,
   DownloadCloud,
   Eye,
+  FileText,
   Film,
   Fingerprint,
   FolderOpen,
@@ -112,7 +114,7 @@ interface MobileSafeZoneSimulatorProps {
 export function MobileSafeZoneSimulator({
   onRefresh,
 }: MobileSafeZoneSimulatorProps) {
-  const { selectedDetail, selectedProjectId, backendOnline, showToast } =
+  const { selectedDetail, selectedProjectId, backendOnline, showToast, setActiveTab } =
     useEngineStore();
 
   const [platformOverlay, setPlatformOverlay] =
@@ -340,6 +342,32 @@ export function MobileSafeZoneSimulator({
           <span>{showExplanation ? "Ocultar Guía" : "¿Por qué es importante?"}</span>
         </button>
       </div>
+
+      {/* Format Notice: If Text Only */}
+      {selectedDetail.project.content_format === "TEXT_ONLY" && (
+        <div className="rounded-xl border border-violet-500/60 bg-[#0c0e22] p-4 text-xs text-slate-200 shadow-xl space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-violet-300 font-bold text-sm">
+              <FileText className="w-4 h-4 text-violet-400" />
+              <span>Publicación configurada en formato: Solo Post Escrito / Carrusel</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-200 border border-violet-500/40 uppercase">
+                Opcional para Video
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("publishing-hitl")}
+              className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+            >
+              <span>Avanzar a Paso 4: Textos y Publicación</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-slate-300 text-xs leading-relaxed">
+            Esta publicación para <strong>LinkedIn / X</strong> no requiere grabación de video, edición 9:16 ni nivelación sonora LUFS (-14 dB). El texto estructurado, los ganchos y el carrusel de diapositivas PDF ya están redactados en el <strong>Paso 2</strong> y listos para autorizar en el <strong>Paso 4</strong>. Si deseas acompañarla de un clip de video de apoyo, puedes subirlo y validarlo a continuación.
+          </p>
+        </div>
+      )}
 
       {/* Explanatory Banner */}
       {showExplanation && (

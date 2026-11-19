@@ -34,6 +34,7 @@ export type FSMState = z.infer<typeof FSMStateSchema>;
 export type SocialChannel = "YouTube" | "Instagram" | "TikTok" | "LinkedIn";
 
 export type ScriptTargetPlatform = "YouTube" | "Instagram" | "TikTok" | "LinkedIn" | "X";
+export type ContentFormat = "TEXT_AND_VIDEO" | "TEXT_ONLY" | "VIDEO_ONLY";
 
 export interface TwoColumnScriptBlock {
   block_id: string;
@@ -103,6 +104,33 @@ export interface ContentProject {
   context_notes?: string | null;
   source_origin?: string;
   target_platforms?: ScriptTargetPlatform[];
+  content_format?: ContentFormat;
+}
+
+export interface IdeaChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp?: string;
+}
+
+export interface IdeaChatRefineRequest {
+  messages: IdeaChatMessage[];
+  current_title?: string;
+  current_context?: string;
+  target_platforms?: ScriptTargetPlatform[];
+  preferred_format?: ContentFormat;
+}
+
+export interface IdeaChatRefineResponse {
+  reply: string;
+  suggested_title?: string;
+  suggested_context_notes?: string;
+  suggested_format: ContentFormat;
+  suggested_platforms: ScriptTargetPlatform[];
+  suggested_hooks: HookCandidate[];
+  calculated_ice?: number;
+  tam_recommendation: "CORE_80" | "EXPANSION_20";
+  ready_to_create: boolean;
 }
 
 export interface IdeaAIEvaluationRequest {

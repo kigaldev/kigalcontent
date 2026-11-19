@@ -4,6 +4,7 @@ import type {
   AnalyticsOverview,
   AuditLogEntry,
   ContentProject,
+  ContentFormat,
   ConversionGoal,
   CreatorProfile,
   DurationPreset,
@@ -11,6 +12,8 @@ import type {
   GitHubRepoItem,
   IdeaAIEvaluationRequest,
   IdeaAIEvaluationResponse,
+  IdeaChatRefineRequest,
+  IdeaChatRefineResponse,
   KigalChatInteraction,
   LeadMagnetItem,
   MediaQCReport,
@@ -168,8 +171,15 @@ export const apiClient = {
     context_notes?: string;
     source_origin?: string;
     target_platforms?: ScriptTargetPlatform[];
+    content_format?: ContentFormat;
   }) =>
     requestJson<ContentProject>("/projects", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  chatRefineIdea: (payload: IdeaChatRefineRequest) =>
+    requestJson<IdeaChatRefineResponse>("/ideas/chat-refine", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
