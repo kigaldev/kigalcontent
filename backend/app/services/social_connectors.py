@@ -509,6 +509,34 @@ class LinkedInUGCConnector(BaseSocialConnector):
     channel = SocialChannel.LINKEDIN
     api_base = "https://api.linkedin.com/v2/ugcPosts"
 
+    async def _resolve_person_urn(self, client: httpx.AsyncClient, configured_urn: str) -> str:
+        if configured_urn and configured_urn != "urn:li:person:creator-001" and configured_urn.startswith("urn:li:"):
+            return configured_urn
+        # Try OpenID Connect /v2/userinfo first, then /v2/me
+        try:
+            ui_resp = await client.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+            )
+            if ui_resp.status_code == 200:
+                sub = ui_resp.json().get("sub")
+                if sub:
+                    return f"urn:li:person:{sub}"
+        except Exception:
+            pass
+        try:
+            me_resp = await client.get(
+                "https://api.linkedin.com/v2/me",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+            )
+            if me_resp.status_code == 200:
+                lid = me_resp.json().get("id")
+                if lid:
+                    return f"urn:li:person:{lid}"
+        except Exception:
+            pass
+        return configured_urn
+
     async def _dispatch_oauth_request(self, project_id: str, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         settings = get_settings()
         headers = {
@@ -516,18 +544,23 @@ class LinkedInUGCConnector(BaseSocialConnector):
             "X-Restli-Protocol-Version": "2.0.0",
             "X-Idempotency-Key": idempotency_key,
         }
-        ugc_body = {
-            "author": settings.linkedin_person_urn,
-            "lifecycleState": "PUBLISHED",
-            "specificContent": {
-                "com.linkedin.ugc.ShareContent": {
-                    "shareCommentary": {"text": payload.get("post_body", "")},
-                    "shareMediaCategory": "NONE",
-                }
-            },
-            "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
-        }
+        title = str(payload.get("title") or "").strip()
+        body = str(payload.get("post_body") or "").strip()
+        full_text = f"{title}\n\n{body}".strip() if (title and not body.startswith(title)) else body
+
         async with httpx.AsyncClient(timeout=20.0) as client:
+            author_urn = await self._resolve_person_urn(client, settings.linkedin_person_urn)
+            ugc_body = {
+                "author": author_urn,
+                "lifecycleState": "PUBLISHED",
+                "specificContent": {
+                    "com.linkedin.ugc.ShareContent": {
+                        "shareCommentary": {"text": full_text},
+                        "shareMediaCategory": "NONE",
+                    }
+                },
+                "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"},
+            }
             resp = await client.post(self.api_base, headers=headers, json=ugc_body)
             resp.raise_for_status()
             post_urn = resp.json().get("id", f"urn:li:share:{idempotency_key[:8]}")

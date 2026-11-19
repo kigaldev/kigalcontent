@@ -2338,6 +2338,12 @@ async def execute_social_publish(
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            err_detail = str(exc)
+            resp = getattr(exc, "response", None)
+            if resp is not None:
+                err_detail = f"Error API {ch.value} ({resp.status_code}): {resp.text[:300]}"
+            raise HTTPException(status_code=502, detail=err_detail) from exc
 
         sp.external_platform_id = pub_res["external_platform_id"]
         sp.canonical_url = pub_res["canonical_url"]

@@ -196,10 +196,20 @@ class HITLSecurityManager:
             )
 
         expected_actor = actor or "creator"
-        expected_sig = self._compute_signature(
-            safe_pid, token_tier, action, expected_actor, expires_at
+        candidate_actions = [action]
+        if required_tier == 3 and action.startswith("publish_"):
+            for batch_action in ("publish_all_channels", "publish_all_channels_live"):
+                if batch_action not in candidate_actions:
+                    candidate_actions.append(batch_action)
+
+        sig_matched = any(
+            hmac.compare_digest(
+                provided_sig,
+                self._compute_signature(safe_pid, token_tier, cand_action, expected_actor, expires_at),
+            )
+            for cand_action in candidate_actions
         )
-        if not hmac.compare_digest(provided_sig, expected_sig):
+        if not sig_matched:
             return HITLVerificationResult(
                 valid=False,
                 tier=required_tier,

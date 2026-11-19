@@ -293,7 +293,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     }
     try {
       let token = activeHitlToken;
-      if (!token) {
+      if (!token || !token.includes("_T3_") || token.includes("_LOCAL_")) {
         if (backendOnline) {
           const res = await apiClient.issueHitlToken({
             project_id: selectedProjectId,

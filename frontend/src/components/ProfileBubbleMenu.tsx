@@ -141,7 +141,6 @@ export function ProfileBubbleMenu({
     setPinError(null);
     setIssuingToken(true);
     const projectId = selectedProjectId || "CR-001";
-    const actor = creatorProfile?.name || "creator";
 
     try {
       if (backendOnline) {
@@ -149,7 +148,7 @@ export function ProfileBubbleMenu({
           project_id: projectId,
           tier: 3,
           action: "publish_all_channels",
-          actor,
+          actor: "creator",
           two_factor_code: cleanedPin,
         });
         setActiveHitlToken(res.token);
