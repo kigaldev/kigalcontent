@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +14,7 @@ from app.api.routes import router as api_v1_router
 from app.api.ws import broadcaster
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal, init_db
+from app.services.publishing_scheduler import scheduler_background_loop
 from app.services.seed import seed_initial_data
 
 
@@ -23,7 +27,17 @@ async def lifespan(_app: FastAPI):
     except Exception as exc:
         import logging
         logging.getLogger("uvicorn.error").warning("DB init deferred/failed on cold-start: %s", exc)
-    yield
+
+    scheduler_task: asyncio.Task[None] | None = None
+    if not os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("VERCEL"):
+        scheduler_task = asyncio.create_task(scheduler_background_loop(60))
+    try:
+        yield
+    finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await scheduler_task
 
 
 settings = get_settings()

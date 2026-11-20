@@ -94,7 +94,7 @@ const PIPELINE_STEPS: TabDefinition[] = [
     label: "Publicar",
     shortLabel: "Publicar",
     stepName: "Publicar",
-    summary: "Vista previa por red, KigalChat Auto-DM y autorización final.",
+    summary: "Planificador visual estilo Metricool (Calendario, Mejores Horas, Autolistas), KigalChat Auto-DM y autorización HITL.",
     icon: Send,
   },
 ];
@@ -108,7 +108,7 @@ const UTILITY_TABS: Array<{
   {
     id: "ads-studio",
     label: "Ads",
-    summary: "Campañas de pago para Meta Ads, Google Ads y YouTube Ads.",
+    summary: "LinkedIn Ads B2B, Radar Ads Library, Meta Ads, Google RSA y YouTube Ads.",
     icon: Megaphone,
   },
   {
@@ -766,7 +766,11 @@ export default function KigalContentStudioPage() {
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
             />
           )}
-          {activeTab === "ads-studio" && <AdsCampaignStudioView />}
+          {activeTab === "ads-studio" && (
+            <AdsCampaignStudioView
+              onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
+            />
+          )}
           {activeTab === "analytics-rmta" && (
             <ClosedLoopAnalyticsView
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}

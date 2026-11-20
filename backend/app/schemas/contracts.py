@@ -588,7 +588,14 @@ class SocialPostResponse(BaseModel):
     preflight_passed: bool
     publish_status: str
     hitl_approval_token: str | None = None
+    scheduled_at: datetime | None = None
     published_at: datetime | None = None
+    auto_publish: bool = True
+    timezone: str = "Europe/Madrid"
+    publish_error: str | None = None
+    autolist_id: UUID | None = None
+    project_title: str | None = None
+    asset_code: str | None = None
 
 
 class SocialPublishExecuteRequest(BaseModel):
@@ -809,13 +816,236 @@ class GoogleRSASpec(BaseModel):
     youtube_5s_hook: str
 
 
+class LinkedInThoughtLeaderAd(BaseModel):
+    intro_hook: str
+    full_post_body: str
+    cta_soft: str
+    target_audience_note: str
+    estimated_ctr_benchmark: str
+
+
+class LinkedInSponsoredSingleImageAd(BaseModel):
+    intro_text: str
+    headline: str
+    description: str
+    cta_label: str
+    visual_brief: str
+
+
+class LinkedInDocumentAd(BaseModel):
+    intro_text: str
+    headline: str
+    slides_outline: list[str]
+    lead_gen_form_fields: list[str]
+    thank_you_message: str
+
+
+class LinkedInConversationAd(BaseModel):
+    subject: str
+    opening_message: str
+    cta_buttons: list[str]
+
+
+class LinkedInTargetingBlueprint(BaseModel):
+    job_titles: list[str]
+    seniorities: list[str]
+    company_sizes: list[str]
+    industries: list[str]
+    geographies: list[str]
+    recommended_daily_budget_eur: str
+
+
+class LinkedInAdsSpec(BaseModel):
+    thought_leader_ad: LinkedInThoughtLeaderAd
+    single_image_ad: LinkedInSponsoredSingleImageAd
+    document_carousel_ad: LinkedInDocumentAd
+    conversation_ad: LinkedInConversationAd
+    targeting_blueprint: LinkedInTargetingBlueprint
+
+
+class LinkedInAdLibrarySearchRequest(BaseModel):
+    keyword: str = ""
+    advertiser: str = ""
+    countries: list[str] = Field(default_factory=lambda: ["ES", "US"])
+    date_start: str | None = None
+    date_end: str | None = None
+    count: int = Field(default=12, ge=1, le=25)
+
+
+class LinkedInAdLibraryItem(BaseModel):
+    ad_id: str
+    ad_url: str | None = None
+    format: str = "SPONSORED_CONTENT"
+    status: str = "ACTIVE"
+    advertiser_name: str
+    advertiser_url: str | None = None
+    payer_name: str | None = None
+    body_text: str = ""
+    headline: str | None = None
+    description: str | None = None
+    landing_page_url: str | None = None
+    creative_urls: list[str] = Field(default_factory=list)
+    first_shown_date: str | None = None
+    last_shown_date: str | None = None
+    impressions_range: str | None = None
+    top_countries: list[str] = Field(default_factory=list)
+    targeting_included: list[str] = Field(default_factory=list)
+
+
+class LinkedInAdLibrarySearchResponse(BaseModel):
+    live: bool
+    source: str
+    status_code: int | None = None
+    needs_token_refresh: bool = False
+    message: str
+    api_version_used: str | None = None
+    total_returned: int = 0
+    items: list[LinkedInAdLibraryItem] = Field(default_factory=list)
+    insights: dict[str, Any] = Field(default_factory=dict)
+
+
+class LinkedInAdLibraryStatusResponse(BaseModel):
+    configured: bool
+    live_verified: bool
+    token_source: str
+    account_name: str = ""
+    api_version_used: str | None = None
+    status_code: int | None = None
+    needs_token_refresh: bool = False
+    message: str
+
+
+class LinkedInAdToIdeaRequest(BaseModel):
+    advertiser_name: str
+    headline: str | None = None
+    body_text: str
+    format: str = "SPONSORED_CONTENT"
+    landing_page_url: str | None = None
+
+
 class AdCampaignResponse(BaseModel):
     topic: str
     objective: str
     platforms: list[str]
     variants: list[AdCreativeVariant]
     google_rsa: GoogleRSASpec
+    linkedin_ads: LinkedInAdsSpec | None = None
     ga4_utm_links: list[dict[str, str]]
+
+
+# --- Metricool-style Publishing Scheduler, Best Times & Autolists ---
+
+
+class BestTimeSlot(BaseModel):
+    day_of_week: int
+    day_label: str
+    hour: int
+    score: int
+    label: str
+
+
+class BestTimeHeatmapResponse(BaseModel):
+    channel: str
+    timezone: str = "Europe/Madrid"
+    source: str = "benchmark"
+    peak_slot: dict[str, Any]
+    grid: list[BestTimeSlot]
+
+
+class ComposerPostCreateRequest(BaseModel):
+    project_id: UUID | None = None
+    channels: list[SocialChannel] = Field(..., min_length=1)
+    title: str | None = None
+    post_body: str = Field(..., min_length=1)
+    per_channel_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    first_comment: str | None = None
+    hashtags: list[str] = Field(default_factory=list)
+    media_url: str | None = None
+    visual_mode: str = "NONE"
+    publish_mode: str = "SCHEDULED"
+    scheduled_at: datetime | None = None
+    timezone: str = "Europe/Madrid"
+    auto_publish: bool = True
+    hitl_pin: str | None = None
+    hitl_token: str | None = None
+
+
+class ScheduleUpdateRequest(BaseModel):
+    scheduled_at: datetime | None = None
+    timezone: str | None = None
+    auto_publish: bool | None = None
+    publish_status: str | None = None
+    hitl_pin: str | None = None
+    hitl_token: str | None = None
+
+
+class AutolistItemCreateRequest(BaseModel):
+    project_id: UUID | None = None
+    title: str | None = None
+    post_body: str = Field(..., min_length=1)
+    first_comment: str | None = None
+    media_url: str | None = None
+    position: int | None = None
+
+
+class AutolistItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    autolist_id: UUID
+    project_id: UUID | None = None
+    title: str | None = None
+    post_body: str
+    first_comment: str | None = None
+    media_url: str | None = None
+    position: int = 0
+    last_published_at: datetime | None = None
+    times_published: int = 0
+    created_at: datetime | None = None
+
+
+class AutolistCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str = ""
+    channels: list[str] = Field(default_factory=lambda: ["LinkedIn"])
+    schedule_slots: list[dict[str, Any]] = Field(default_factory=list)
+    timezone: str = "Europe/Madrid"
+    is_active: bool = True
+    repeat_loop: bool = True
+
+
+class AutolistUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    channels: list[str] | None = None
+    schedule_slots: list[dict[str, Any]] | None = None
+    timezone: str | None = None
+    is_active: bool | None = None
+    repeat_loop: bool | None = None
+
+
+class AutolistResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str = ""
+    channels: list[str] = Field(default_factory=list)
+    schedule_slots: list[dict[str, Any]] = Field(default_factory=list)
+    timezone: str = "Europe/Madrid"
+    is_active: bool = True
+    repeat_loop: bool = True
+    items: list[AutolistItemResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class PublishingCalendarResponse(BaseModel):
+    posts: list[SocialPostResponse]
+    projected_autolist_slots: list[dict[str, Any]] = Field(default_factory=list)
+    connected_channels: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    timezone: str = "Europe/Madrid"
+
 
 
 

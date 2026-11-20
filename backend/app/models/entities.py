@@ -201,10 +201,54 @@ class SocialPost(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hitl_approval_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    auto_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Europe/Madrid")
+    publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    autolist_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("autolists.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     project: Mapped[ContentProject] = relationship(back_populates="social_posts")
     snapshots: Mapped[list[PerformanceSnapshot]] = relationship(back_populates="social_post", cascade="all, delete-orphan")
+
+
+class Autolist(Base):
+    __tablename__ = "autolists"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    channels: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    schedule_slots: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Europe/Madrid")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    repeat_loop: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    items: Mapped[list[AutolistItem]] = relationship(
+        back_populates="autolist",
+        cascade="all, delete-orphan",
+        order_by="AutolistItem.position",
+    )
+
+
+class AutolistItem(Base):
+    __tablename__ = "autolist_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    autolist_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("autolists.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("content_projects.id", ondelete="SET NULL"), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    post_body: Mapped[str] = mapped_column(Text, nullable=False)
+    first_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    media_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    times_published: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    autolist: Mapped[Autolist] = relationship(back_populates="items")
 
 
 class PerformanceSnapshot(Base):

@@ -237,7 +237,14 @@ export interface SocialPost {
   preflight_passed: boolean;
   publish_status: string;
   hitl_approval_token: string | null;
+  scheduled_at?: string | null;
   published_at: string | null;
+  auto_publish?: boolean;
+  timezone?: string;
+  publish_error?: string | null;
+  autolist_id?: string | null;
+  project_title?: string | null;
+  asset_code?: string | null;
 }
 
 export interface ProjectDetail {
@@ -438,6 +445,198 @@ export interface AdCreativeVariant {
   }>;
 }
 
+export interface LinkedInThoughtLeaderAd {
+  intro_hook: string;
+  full_post_body: string;
+  cta_soft: string;
+  target_audience_note: string;
+  estimated_ctr_benchmark: string;
+}
+
+export interface LinkedInSponsoredSingleImageAd {
+  intro_text: string;
+  headline: string;
+  description: string;
+  cta_label: string;
+  visual_brief: string;
+}
+
+export interface LinkedInDocumentAd {
+  intro_text: string;
+  headline: string;
+  slides_outline: string[];
+  lead_gen_form_fields: string[];
+  thank_you_message: string;
+}
+
+export interface LinkedInConversationAd {
+  subject: string;
+  opening_message: string;
+  cta_buttons: string[];
+}
+
+export interface LinkedInTargetingBlueprint {
+  job_titles: string[];
+  seniorities: string[];
+  company_sizes: string[];
+  industries: string[];
+  geographies: string[];
+  recommended_daily_budget_eur: string;
+}
+
+export interface LinkedInAdsSpec {
+  thought_leader_ad: LinkedInThoughtLeaderAd;
+  single_image_ad: LinkedInSponsoredSingleImageAd;
+  document_carousel_ad: LinkedInDocumentAd;
+  conversation_ad: LinkedInConversationAd;
+  targeting_blueprint: LinkedInTargetingBlueprint;
+}
+
+export interface LinkedInAdLibraryItem {
+  ad_id: string;
+  ad_url?: string | null;
+  format: string;
+  status: string;
+  advertiser_name: string;
+  advertiser_url?: string | null;
+  payer_name?: string | null;
+  body_text: string;
+  headline?: string | null;
+  description?: string | null;
+  landing_page_url?: string | null;
+  creative_urls: string[];
+  first_shown_date?: string | null;
+  last_shown_date?: string | null;
+  impressions_range?: string | null;
+  top_countries: string[];
+  targeting_included: string[];
+}
+
+export interface LinkedInAdLibrarySearchRequest {
+  keyword?: string;
+  advertiser?: string;
+  countries?: string[];
+  date_start?: string;
+  date_end?: string;
+  count?: number;
+}
+
+export interface LinkedInAdLibrarySearchResponse {
+  live: boolean;
+  source: "linkedin_live_api" | "error" | "not_configured";
+  status_code?: number | null;
+  needs_token_refresh?: boolean;
+  message: string;
+  api_version_used?: string | null;
+  total_returned: number;
+  items: LinkedInAdLibraryItem[];
+  insights: {
+    top_formats: Array<{ format: string; count: number }>;
+    avg_copy_chars: number;
+    detected_angles: string[];
+  };
+}
+
+export interface LinkedInAdLibraryStatusResponse {
+  configured: boolean;
+  live_verified: boolean;
+  token_source: string;
+  account_name: string;
+  api_version_used?: string | null;
+  status_code?: number | null;
+  needs_token_refresh?: boolean;
+  message: string;
+}
+
+export interface BestTimeSlot {
+  day_of_week: number;
+  day_label: string;
+  hour: number;
+  score: number;
+  label: string;
+}
+
+export interface BestTimeHeatmapResponse {
+  channel: string;
+  timezone: string;
+  source: "analytics" | "benchmark";
+  peak_slot: { day_label: string; hour: number; score: number };
+  grid: BestTimeSlot[];
+}
+
+export interface AutolistItemRecord {
+  id: string;
+  autolist_id: string;
+  project_id?: string | null;
+  title?: string | null;
+  post_body: string;
+  first_comment?: string | null;
+  media_url?: string | null;
+  position: number;
+  last_published_at?: string | null;
+  times_published: number;
+}
+
+export interface AutolistRecord {
+  id: string;
+  name: string;
+  description: string;
+  channels: string[];
+  schedule_slots: Array<{ day_of_week: number; time: string }>;
+  timezone: string;
+  is_active: boolean;
+  repeat_loop: boolean;
+  items: AutolistItemRecord[];
+  created_at: string;
+}
+
+export interface CalendarProjectedSlot {
+  id: string;
+  autolist_id: string;
+  autolist_name: string;
+  channel: string;
+  scheduled_at: string;
+  title: string;
+  post_body: string;
+  is_projected: true;
+}
+
+export interface PublishingCalendarResponse {
+  posts: SocialPost[];
+  projected_autolist_slots: CalendarProjectedSlot[];
+  connected_channels: Record<
+    string,
+    {
+      configured: boolean;
+      account_name: string;
+      source: string;
+      person_urn: string;
+    }
+  >;
+  timezone: string;
+}
+
+export interface ComposerPostCreateRequest {
+  project_id?: string | null;
+  channels: SocialChannel[];
+  title?: string | null;
+  post_body: string;
+  per_channel_overrides?: Record<
+    string,
+    { title?: string; post_body?: string; first_comment?: string }
+  >;
+  first_comment?: string | null;
+  hashtags?: string[];
+  media_url?: string | null;
+  visual_mode?: string;
+  publish_mode: "DRAFT" | "SCHEDULED" | "MANUAL_REMINDER" | "PUBLISH_NOW";
+  scheduled_at?: string | null;
+  timezone?: string;
+  auto_publish?: boolean;
+  hitl_pin?: string;
+  hitl_token?: string | null;
+}
+
 export interface AdCampaignResponse {
   topic: string;
   objective: string;
@@ -451,9 +650,12 @@ export interface AdCampaignResponse {
     search_keywords_negative: string[];
     youtube_5s_hook: string;
   };
+  linkedin_ads?: LinkedInAdsSpec | null;
   ga4_utm_links: Array<{
     platform: string;
-    utm_url: string;
+    utm_url?: string;
+    url?: string;
+    variant_id?: string;
   }>;
 }
 

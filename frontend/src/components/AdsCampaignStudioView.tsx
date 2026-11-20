@@ -24,21 +24,36 @@ import {
   Target,
   Video,
 } from "lucide-react";
+import { LinkedInAdsLibraryExplorer } from "@/components/ads/LinkedInAdsLibraryExplorer";
+import { LinkedInB2BAdsPanel } from "@/components/ads/LinkedInB2BAdsPanel";
+import { AstryxBadge, AstryxButton } from "@/components/ui/AstryxPrimitives";
 import { apiClient } from "@/lib/api";
+import { copyPreservingLineBreaks } from "@/lib/unicodeFormat";
 import { useEngineStore } from "@/store/useEngineStore";
 import type {
   AdCampaignGenerateRequest,
   AdCampaignResponse,
   AdCreativeVariant,
+  LinkedInAdsSpec,
 } from "@/types/engine";
 
 interface AdsCampaignStudioViewProps {
   onRefresh?: () => Promise<void> | void;
 }
 
-type AdsResultTabId = "creatives" | "google-rsa" | "remotion-utm";
+type AdsResultTabId =
+  | "creatives"
+  | "linkedin-ads"
+  | "linkedin-library"
+  | "google-rsa"
+  | "remotion-utm";
 
 const AD_PLATFORMS = [
+  {
+    id: "LinkedIn Ads (B2B & Thought Leader)",
+    short: "LinkedIn Ads",
+    hint: "Thought Leader + PDF Lead Gen + Ads Library",
+  },
   {
     id: "Meta Ads (IG/FB)",
     short: "Meta Ads",
@@ -71,18 +86,28 @@ const AD_OBJECTIVES = [
 const RESULT_TABS: Array<{ id: AdsResultTabId; label: string; shortLabel: string }> = [
   {
     id: "creatives",
-    label: "Creatividades PAS / Autoridad",
+    label: "1. Creatividades PAS / Autoridad",
     shortLabel: "1. Creatividades",
   },
   {
+    id: "linkedin-ads",
+    label: "2. 💼 LinkedIn Ads B2B",
+    shortLabel: "2. 💼 LinkedIn Ads",
+  },
+  {
+    id: "linkedin-library",
+    label: "3. 🔍 LinkedIn Ads Library",
+    shortLabel: "3. 🔍 Ads Library",
+  },
+  {
     id: "google-rsa",
-    label: "Google Ads RSA & Search Console",
-    shortLabel: "2. Google RSA",
+    label: "4. Google RSA & Search Console",
+    shortLabel: "4. Google RSA",
   },
   {
     id: "remotion-utm",
-    label: "Storyboard 9:16 Remotion & UTMs GA4",
-    shortLabel: "3. Remotion & UTMs",
+    label: "5. Storyboard 9:16 & UTMs GA4",
+    shortLabel: "5. Remotion & UTMs",
   },
 ];
 
@@ -139,6 +164,168 @@ function buildUtmUrl(
     });
     return `${safeBase}?${query.toString()}`;
   }
+}
+
+function buildLocalLinkedInAdsSpec(
+  req: AdCampaignGenerateRequest,
+  context: {
+    niche?: string;
+    icp?: string;
+    creatorName?: string;
+    hookHint?: string;
+  }
+): LinkedInAdsSpec {
+  const topic = req.topic.trim() || "Sistema de Automatización con IA";
+  const keyword = (req.trigger_keyword || "BLUEPRINT").trim().toUpperCase();
+  const targetUrl =
+    req.target_url?.trim() || "https://contentengine.local/blueprint";
+  const icp = context.icp || "fundadores, directivos y equipos B2B";
+  const niche = context.niche || "automatización con IA y sistemas B2B";
+  const creatorName = context.creatorName || "Nuestro equipo";
+  const shortTopic = truncateAtLimit(topic, 48);
+  const shortIcp = truncateAtLimit(icp, 48);
+  const shortNiche = truncateAtLimit(niche, 48);
+
+  const tlCtaSoft =
+    req.objective === "Demos B2B"
+      ? `Si quieres revisar cómo encajaría en tu equipo, escríbeme "${keyword}" por DM y coordinamos 15 min.`
+      : req.objective === "Tráfico a Landing"
+      ? `Dejo el acceso directo al recurso completo en el primer comentario (o comenta "${keyword}").`
+      : `Si quieres la guía paso a paso + plantilla, comenta "${keyword}" abajo y te la envío por DM.`;
+
+  const singleCtaLabel =
+    req.objective === "Demos B2B"
+      ? "Solicitar demo"
+      : req.objective === "Leads / ManyChat DM"
+      ? "Descargar"
+      : "Más información";
+
+  const tlHook = truncateAtLimit(
+    context.hookHint?.trim() ||
+      `Dejamos de improvisar en ${shortTopic} y multiplicamos x3.4 los leads B2B sin ampliar equipo.`,
+    148
+  );
+
+  return {
+    thought_leader_ad: {
+      intro_hook: tlHook,
+      full_post_body: [
+        `Durante meses vimos al mismo patrón repetirse en ${shortIcp}: muchas horas creando piezas sueltas y cero trazabilidad real en pipeline.`,
+        `Al estructurar "${shortTopic}" dentro de ${shortNiche}, cambiamos 3 piezas clave:`,
+        `1. Empaque y gancho validado antes de producir.\n2. Distribución multicanal sin enlaces dentro del cuerpo.\n3. Captura directa con palabra clave ${keyword} y seguimiento medible.`,
+        `Resultado: conversaciones B2B cualificadas cada semana con menos de la mitad de esfuerzo manual.`,
+      ].join("\n\n"),
+      cta_soft: tlCtaSoft,
+      target_audience_note: `Patrocinar publicación orgánica desde perfil personal de ${creatorName} hacia ${shortIcp} (excluyendo juniors y estudiantes).`,
+      estimated_ctr_benchmark: "1.6% – 2.9% CTR (Thought Leader)",
+    },
+    single_image_ad: {
+      intro_text: truncateAtLimit(
+        `¿Tu equipo en ${shortNiche} sigue invirtiendo horas manuales sin retorno predecible?\n\nCon "${shortTopic}" diseñas un sistema B2B medible para ${shortIcp}: de idea validada a leads cualificados con ${keyword}.`,
+        595
+      ),
+      headline: truncateAtLimit(`Sistema B2B: ${shortTopic}`, 68),
+      description: truncateAtLimit(
+        `Arquitectura lista para ${shortIcp}. Activa con ${keyword}.`,
+        96
+      ),
+      cta_label: singleCtaLabel,
+      visual_brief: `Diagrama oscuro NLE (fondo #07090e, acentos cyan #22d3ee) en 1200×627 comparando "Flujo Manual Disperso" vs "Arquitectura ${shortTopic}" con 3 nodos y métrica destacada "+3.4x Watch Time / CPL -38%".`,
+    },
+    document_carousel_ad: {
+      intro_text: truncateAtLimit(
+        `Desliza este documento de 5 páginas con la hoja de ruta exacta de "${shortTopic}" aplicada a ${shortNiche}. Descárgalo gratis al final.`,
+        595
+      ),
+      headline: truncateAtLimit(`Blueprint PDF: ${shortTopic}`, 68),
+      slides_outline: [
+        `Portada: Cómo dominar ${shortTopic} sin añadir horas operativas`,
+        `El cuello de botella oculto que frena a ${shortIcp}`,
+        `Arquitectura en 3 fases: Hook · Producción -14 LUFS · Captura ${keyword}`,
+        `Métricas de control B2B (Hold Rate 3s, Watch Time Share y CPL)`,
+        `Checklist de implementación + Acceso completo (${keyword})`,
+      ],
+      lead_gen_form_fields: [
+        "Nombre",
+        "Email corporativo",
+        "Empresa",
+        "Cargo",
+      ],
+      thank_you_message: `¡Perfecto! Tu recurso de "${shortTopic}" está listo. Ábrelo ahora aquí: ${targetUrl}`,
+    },
+    conversation_ad: {
+      subject: truncateAtLimit(`Sobre ${shortTopic} en tu equipo`, 58),
+      opening_message: `Hola %FIRSTNAME%,\n\nViendo tu rol en %COMPANYNAME%, te comparto el esquema con el que ${shortIcp} está reduciendo a la mitad el tiempo operativo en ${shortTopic} sin perder control de marca.\n\n¿Te paso el documento técnico o prefieres ver un diagnóstico rápido de 15 minutos?`,
+      cta_buttons: [
+        `Enviar blueprint (${keyword})`,
+        "Agendar diagnóstico 15 min",
+        "Solo explorar métricas",
+      ],
+    },
+    targeting_blueprint: {
+      job_titles: [
+        "Founder & CEO",
+        "Head of Growth",
+        "Marketing Director",
+        "VP of Revenue",
+        "COO / Operations Lead",
+      ],
+      seniorities: ["Owner", "CXO", "VP", "Director", "Partner"],
+      company_sizes: [
+        "11-50 empleados",
+        "51-200 empleados",
+        "201-500 empleados",
+      ],
+      industries: [
+        truncateAtLimit(niche, 38),
+        "Software y Tecnología (SaaS)",
+        "Consultoría y Servicios B2B",
+        "Marketing y Publicidad",
+      ],
+      geographies: [
+        "España (ES)",
+        "México (MX)",
+        "Colombia (CO)",
+        "Argentina (AR)",
+        "Estados Unidos (ES/EN)",
+      ],
+      recommended_daily_budget_eur:
+        "30 € – 50 €/día (70% Thought Leader + 30% Document Ad)",
+    },
+  };
+}
+
+function normalizeCampaignResponse(
+  res: AdCampaignResponse,
+  req: AdCampaignGenerateRequest,
+  context: {
+    niche?: string;
+    icp?: string;
+    creatorName?: string;
+    hookHint?: string;
+  }
+): AdCampaignResponse {
+  const normalizedVariants = res.variants.map((variant) => ({
+    ...variant,
+    remotion_916_storyboard: (variant.remotion_916_storyboard || []).map(
+      (blk) => {
+        const raw = blk as unknown as Record<string, string | undefined>;
+        return {
+          timecode: blk.timecode || raw.timecode || "00:00",
+          visual: blk.visual || raw.visual_direction || "",
+          copy_overlay: blk.copy_overlay || raw.on_screen_text || "",
+          audio: blk.audio || raw.audio_voiceover || "",
+        };
+      }
+    ),
+  }));
+
+  return {
+    ...res,
+    variants: normalizedVariants,
+    linkedin_ads:
+      res.linkedin_ads ?? buildLocalLinkedInAdsSpec(req, context),
+  };
 }
 
 function buildLocalAdCampaign(
@@ -336,21 +523,27 @@ function buildLocalAdCampaign(
   const exactBase = coreKw || "sistema automatizacion ia";
 
   const ga4_utm_links = req.platforms.map((plat) => {
-    const src = plat.toLowerCase().includes("meta")
+    const low = plat.toLowerCase();
+    const src = low.includes("linkedin")
+      ? "linkedin_ads"
+      : low.includes("meta")
       ? "meta_ads"
-      : plat.toLowerCase().includes("google")
+      : low.includes("google")
       ? "google_search"
-      : plat.toLowerCase().includes("youtube")
+      : low.includes("youtube")
       ? "youtube_ads"
       : "tiktok_spark";
-    const med = plat.toLowerCase().includes("search") ? "cpc" : "paid_social";
+    const med = low.includes("search") ? "cpc" : "paid_social";
+    const content = low.includes("linkedin")
+      ? `li_thought_leader_${keyword.toLowerCase()}`
+      : `var_a_pas_${keyword.toLowerCase()}`;
     return {
       platform: plat,
       utm_url: buildUtmUrl(targetUrl, {
         source: src,
         medium: med,
         campaign: `${campaignSlug}_${slugifyUtm(req.objective)}`,
-        content: `var_a_pas_${keyword.toLowerCase()}`,
+        content,
       }),
     };
   });
@@ -388,32 +581,9 @@ function buildLocalAdCampaign(
         46
       )} lo resuelve con ${keyword}.`,
     },
+    linkedin_ads: buildLocalLinkedInAdsSpec(req, context),
     ga4_utm_links,
   };
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fallback below
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 export function AdsCampaignStudioView({
@@ -425,6 +595,7 @@ export function AdsCampaignStudioView({
     creatorProfile,
     backendOnline,
     showToast,
+    setProjects,
   } = useEngineStore();
 
   const resultTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -432,6 +603,7 @@ export function AdsCampaignStudioView({
     useState<AdsResultTabId>("creatives");
 
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([
+    "LinkedIn Ads (B2B & Thought Leader)",
     "Meta Ads (IG/FB)",
     "Google Search Ads",
     "YouTube In-Stream Ads",
@@ -457,6 +629,7 @@ export function AdsCampaignStudioView({
         topic:
           selectedDetail?.project?.working_title ?? "Campaña de Contenido",
         platforms: [
+          "LinkedIn Ads (B2B & Thought Leader)",
           "Meta Ads (IG/FB)",
           "Google Search Ads",
           "YouTube In-Stream Ads",
@@ -480,10 +653,10 @@ export function AdsCampaignStudioView({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Interactive GA4 Custom UTM Builder state
-  const [utmSource, setUtmSource] = useState("meta_ads");
+  const [utmSource, setUtmSource] = useState("linkedin_ads");
   const [utmMedium, setUtmMedium] = useState("paid_social");
   const [utmCampaignName, setUtmCampaignName] = useState("ace_101_leads");
-  const [utmContent, setUtmContent] = useState("var_a_pas");
+  const [utmContent, setUtmContent] = useState("li_thought_leader");
   const [utmTerm, setUtmTerm] = useState("");
 
   const manychatTriggers = useMemo(
@@ -534,7 +707,7 @@ export function AdsCampaignStudioView({
   const customGa4Url = useMemo(
     () =>
       buildUtmUrl(targetUrl, {
-        source: utmSource.trim() || "meta_ads",
+        source: utmSource.trim() || "linkedin_ads",
         medium: utmMedium.trim() || "paid_social",
         campaign: utmCampaignName.trim() || "ace_campaign",
         content: utmContent.trim() || undefined,
@@ -545,7 +718,7 @@ export function AdsCampaignStudioView({
 
   const handleCopy = useCallback(
     async (key: string, value: string, label: string) => {
-      const ok = await copyText(value);
+      const ok = await copyPreservingLineBreaks(value);
       if (ok) {
         setCopiedKey(key);
         showToast("success", `${label} copiado al portapapeles.`);
@@ -581,70 +754,102 @@ export function AdsCampaignStudioView({
     }
   };
 
-  const handleGenerateCampaign = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!topic.trim()) {
-      showToast("error", "Introduce un tema u oferta para generar la campaña.");
-      return;
-    }
+  const campaignContext = useMemo(
+    () => ({
+      niche: creatorProfile?.niche,
+      icp: creatorProfile?.ideal_customer_profile,
+      creatorName: creatorProfile?.name,
+      hookHint: selectedDetail?.script?.hook_variants?.[0]?.hook_text,
+    }),
+    [creatorProfile, selectedDetail]
+  );
 
-    const payload: AdCampaignGenerateRequest = {
-      project_id: selectedProjectId ?? null,
-      topic: topic.trim(),
-      platforms: selectedPlatforms,
-      objective,
-      target_url: targetUrl.trim() || undefined,
-      trigger_keyword: triggerKeyword.trim() || undefined,
-    };
+  const executeCampaignGeneration = useCallback(
+    async (
+      topicOverride?: string,
+      platformsOverride?: string[],
+      customBannerMessage?: string
+    ) => {
+      const effectiveTopic = (topicOverride ?? topic).trim();
+      if (!effectiveTopic) {
+        showToast("error", "Introduce un tema u oferta para generar la campaña.");
+        return;
+      }
 
-    setGenerating(true);
-    try {
-      if (backendOnline) {
-        const res = await apiClient.generateAdCampaign(payload);
-        setCampaign(res);
-        setGenerationSource("backend");
-        setSelectedStoryboardIdx(0);
-        setSelectedFrameBlockIdx(0);
-        setUtmCampaignName(slugifyUtm(res.topic));
-        showToast(
-          "success",
-          `Campaña generada (${res.variants.length} creatividades + RSA + Remotion 9:16 + UTMs).`
-        );
-      } else {
-        const local = buildLocalAdCampaign(payload, {
-          niche: creatorProfile?.niche,
-          icp: creatorProfile?.ideal_customer_profile,
-          creatorName: creatorProfile?.name,
-          hookHint: selectedDetail?.script?.hook_variants?.[0]?.hook_text,
-        });
-        setCampaign(local);
+      const effectivePlatforms = platformsOverride ?? selectedPlatforms;
+      const payload: AdCampaignGenerateRequest = {
+        project_id: selectedProjectId ?? null,
+        topic: effectiveTopic,
+        platforms: effectivePlatforms,
+        objective,
+        target_url: targetUrl.trim() || undefined,
+        trigger_keyword: triggerKeyword.trim() || undefined,
+      };
+
+      setGenerating(true);
+      try {
+        if (backendOnline) {
+          const rawRes = await apiClient.generateAdCampaign(payload);
+          const normalized = normalizeCampaignResponse(
+            rawRes,
+            payload,
+            campaignContext
+          );
+          setCampaign(normalized);
+          setGenerationSource("backend");
+          setSelectedStoryboardIdx(0);
+          setSelectedFrameBlockIdx(0);
+          setUtmCampaignName(slugifyUtm(normalized.topic));
+          showToast(
+            "success",
+            customBannerMessage ||
+              `Campaña generada (${normalized.variants.length} creatividades + LinkedIn B2B + RSA + Remotion 9:16 + UTMs).`
+          );
+        } else {
+          const local = buildLocalAdCampaign(payload, campaignContext);
+          setCampaign(local);
+          setGenerationSource("local");
+          setSelectedStoryboardIdx(0);
+          setSelectedFrameBlockIdx(0);
+          setUtmCampaignName(slugifyUtm(local.topic));
+          showToast(
+            customBannerMessage ? "success" : "info",
+            customBannerMessage ||
+              "Campaña generada con motor local rico (LinkedIn B2B + Meta + Google RSA + Remotion 9:16)."
+          );
+        }
+      } catch {
+        const fallback = buildLocalAdCampaign(payload, campaignContext);
+        setCampaign(fallback);
         setGenerationSource("local");
         setSelectedStoryboardIdx(0);
         setSelectedFrameBlockIdx(0);
-        setUtmCampaignName(slugifyUtm(local.topic));
+        setUtmCampaignName(slugifyUtm(fallback.topic));
         showToast(
           "info",
-          "Campaña generada con motor local rico (Meta + Google RSA + Remotion 9:16)."
+          customBannerMessage ||
+            "Backend sin respuesta para /ads/generate-campaign: campaña generada con fallback local."
         );
+      } finally {
+        setGenerating(false);
       }
-    } catch {
-      const fallback = buildLocalAdCampaign(payload, {
-        niche: creatorProfile?.niche,
-        icp: creatorProfile?.ideal_customer_profile,
-        creatorName: creatorProfile?.name,
-        hookHint: selectedDetail?.script?.hook_variants?.[0]?.hook_text,
-      });
-      setCampaign(fallback);
-      setGenerationSource("local");
-      setSelectedStoryboardIdx(0);
-      setSelectedFrameBlockIdx(0);
-      showToast(
-        "info",
-        "Backend sin respuesta para /ads/generate-campaign: campaña generada con fallback local."
-      );
-    } finally {
-      setGenerating(false);
-    }
+    },
+    [
+      topic,
+      selectedPlatforms,
+      selectedProjectId,
+      objective,
+      targetUrl,
+      triggerKeyword,
+      backendOnline,
+      campaignContext,
+      showToast,
+    ]
+  );
+
+  const handleGenerateCampaign = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    await executeCampaignGeneration();
   };
 
   const selectResultTab = (tabId: AdsResultTabId, idx?: number) => {
@@ -658,6 +863,41 @@ export function AdsCampaignStudioView({
         block: "nearest",
         inline: "nearest",
       });
+    }
+  };
+
+  const handleUseAdAsReference = async (
+    refTopic: string,
+    advertiser: string
+  ) => {
+    const cleanTopic = refTopic.trim() || `Estrategia B2B (${advertiser})`;
+    setTopic(cleanTopic);
+    setUtmCampaignName(slugifyUtm(cleanTopic));
+
+    const liPlatformId = "LinkedIn Ads (B2B & Thought Leader)";
+    const nextPlatforms = selectedPlatforms.includes(liPlatformId)
+      ? selectedPlatforms
+      : [liPlatformId, ...selectedPlatforms];
+    setSelectedPlatforms(nextPlatforms);
+
+    selectResultTab("linkedin-ads", 1);
+    await executeCampaignGeneration(
+      cleanTopic,
+      nextPlatforms,
+      `Referencia de ${advertiser} aplicada a tu Campaña LinkedIn Ads B2B.`
+    );
+  };
+
+  const handleIdeaImported = async () => {
+    if (onRefresh) {
+      await onRefresh();
+      return;
+    }
+    try {
+      const updated = await apiClient.listProjects();
+      setProjects(updated);
+    } catch {
+      // silent fallback
     }
   };
 
@@ -745,52 +985,77 @@ export function AdsCampaignStudioView({
   const previewBlock =
     activeStoryboard[selectedFrameBlockIdx] ?? activeStoryboard[0];
 
+  const resolvedLinkedInSpec = useMemo<LinkedInAdsSpec>(() => {
+    if (campaign.linkedin_ads) return campaign.linkedin_ads;
+    return buildLocalLinkedInAdsSpec(
+      {
+        project_id: selectedProjectId ?? null,
+        topic: campaign.topic || topic || "Campaña B2B",
+        platforms: campaign.platforms,
+        objective: campaign.objective || objective,
+        target_url: targetUrl,
+        trigger_keyword: triggerKeyword,
+      },
+      campaignContext
+    );
+  }, [
+    campaign.linkedin_ads,
+    campaign.topic,
+    campaign.platforms,
+    campaign.objective,
+    selectedProjectId,
+    topic,
+    objective,
+    targetUrl,
+    triggerKeyword,
+    campaignContext,
+  ]);
+
   return (
     <div className="space-y-5">
       {/* Pro Dark NLE Paid Ads Studio Header */}
       <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-xl shadow-black/30">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 font-mono text-[11px] font-bold">
-              <Megaphone className="w-3.5 h-3.5" />
-              PAID ADS STUDIO
-            </span>
+            <AstryxBadge
+              label="PAID ADS STUDIO"
+              variant="orange"
+              icon={<Megaphone className="w-3.5 h-3.5" />}
+            />
             {selectedDetail?.project && (
-              <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono text-xs font-bold">
-                {selectedDetail.project.asset_code}
-              </span>
+              <AstryxBadge
+                label={selectedDetail.project.asset_code}
+                variant="cyan"
+              />
             )}
             <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
-              Estudio de Campañas Paid Ads (Meta + Google RSA + Remotion 9:16)
+              Estudio de Campañas Paid Ads (LinkedIn B2B + Meta + Google RSA + Remotion 9:16)
             </h2>
           </div>
           <p className="text-xs text-slate-400">
-            Convierte tu guión y oferta de Paso 0 en creatividades PAS/Autoridad, anuncios Search Console/RSA, storyboard 9:16 y UTMs GA4.
+            Convierte tu guión y oferta de Paso 0 en creatividades PAS/Autoridad, suite LinkedIn Ads B2B &amp; Ads Library, Google RSA, storyboard 9:16 y UTMs GA4.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`px-2.5 py-1 rounded-full border text-[11px] font-mono ${
+          <AstryxBadge
+            label={
               generationSource === "backend"
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                : "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
-            }`}
-          >
-            {generationSource === "backend"
-              ? "Sincronizado con Backend IA"
-              : "Motor Studio Local Listo"}
-          </span>
+                ? "Sincronizado con Backend IA"
+                : "Motor Studio Local Listo"
+            }
+            variant={generationSource === "backend" ? "success" : "info"}
+          />
 
           {onRefresh && (
-            <button
+            <AstryxButton
               type="button"
+              variant="secondary"
+              size="sm"
+              label="Actualizar Proyecto"
+              icon={<RefreshCw className="w-3.5 h-3.5" />}
               onClick={() => void onRefresh()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:border-cyan-400 text-xs font-semibold text-slate-200 transition"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Actualizar Proyecto
-            </button>
+            />
           )}
         </div>
       </div>
@@ -810,8 +1075,8 @@ export function AdsCampaignStudioView({
                 1. Plataformas Publicitarias ({selectedPlatforms.length} activas)
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {AD_PLATFORMS.map((plat) => {
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {AD_PLATFORMS.map((plat, platIdx) => {
                 const active = selectedPlatforms.includes(plat.id);
                 return (
                   <button
@@ -820,6 +1085,8 @@ export function AdsCampaignStudioView({
                     aria-pressed={active}
                     onClick={() => handleTogglePlatform(plat.id)}
                     className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                      platIdx === 0 ? "sm:col-span-2" : ""
+                    } ${
                       active
                         ? "border-cyan-400 bg-cyan-500/15 text-cyan-100"
                         : "border-slate-800 bg-slate-950/70 text-slate-400 hover:border-slate-700 hover:text-slate-200"
@@ -989,18 +1256,20 @@ export function AdsCampaignStudioView({
         {/* Generate CTA */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <p className="text-[11px] text-slate-400">
-            Genera 3 ángulos publicitarios, 5 titulares RSA (&le;30 chars), keywords exactas/negativas, gancho YouTube 5s, storyboard Remotion 9:16 y UTMs GA4.
+            Genera 3 ángulos PAS/Autoridad, Suite LinkedIn Ads B2B (Thought Leader + PDF Lead Gen + InMail), 5 titulares RSA (&le;30 chars), storyboard 9:16 y UTMs GA4.
           </p>
-          <button
+          <AstryxButton
             type="submit"
-            disabled={generating}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 hover:brightness-110 text-slate-950 text-xs sm:text-sm font-extrabold transition shadow-lg shadow-cyan-500/15 disabled:opacity-60"
-          >
-            <Sparkles className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />
-            {generating
-              ? "Generando Campaña..."
-              : "✨ Generar Campaña Completa (Meta + Google + Remotion)"}
-          </button>
+            variant="primary"
+            size="lg"
+            label={
+              generating
+                ? "Generando Campaña..."
+                : "Generar Campaña Completa (LinkedIn B2B + Meta + Google + Remotion)"
+            }
+            icon={<Sparkles className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />}
+            isLoading={generating}
+          />
         </div>
       </form>
 
@@ -1023,6 +1292,7 @@ export function AdsCampaignStudioView({
                 role="tab"
                 type="button"
                 aria-selected={isSelected}
+                aria-controls={`ads-panel-${tab.id}`}
                 tabIndex={isSelected ? 0 : -1}
                 onClick={() => selectResultTab(tab.id, idx)}
                 onKeyDown={(e) => handleResultTabKeyDown(e, idx)}
@@ -1200,7 +1470,40 @@ export function AdsCampaignStudioView({
         </div>
 
         {/* =============================================================== */}
-        {/* RESULT TAB 2: Google Ads RSA & Search Console                   */}
+        {/* RESULT TAB 2: LinkedIn Ads B2B & Thought Leader                 */}
+        {/* =============================================================== */}
+        <div
+          role="tabpanel"
+          id="ads-panel-linkedin-ads"
+          aria-labelledby="ads-tab-linkedin-ads"
+          hidden={activeResultTab !== "linkedin-ads"}
+        >
+          <LinkedInB2BAdsPanel
+            spec={resolvedLinkedInSpec}
+            topic={campaign.topic}
+            onTopicSuggestion={() => selectResultTab("linkedin-library", 2)}
+          />
+        </div>
+
+        {/* =============================================================== */}
+        {/* RESULT TAB 3: LinkedIn Ads Library Explorer                     */}
+        {/* =============================================================== */}
+        <div
+          role="tabpanel"
+          id="ads-panel-linkedin-library"
+          aria-labelledby="ads-tab-linkedin-library"
+          hidden={activeResultTab !== "linkedin-library"}
+        >
+          <LinkedInAdsLibraryExplorer
+            onIdeaImported={handleIdeaImported}
+            onUseAdAsReference={(refTopic, advertiser) =>
+              void handleUseAdAsReference(refTopic, advertiser)
+            }
+          />
+        </div>
+
+        {/* =============================================================== */}
+        {/* RESULT TAB 4: Google Ads RSA & Search Console                   */}
         {/* =============================================================== */}
         <div
           role="tabpanel"
@@ -1546,7 +1849,7 @@ export function AdsCampaignStudioView({
         </div>
 
         {/* =============================================================== */}
-        {/* RESULT TAB 3: Storyboard 9:16 Remotion & UTMs GA4               */}
+        {/* RESULT TAB 5: Storyboard 9:16 Remotion & UTMs GA4               */}
         {/* =============================================================== */}
         <div
           role="tabpanel"
@@ -1790,7 +2093,7 @@ export function AdsCampaignStudioView({
                         {item.platform}
                       </span>
                       <code className="text-[11px] font-mono text-slate-300 break-all">
-                        {item.utm_url}
+                        {item.utm_url || item.url || ""}
                       </code>
                     </div>
                     <button
@@ -1798,7 +2101,7 @@ export function AdsCampaignStudioView({
                       onClick={() =>
                         void handleCopy(
                           `utm-${idx}`,
-                          item.utm_url,
+                          item.utm_url || item.url || "",
                           `UTM ${item.platform}`
                         )
                       }

@@ -6,15 +6,17 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.ws import broadcaster
 from app.core.config import get_settings
@@ -22,6 +24,8 @@ from app.core.security import HITLSecurityManager, get_permissions_summary
 from app.db.session import get_db
 from app.models.entities import (
     AuditLog,
+    Autolist,
+    AutolistItem,
     ContentProject,
     CreatorProfile,
     HookVaultEntry,
@@ -39,6 +43,13 @@ from app.schemas.contracts import (
     AdCampaignResponse,
     AdCreativeVariant,
     AuditLogResponse,
+    AutolistCreateRequest,
+    AutolistItemCreateRequest,
+    AutolistItemResponse,
+    AutolistResponse,
+    AutolistUpdateRequest,
+    BestTimeHeatmapResponse,
+    ComposerPostCreateRequest,
     ConversionGoal,
     ContentFormat,
     CreatorProfileSchema,
@@ -70,6 +81,10 @@ from app.schemas.contracts import (
     KigalChatAutoSweepResponse,
     KigalChatInteraction,
     LeadMagnetItem,
+    LinkedInAdLibrarySearchRequest,
+    LinkedInAdLibrarySearchResponse,
+    LinkedInAdLibraryStatusResponse,
+    LinkedInAdToIdeaRequest,
     LLMConfigResponse,
     LLMConfigUpdateRequest,
     LLMTestConnectionRequest,
@@ -84,12 +99,14 @@ from app.schemas.contracts import (
     PreflightCheckResult,
     ProjectCreateRequest,
     ProjectSummaryResponse,
+    PublishingCalendarResponse,
     RadarMatutinoIngestRequest,
     RadarMatutinoIngestResponse,
     RMTADiagnosisRequest,
     RMTADiagnosisResponse,
     S3MultipartInitRequest,
     S3MultipartInitResponse,
+    ScheduleUpdateRequest,
     ScriptGenerateRequest,
     ScriptResponse,
     ScriptUpdateRequest,
@@ -115,7 +132,17 @@ from app.services.domain_engines import (
     diagnose_rmta,
     generate_parametric_script,
 )
+from app.services.linkedin_ads import (
+    LinkedInAdLibraryClient,
+    generate_linkedin_b2b_ads_spec,
+)
 from app.services.mcp_hub import MCPClientHub
+from app.services.publishing_scheduler import (
+    compute_best_time_heatmap,
+    project_autolist_slots,
+    resolve_effective_social_credential,
+    run_due_scheduled_posts,
+)
 from app.services.social_connectors import (
     SocialCopyCraftEngine,
     get_connector_for_channel,
@@ -196,6 +223,36 @@ def _build_script_response(script: Script) -> ScriptResponse:
         pattern_interrupt_interval_sec=spec["cut_interval_sec"],
         within_budget=within_budget,
         created_at=script.created_at,
+    )
+
+
+def _serialize_social_post(
+    post: SocialPost,
+    project: ContentProject | None = None,
+) -> SocialPostResponse:
+    return SocialPostResponse(
+        id=post.id,
+        project_id=post.project_id,
+        channel=post.channel,
+        external_platform_id=post.external_platform_id,
+        canonical_url=post.canonical_url,
+        title=post.title,
+        post_body=post.post_body,
+        first_comment=post.first_comment,
+        hashtags=post.hashtags or [],
+        metadata_payload=post.metadata_payload or {},
+        preflight_warnings=post.preflight_warnings or [],
+        preflight_passed=post.preflight_passed,
+        publish_status=post.publish_status,
+        hitl_approval_token=post.hitl_approval_token,
+        scheduled_at=post.scheduled_at,
+        published_at=post.published_at,
+        auto_publish=getattr(post, "auto_publish", True),
+        timezone=getattr(post, "timezone", "Europe/Madrid") or "Europe/Madrid",
+        publish_error=getattr(post, "publish_error", None),
+        autolist_id=getattr(post, "autolist_id", None),
+        project_title=project.working_title if project else None,
+        asset_code=project.asset_code if project else None,
     )
 
 
@@ -1627,23 +1684,7 @@ async def get_project_detail(project_id: uuid.UUID, db: AsyncSession = Depends(g
         if video
         else None,
         "social_posts": [
-            SocialPostResponse(
-                id=p.id,
-                project_id=p.project_id,
-                channel=p.channel,
-                external_platform_id=p.external_platform_id,
-                canonical_url=p.canonical_url,
-                title=p.title,
-                post_body=p.post_body,
-                first_comment=p.first_comment,
-                hashtags=p.hashtags,
-                metadata_payload=p.metadata_payload,
-                preflight_warnings=p.preflight_warnings,
-                preflight_passed=p.preflight_passed,
-                publish_status=p.publish_status,
-                hitl_approval_token=p.hitl_approval_token,
-                published_at=p.published_at,
-            ).model_dump(mode="json")
+            _serialize_social_post(p, project).model_dump(mode="json")
             for p in posts
         ],
     }
@@ -2290,36 +2331,13 @@ async def _get_effective_social_credential(
     db: AsyncSession, channel_key: str
 ) -> tuple[str, str, str, str | None]:
     """Return (access_token, person_urn, source, account_name) checking DB first, then env settings."""
-    key = channel_key.lower()
-    row = (
-        await db.execute(select(SocialCredential).where(SocialCredential.channel == key))
-    ).scalar_one_or_none()
-    settings = get_settings()
-
-    env_map = {
-        "youtube": (settings.youtube_access_token, ""),
-        "instagram": (settings.instagram_access_token, ""),
-        "tiktok": (settings.tiktok_access_token, ""),
-        "linkedin": (settings.linkedin_access_token, settings.linkedin_person_urn),
-    }
-    env_token, env_urn = env_map.get(key, ("", ""))
-
-    if row and row.access_token and row.access_token.strip():
-        return (
-            row.access_token.strip(),
-            (row.person_urn or env_urn or "").strip(),
-            "database",
-            row.account_name,
-        )
-    if env_token and env_token.strip() and not env_token.startswith("test_"):
-        return env_token.strip(), (env_urn or "").strip(), "env", None
-    return "", (env_urn or "").strip(), "none", None
+    return await resolve_effective_social_credential(db, channel_key)
 
 
 @router.get("/social/credentials")
 async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """List connection status (masked) for YouTube, Instagram, TikTok, and LinkedIn."""
-    channels = ("youtube", "instagram", "tiktok", "linkedin")
+    """List connection status (masked) for YouTube, Instagram, TikTok, LinkedIn, and LinkedIn Ads."""
+    channels = ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads")
     result: dict[str, Any] = {}
     for ch in channels:
         token, urn, source, account_name = await _get_effective_social_credential(db, ch)
@@ -2342,7 +2360,7 @@ async def save_social_credential(
 ) -> dict[str, Any]:
     """Persist an OAuth2 access token (and optional LinkedIn Person URN) in PostgreSQL."""
     ch = str(payload.get("channel") or "").strip().lower()
-    if ch not in ("youtube", "instagram", "tiktok", "linkedin"):
+    if ch not in ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads"):
         raise HTTPException(status_code=400, detail="Canal no soportado.")
 
     token = str(payload.get("access_token") or "").strip()
@@ -2381,16 +2399,44 @@ async def test_social_credential(
     import httpx
 
     ch = str(payload.get("channel") or "").strip().lower()
+    if ch not in ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads"):
+        raise HTTPException(status_code=400, detail="Canal no soportado.")
+
     provided_token = str(payload.get("access_token") or "").strip()
     provided_urn = str(payload.get("person_urn") or "").strip()
 
-    saved_token, saved_urn, _, _ = await _get_effective_social_credential(db, ch)
+    saved_token, saved_urn, saved_source, saved_account = await _get_effective_social_credential(db, ch)
     token = provided_token or saved_token
     if not token:
         return {
             "ok": False,
             "channel": ch,
             "message": f"No hay ningún token de {ch.capitalize()} guardado ni introducido. Pega tu Access Token y pulsa Guardar.",
+        }
+
+    if ch == "linkedin_ads":
+        status_res = await LinkedInAdLibraryClient().check_status(
+            token,
+            token_source="input" if provided_token else saved_source,
+            account_name=saved_account or "",
+        )
+        if status_res.live_verified:
+            row = (
+                await db.execute(select(SocialCredential).where(SocialCredential.channel == "linkedin_ads"))
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(SocialCredential(channel="linkedin_ads", access_token=token))
+            else:
+                row.access_token = token
+            await db.commit()
+        return {
+            "ok": status_res.live_verified,
+            "channel": "linkedin_ads",
+            "live_verified": status_res.live_verified,
+            "api_version_used": status_res.api_version_used,
+            "status_code": status_res.status_code,
+            "needs_token_refresh": status_res.needs_token_refresh,
+            "message": status_res.message,
         }
 
     if ch == "linkedin":
@@ -3403,6 +3449,24 @@ async def generate_ads_campaign(
             "utm_content": "demo_contraintuitiva_5s",
             "utm_term": keyword.lower(),
         },
+        {
+            "platform": "LinkedIn Ads (Thought Leader)",
+            "variant_id": "LI-THOUGHT-LEADER",
+            "utm_source": "linkedin",
+            "utm_medium": "paid_social",
+            "utm_campaign": f"li_{campaign_slug}",
+            "utm_content": "thought_leader_ad",
+            "utm_term": keyword.lower(),
+        },
+        {
+            "platform": "LinkedIn Ads (Document / Lead Gen)",
+            "variant_id": "LI-DOC-CAROUSEL",
+            "utm_source": "linkedin",
+            "utm_medium": "paid_social",
+            "utm_campaign": f"li_{campaign_slug}",
+            "utm_content": "document_carousel_ad",
+            "utm_term": keyword.lower(),
+        },
     ]
     ga4_utm_links: list[dict[str, str]] = []
     for spec in utm_specs:
@@ -3416,7 +3480,16 @@ async def generate_ads_campaign(
                 "utm_term": spec["utm_term"],
             },
         )
-        ga4_utm_links.append({**spec, "url": full_url})
+        ga4_utm_links.append({**spec, "url": full_url, "utm_url": full_url})
+
+    linkedin_ads = generate_linkedin_b2b_ads_spec(
+        topic=topic,
+        objective=body.objective,
+        target_url=target_url,
+        trigger_keyword=keyword,
+        profile=profile,
+        lm_title=lm_title,
+    )
 
     if workspace_id is not None:
         await _record_audit(
@@ -3453,8 +3526,853 @@ async def generate_ads_campaign(
         platforms=body.platforms,
         variants=variants,
         google_rsa=google_rsa,
+        linkedin_ads=linkedin_ads,
         ga4_utm_links=ga4_utm_links,
     )
+
+
+@router.get("/ads/linkedin-library/status", response_model=LinkedInAdLibraryStatusResponse)
+async def get_linkedin_ad_library_status(
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInAdLibraryStatusResponse:
+    """Verify live access to LinkedIn Ad Library API using configured linkedin_ads or linkedin token."""
+    token, _, source, account_name = await _get_effective_social_credential(db, "linkedin_ads")
+    return await LinkedInAdLibraryClient().check_status(
+        token=token,
+        token_source=source,
+        account_name=account_name or "",
+    )
+
+
+@router.post("/ads/linkedin-library/search", response_model=LinkedInAdLibrarySearchResponse)
+async def search_linkedin_ad_library(
+    body: LinkedInAdLibrarySearchRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInAdLibrarySearchResponse:
+    """Query LinkedIn's official Ad Library API for competitive B2B ad intelligence."""
+    token, _, _, _ = await _get_effective_social_credential(db, "linkedin_ads")
+    return await LinkedInAdLibraryClient().search(token=token, req=body)
+
+
+@router.post("/ads/linkedin-library/to-idea")
+async def import_linkedin_ad_to_idea(
+    body: LinkedInAdToIdeaRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Convert a LinkedIn Ad Library inspiration into an evaluated Idea + Kanban ContentProject."""
+    ws = await _get_default_workspace(db)
+    raw_headline = (body.headline or "").strip()
+    snippet = " ".join(body.body_text.split())[:65].strip()
+    working_title = (
+        raw_headline[:255]
+        if raw_headline
+        else f"Ángulo {body.advertiser_name[:40]}: {snippet}"[:255]
+    )
+    context_notes = (
+        f"Inspiración importada desde LinkedIn Ad Library.\n"
+        f"Anunciante: {body.advertiser_name} · Formato: {body.format}\n"
+        + (f"Landing: {body.landing_page_url}\n" if body.landing_page_url else "")
+        + f"\nCopy original analizado:\n{body.body_text.strip()}"
+    )
+
+    idea = Idea(
+        workspace_id=ws.id,
+        concept_title=working_title,
+        source_origin="linkedin_ad_library",
+        impact_score=8.5,
+        confidence_score=8.0,
+        ease_score=8.5,
+        ice_score=8.33,
+        ice_multiplicative=578.0,
+        tam_classification=TAMClassification.CORE_80.value,
+        triage_status="APROBADO_PRIORITARIO",
+        context_notes=context_notes,
+        target_platforms=["LinkedIn"],
+        research_dossier={
+            "advertiser_name": body.advertiser_name,
+            "format": body.format,
+            "landing_page_url": body.landing_page_url,
+        },
+        semantic_embedding=compute_deterministic_embedding(working_title),
+    )
+    db.add(idea)
+    await db.flush()
+
+    asset_code = f"LI-{uuid.uuid4().hex[:5].upper()}"
+    blocks, ab_variants, cta_text = generate_parametric_script(
+        topic=working_title,
+        preset=DurationPreset.STANDARD_SHORT,
+        goal=ConversionGoal.B2B_INBOUND_CONVERSATION,
+    )
+    project = ContentProject(
+        workspace_id=ws.id,
+        idea_id=idea.id,
+        asset_code=asset_code,
+        working_title=working_title,
+        target_duration=DurationPreset.STANDARD_SHORT.value,
+        conversion_goal=ConversionGoal.B2B_INBOUND_CONVERSATION.value,
+        current_state=FSMState.SCRIPTED_PACKAGED.value,
+        ice_score=8.33,
+        tam_classification=TAMClassification.CORE_80.value,
+        context_notes=context_notes,
+        source_origin="linkedin_ad_library",
+        target_platforms=["LinkedIn"],
+        content_format=ContentFormat.TEXT_ONLY.value,
+        ab_variants=[v.model_dump(mode="json") for v in ab_variants],
+        state_history=[
+            {"from": "INIT", "to": "CAPTURED", "agent": "LinkedInAdLibrary", "tier": 1},
+            {"from": "CAPTURED", "to": FSMState.SCRIPTED_PACKAGED.value, "agent": "AdsCampaignStrategist", "tier": 1},
+        ],
+        temporal_workflow_id=f"wf-liad-{asset_code.lower()}",
+    )
+    db.add(project)
+    await db.flush()
+
+    computed_blocks, wc, est_sec, _ = compute_block_metrics(blocks, 140, DurationPreset.STANDARD_SHORT)
+    db.add(
+        Script(
+            project_id=project.id,
+            script_version=1,
+            duration_preset=DurationPreset.STANDARD_SHORT.value,
+            conversion_goal=ConversionGoal.B2B_INBOUND_CONVERSATION.value,
+            wpm_rate=140,
+            two_column_blocks=[b.model_dump(mode="json") for b in computed_blocks],
+            hook_variants=[],
+            selected_hook_index=0,
+            cta_text=cta_text,
+            word_count=wc,
+            estimated_duration_sec=est_sec,
+        )
+    )
+
+    copy_engine = SocialCopyCraftEngine()
+    li_draft = copy_engine.generate_linkedin(
+        headline=working_title,
+        thesis_points=[snippet or working_title],
+        goal=ConversionGoal.B2B_INBOUND_CONVERSATION,
+        context_notes=context_notes,
+    )
+    pf = validate_preflight(SocialChannel.LINKEDIN, li_draft)
+    db.add(
+        SocialPost(
+            project_id=project.id,
+            channel=SocialChannel.LINKEDIN.value,
+            title=li_draft.get("title"),
+            post_body=li_draft["post_body"],
+            first_comment=li_draft.get("first_comment"),
+            hashtags=li_draft.get("hashtags", []),
+            metadata_payload=li_draft.get("metadata_payload", {}),
+            preflight_warnings=pf.warnings + pf.blocking_errors,
+            preflight_passed=pf.passed,
+            publish_status="READY_FOR_HITL",
+        )
+    )
+
+    await _record_audit(
+        db=db,
+        workspace_id=ws.id,
+        project_id=project.id,
+        action_type="LINKEDIN_AD_TO_IDEA",
+        agent_or_user_id="AdsCampaignStrategist",
+        security_tier=1,
+        operation_status="SUCCESS",
+        payload={
+            "advertiser_name": body.advertiser_name,
+            "format": body.format,
+            "asset_code": asset_code,
+        },
+        ip_source=request.client.host if request.client else "127.0.0.1",
+    )
+    await db.commit()
+
+    await broadcaster.broadcast(
+        "PROJECT_CREATED",
+        {"project_id": str(project.id), "asset_code": asset_code, "source": "linkedin_ad_library"},
+    )
+    return {
+        "imported": True,
+        "project_id": str(project.id),
+        "asset_code": asset_code,
+        "working_title": working_title,
+    }
+
+
+# --- 12. Metricool-Style Publishing Scheduler, Best Times & Autolists ---
+
+
+def _normalize_dt_utc(dt: datetime | None, tz_name: str = "Europe/Madrid") -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        try:
+            tz_obj = ZoneInfo((tz_name or "Europe/Madrid").strip() or "Europe/Madrid")
+        except (ZoneInfoNotFoundError, KeyError, ValueError):
+            tz_obj = timezone.utc
+        return dt.replace(tzinfo=tz_obj).astimezone(timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_calendar_bound(raw: str | None, is_end: bool = False) -> datetime | None:
+    if not raw or not raw.strip():
+        return None
+    txt = re.sub(r" (\d{2}:\d{2})$", r"+\1", raw.strip())
+    is_date_only = len(txt) == 10 and "T" not in txt and " " not in txt
+    try:
+        parsed = datetime.fromisoformat(txt.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Fecha inválida en calendario: {raw}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    if is_date_only and is_end:
+        parsed = parsed.replace(hour=23, minute=59, second=59)
+    return parsed
+
+
+def _compute_scheduled_hitl_ttl(scheduled_utc: datetime | None) -> int:
+    if scheduled_utc is None:
+        return 3600
+    delta = int((scheduled_utc - datetime.now(timezone.utc)).total_seconds())
+    return max(3600, min(180 * 86400, delta + 7200))
+
+
+def _canonical_channel_name(raw_channel: str) -> str:
+    lookup = {
+        "youtube": SocialChannel.YOUTUBE.value,
+        "instagram": SocialChannel.INSTAGRAM.value,
+        "tiktok": SocialChannel.TIKTOK.value,
+        "linkedin": SocialChannel.LINKEDIN.value,
+    }
+    return lookup.get(raw_channel.strip().lower(), raw_channel.strip() or SocialChannel.LINKEDIN.value)
+
+
+async def _load_autolist(db: AsyncSession, autolist_id: uuid.UUID) -> Autolist:
+    row = (
+        await db.execute(
+            select(Autolist)
+            .options(selectinload(Autolist.items))
+            .where(Autolist.id == autolist_id)
+        )
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Autolist not found.")
+    return row
+
+
+@router.get("/publishing/calendar", response_model=PublishingCalendarResponse)
+async def get_publishing_calendar(
+    start: str | None = None,
+    end: str | None = None,
+    channel: str | None = None,
+    tz_param: str = Query(default="Europe/Madrid", alias="timezone"),
+    db: AsyncSession = Depends(get_db),
+) -> PublishingCalendarResponse:
+    """Return scheduled/draft/published SocialPosts, projected Autolist slots, and connected channels."""
+    now_utc = datetime.now(timezone.utc)
+    default_start = (now_utc - timedelta(days=now_utc.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    start_dt = _parse_calendar_bound(start, is_end=False) or default_start
+    end_dt = _parse_calendar_bound(end, is_end=True) or (start_dt + timedelta(days=30))
+
+    stmt = (
+        select(SocialPost, ContentProject)
+        .join(ContentProject, SocialPost.project_id == ContentProject.id)
+        .order_by(SocialPost.scheduled_at.asc(), desc(SocialPost.created_at))
+    )
+    rows = (await db.execute(stmt)).all()
+
+    channel_filter = channel.strip().lower() if channel and channel.strip() and channel.strip().upper() != "ALL" else None
+
+    calendar_posts: list[SocialPostResponse] = []
+    for sp, proj in rows:
+        if channel_filter and sp.channel.lower() != channel_filter:
+            continue
+        effective_dt = sp.scheduled_at or sp.published_at
+        if effective_dt is not None:
+            eff_utc = _normalize_dt_utc(effective_dt)
+            assert eff_utc is not None
+            if not (start_dt <= eff_utc <= end_dt):
+                continue
+        elif sp.publish_status not in ("DRAFT", "MANUAL_REMINDER", "READY_FOR_HITL"):
+            continue
+        calendar_posts.append(_serialize_social_post(sp, proj))
+
+    autolists = (
+        (
+            await db.execute(
+                select(Autolist)
+                .options(selectinload(Autolist.items))
+                .where(Autolist.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    projected_slots = project_autolist_slots(list(autolists), start_dt, end_dt)
+    if channel_filter:
+        projected_slots = [
+            s for s in projected_slots if str(s.get("channel", "")).lower() == channel_filter
+        ]
+
+    connected_channels: dict[str, dict[str, Any]] = {}
+    for ch_name in ("YouTube", "Instagram", "TikTok", "LinkedIn"):
+        token, urn, source, account_name = await _get_effective_social_credential(
+            db, ch_name.lower()
+        )
+        connected_channels[ch_name] = {
+            "configured": bool(token),
+            "account_name": account_name or "",
+            "source": source,
+            "person_urn": urn if (urn and urn != "urn:li:person:creator-001") else "",
+        }
+
+    return PublishingCalendarResponse(
+        posts=calendar_posts,
+        projected_autolist_slots=projected_slots,
+        connected_channels=connected_channels,
+        timezone=tz_param,
+    )
+
+
+@router.post("/publishing/posts")
+async def create_publishing_posts(
+    body: ComposerPostCreateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Create multi-channel draft, manual reminder, scheduled, or immediate posts from Composer."""
+    mode = body.publish_mode.strip().upper()
+    if mode not in ("DRAFT", "SCHEDULED", "MANUAL_REMINDER", "PUBLISH_NOW"):
+        raise HTTPException(status_code=400, detail=f"publish_mode no soportado: {body.publish_mode}")
+
+    scheduled_utc = _normalize_dt_utc(body.scheduled_at, body.timezone)
+    if mode == "SCHEDULED" and scheduled_utc is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes especificar una fecha/hora (scheduled_at) para programar la publicación.",
+        )
+
+    ws = await _get_default_workspace(db)
+    if body.project_id is not None:
+        project = (
+            await db.execute(select(ContentProject).where(ContentProject.id == body.project_id))
+        ).scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found.")
+    else:
+        first_line = " ".join(body.post_body.strip().splitlines()[:1])[:80]
+        working_title = (body.title or first_line or "Publicación Programada").strip()[:255]
+        asset_code = f"PUB-{uuid.uuid4().hex[:5].upper()}"
+        target_platforms = list(dict.fromkeys(ch.value for ch in body.channels))
+        project = ContentProject(
+            workspace_id=ws.id,
+            asset_code=asset_code,
+            working_title=working_title,
+            target_duration=DurationPreset.STANDARD_SHORT.value,
+            conversion_goal=ConversionGoal.EMAIL_LEAD_CAPTURE.value,
+            current_state=FSMState.HITL_PENDING_PUBLISH.value,
+            ice_score=8.0,
+            tam_classification=TAMClassification.CORE_80.value,
+            source_origin="publishing_composer",
+            target_platforms=target_platforms,
+            content_format=(
+                ContentFormat.TEXT_ONLY.value
+                if body.visual_mode == "NONE"
+                else ContentFormat.TEXT_AND_VIDEO.value
+            ),
+            state_history=[
+                {"from": "INIT", "to": FSMState.HITL_PENDING_PUBLISH.value, "agent": "PublishingComposer", "tier": 1}
+            ],
+            temporal_workflow_id=f"wf-pub-{asset_code.lower()}",
+        )
+        db.add(project)
+        await db.flush()
+
+    requires_hitl = mode == "PUBLISH_NOW" or (mode == "SCHEDULED" and body.auto_publish)
+    sec_mgr = HITLSecurityManager()
+    approval_token: str | None = None
+    if requires_hitl:
+        if body.hitl_token:
+            verif = sec_mgr.verify_hitl_token(
+                token=body.hitl_token,
+                project_id=str(project.id),
+                required_tier=3,
+                action="publish_all_channels",
+                actor="creator",
+            )
+            if not verif.valid:
+                raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
+            approval_token = body.hitl_token
+        else:
+            if not body.hitl_pin or len(body.hitl_pin.strip()) < 4:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tier 3 HITL authorization requires explicit 2FA confirmation code (>=4 chars).",
+                )
+            ttl_seconds = _compute_scheduled_hitl_ttl(scheduled_utc)
+            issued = sec_mgr.issue_hitl_token(
+                project_id=str(project.id),
+                tier=3,
+                action="publish_all_channels",
+                actor="creator",
+                ttl_seconds=ttl_seconds,
+            )
+            approval_token = issued["token"]
+
+    unique_channels = list(dict.fromkeys(body.channels))
+    created_posts: list[SocialPost] = []
+    publications: list[dict[str, Any]] = []
+    ip_addr = request.client.host if request.client else "127.0.0.1"
+
+    for ch in unique_channels:
+        override = (
+            body.per_channel_overrides.get(ch.value)
+            or body.per_channel_overrides.get(ch.value.lower())
+            or {}
+        )
+        ch_title = override.get("title") if "title" in override and override.get("title") is not None else body.title
+        ch_body = str(override.get("post_body") or body.post_body)
+        ch_first_comment = (
+            override.get("first_comment") if "first_comment" in override else body.first_comment
+        )
+
+        post_payload = {
+            "title": ch_title,
+            "post_body": ch_body,
+            "first_comment": ch_first_comment,
+            "hashtags": body.hashtags,
+            "metadata_payload": {
+                "visual_mode": body.visual_mode,
+                "media_url": body.media_url,
+                "auto_first_comment": bool(ch_first_comment),
+                "source": "publishing_composer",
+            },
+        }
+        pf = validate_preflight(ch, post_payload)
+
+        if mode == "DRAFT":
+            pub_status = "DRAFT"
+            auto_pub = body.auto_publish
+        elif mode == "MANUAL_REMINDER":
+            pub_status = "MANUAL_REMINDER"
+            auto_pub = False
+        elif mode == "SCHEDULED":
+            pub_status = "SCHEDULED"
+            auto_pub = body.auto_publish
+        else:
+            pub_status = "SCHEDULED"
+            auto_pub = True
+
+        sp = SocialPost(
+            project_id=project.id,
+            channel=ch.value,
+            title=ch_title,
+            post_body=ch_body,
+            first_comment=ch_first_comment,
+            hashtags=body.hashtags,
+            metadata_payload=post_payload["metadata_payload"],
+            preflight_warnings=pf.warnings + pf.blocking_errors,
+            preflight_passed=pf.passed,
+            publish_status=pub_status,
+            scheduled_at=scheduled_utc,
+            hitl_approval_token=approval_token,
+            auto_publish=auto_pub,
+            timezone=body.timezone or "Europe/Madrid",
+        )
+        db.add(sp)
+        await db.flush()
+
+        if mode == "PUBLISH_NOW":
+            eff_token, eff_urn, _, _ = await _get_effective_social_credential(db, ch.value.lower())
+            connector = get_connector_for_channel(
+                ch,
+                access_token_override=eff_token or None,
+                person_urn_override=eff_urn or None,
+            )
+            try:
+                pub_res = await connector.publish(
+                    project_id=str(project.id),
+                    payload=post_payload,
+                    hitl_token=approval_token,
+                    actor="creator",
+                    security_manager=sec_mgr,
+                )
+                sp.external_platform_id = pub_res["external_platform_id"]
+                sp.canonical_url = pub_res["canonical_url"]
+                sp.publish_status = "PUBLISHED"
+                sp.published_at = datetime.now(timezone.utc)
+                sp.publish_error = None
+                publications.append(pub_res)
+
+                await _record_audit(
+                    db=db,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                    action_type=f"PUBLISH_{ch.value.upper()}",
+                    agent_or_user_id="creator",
+                    security_tier=3,
+                    operation_status="SUCCESS",
+                    hitl_token_id=approval_token,
+                    payload=pub_res,
+                    ip_source=ip_addr,
+                )
+            except Exception as exc:
+                resp = getattr(exc, "response", None)
+                err_msg = (
+                    f"Error API {ch.value} ({resp.status_code}): {resp.text[:300]}"
+                    if resp is not None
+                    else str(exc)
+                )
+                sp.publish_status = "FAILED"
+                sp.publish_error = err_msg
+                publications.append({"channel": ch.value, "status": "FAILED", "error": err_msg})
+                await _record_audit(
+                    db=db,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                    action_type=f"PUBLISH_{ch.value.upper()}",
+                    agent_or_user_id="creator",
+                    security_tier=3,
+                    operation_status="FAILED",
+                    hitl_token_id=approval_token,
+                    payload={"error": err_msg},
+                    ip_source=ip_addr,
+                )
+
+        created_posts.append(sp)
+
+    if mode == "PUBLISH_NOW" and all(p.publish_status == "PUBLISHED" for p in created_posts):
+        project.current_state = FSMState.PUBLISHED_LIVE.value
+
+    if mode != "PUBLISH_NOW":
+        await _record_audit(
+            db=db,
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            action_type=f"COMPOSER_{mode}_POSTS",
+            agent_or_user_id="creator",
+            security_tier=3 if requires_hitl else 1,
+            operation_status="SUCCESS",
+            hitl_token_id=approval_token,
+            payload={
+                "channels": [c.value for c in unique_channels],
+                "scheduled_at": scheduled_utc.isoformat() if scheduled_utc else None,
+                "auto_publish": body.auto_publish,
+            },
+            ip_source=ip_addr,
+        )
+
+    await db.commit()
+    for sp in created_posts:
+        await db.refresh(sp)
+
+    serialized = [_serialize_social_post(sp, project).model_dump(mode="json") for sp in created_posts]
+    await broadcaster.broadcast(
+        "PUBLISHING_POSTS_CREATED",
+        {"created_count": len(serialized), "mode": mode, "project_id": str(project.id)},
+    )
+    return {
+        "created_count": len(serialized),
+        "posts": serialized,
+        "publications": publications,
+    }
+
+
+@router.patch("/publishing/schedule/{post_id}", response_model=SocialPostResponse)
+async def reschedule_publishing_post(
+    post_id: uuid.UUID,
+    body: ScheduleUpdateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> SocialPostResponse:
+    """Reschedule a post (drag & drop), toggle auto_publish, and renew Tier 3 HITL token if needed."""
+    post = (await db.execute(select(SocialPost).where(SocialPost.id == post_id))).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Social post not found.")
+
+    project = (
+        await db.execute(select(ContentProject).where(ContentProject.id == post.project_id))
+    ).scalar_one_or_none()
+
+    if "timezone" in body.model_fields_set and body.timezone:
+        post.timezone = body.timezone.strip()
+    if "auto_publish" in body.model_fields_set and body.auto_publish is not None:
+        post.auto_publish = body.auto_publish
+    if "scheduled_at" in body.model_fields_set:
+        post.scheduled_at = _normalize_dt_utc(body.scheduled_at, post.timezone)
+    if "publish_status" in body.model_fields_set and body.publish_status:
+        allowed_statuses = {"DRAFT", "SCHEDULED", "MANUAL_REMINDER", "READY_FOR_HITL", "PUBLISHED", "FAILED"}
+        if body.publish_status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail=f"Estado inválido: {body.publish_status}")
+        post.publish_status = body.publish_status
+
+    if post.publish_status == "SCHEDULED" and post.auto_publish:
+        if post.scheduled_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="scheduled_at es obligatorio cuando el estado es SCHEDULED con auto_publish.",
+            )
+        scheduled_utc = _normalize_dt_utc(post.scheduled_at, post.timezone)
+        assert scheduled_utc is not None
+        sec_mgr = HITLSecurityManager()
+        action = f"publish_{post.channel.lower()}"
+
+        if body.hitl_token:
+            verif = sec_mgr.verify_hitl_token(
+                token=body.hitl_token,
+                project_id=str(post.project_id),
+                required_tier=3,
+                action=action,
+                actor="creator",
+            )
+            if not verif.valid:
+                raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
+            post.hitl_approval_token = body.hitl_token
+        elif body.hitl_pin:
+            if len(body.hitl_pin.strip()) < 4:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tier 3 HITL authorization requires explicit 2FA confirmation code (>=4 chars).",
+                )
+            issued = sec_mgr.issue_hitl_token(
+                project_id=str(post.project_id),
+                tier=3,
+                action="publish_all_channels",
+                actor="creator",
+                ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
+            )
+            post.hitl_approval_token = issued["token"]
+        elif post.hitl_approval_token:
+            verif = sec_mgr.verify_hitl_token(
+                token=post.hitl_approval_token,
+                project_id=str(post.project_id),
+                required_tier=3,
+                action=action,
+                actor="creator",
+            )
+            if not verif.valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}",
+                )
+            # Renew long-lived Tier 3 token if rescheduled later than current expiry window
+            if int(scheduled_utc.timestamp()) + 3600 > verif.expires_at:
+                issued = sec_mgr.issue_hitl_token(
+                    project_id=str(post.project_id),
+                    tier=3,
+                    action="publish_all_channels",
+                    actor="creator",
+                    ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
+                )
+                post.hitl_approval_token = issued["token"]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Tier 3 HITL authorization requires explicit PIN/2FA confirmation code (>=4 chars).",
+            )
+
+    if project is not None:
+        await _record_audit(
+            db=db,
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            action_type="RESCHEDULE_SOCIAL_POST",
+            agent_or_user_id="creator",
+            security_tier=3 if (post.publish_status == "SCHEDULED" and post.auto_publish) else 1,
+            operation_status="SUCCESS",
+            hitl_token_id=post.hitl_approval_token,
+            payload={
+                "post_id": str(post.id),
+                "scheduled_at": post.scheduled_at.isoformat() if post.scheduled_at else None,
+                "auto_publish": post.auto_publish,
+                "publish_status": post.publish_status,
+            },
+            ip_source=request.client.host if request.client else "127.0.0.1",
+        )
+
+    await db.commit()
+    await db.refresh(post)
+    return _serialize_social_post(post, project)
+
+
+@router.delete("/publishing/posts/{post_id}")
+async def delete_publishing_post(
+    post_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    post = (await db.execute(select(SocialPost).where(SocialPost.id == post_id))).scalar_one_or_none()
+    if not post:
+        raise HTTPException(status_code=404, detail="Social post not found.")
+    await db.delete(post)
+    await db.commit()
+    return {"deleted": True, "post_id": str(post_id)}
+
+
+@router.get("/publishing/best-times", response_model=BestTimeHeatmapResponse)
+async def get_publishing_best_times(
+    channel: str = "LinkedIn",
+    tz_param: str = Query(default="Europe/Madrid", alias="timezone"),
+    db: AsyncSession = Depends(get_db),
+) -> BestTimeHeatmapResponse:
+    """Return 7x24 Best Time to Post audience heatmap combining DB snapshots and channel curves."""
+    canonical = _canonical_channel_name(channel)
+    snapshots = (
+        (
+            await db.execute(
+                select(PerformanceSnapshot)
+                .join(SocialPost, PerformanceSnapshot.social_post_id == SocialPost.id)
+                .where(SocialPost.channel == canonical)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return compute_best_time_heatmap(channel=canonical, snapshots=list(snapshots), tz=tz_param)
+
+
+@router.get("/publishing/autolists", response_model=list[AutolistResponse])
+async def list_autolists(db: AsyncSession = Depends(get_db)) -> list[AutolistResponse]:
+    rows = (
+        (
+            await db.execute(
+                select(Autolist)
+                .options(selectinload(Autolist.items))
+                .order_by(desc(Autolist.created_at))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [AutolistResponse.model_validate(r) for r in rows]
+
+
+@router.post("/publishing/autolists", response_model=AutolistResponse)
+async def create_autolist(
+    body: AutolistCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AutolistResponse:
+    ws = await _get_default_workspace(db)
+    al = Autolist(
+        workspace_id=ws.id,
+        name=body.name.strip(),
+        description=body.description.strip(),
+        channels=[_canonical_channel_name(c) for c in body.channels],
+        schedule_slots=body.schedule_slots,
+        timezone=body.timezone or "Europe/Madrid",
+        is_active=body.is_active,
+        repeat_loop=body.repeat_loop,
+    )
+    db.add(al)
+    await db.commit()
+    loaded = await _load_autolist(db, al.id)
+    return AutolistResponse.model_validate(loaded)
+
+
+@router.put("/publishing/autolists/{autolist_id}", response_model=AutolistResponse)
+async def update_autolist(
+    autolist_id: uuid.UUID,
+    body: AutolistUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AutolistResponse:
+    al = await _load_autolist(db, autolist_id)
+    if body.name is not None:
+        al.name = body.name.strip()
+    if body.description is not None:
+        al.description = body.description.strip()
+    if body.channels is not None:
+        al.channels = [_canonical_channel_name(c) for c in body.channels]
+    if body.schedule_slots is not None:
+        al.schedule_slots = body.schedule_slots
+    if body.timezone is not None:
+        al.timezone = body.timezone.strip() or "Europe/Madrid"
+    if body.is_active is not None:
+        al.is_active = body.is_active
+    if body.repeat_loop is not None:
+        al.repeat_loop = body.repeat_loop
+
+    await db.commit()
+    loaded = await _load_autolist(db, al.id)
+    return AutolistResponse.model_validate(loaded)
+
+
+@router.delete("/publishing/autolists/{autolist_id}")
+async def delete_autolist(
+    autolist_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    al = (await db.execute(select(Autolist).where(Autolist.id == autolist_id))).scalar_one_or_none()
+    if not al:
+        raise HTTPException(status_code=404, detail="Autolist not found.")
+    await db.delete(al)
+    await db.commit()
+    return {"deleted": True, "autolist_id": str(autolist_id)}
+
+
+@router.post("/publishing/autolists/{autolist_id}/items", response_model=AutolistItemResponse)
+async def add_autolist_item(
+    autolist_id: uuid.UUID,
+    body: AutolistItemCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AutolistItemResponse:
+    al = await _load_autolist(db, autolist_id)
+    if body.project_id is not None:
+        proj = (
+            await db.execute(select(ContentProject).where(ContentProject.id == body.project_id))
+        ).scalar_one_or_none()
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+
+    next_pos = body.position
+    if next_pos is None:
+        next_pos = max((it.position for it in al.items), default=-1) + 1
+
+    item = AutolistItem(
+        autolist_id=al.id,
+        project_id=body.project_id,
+        title=body.title,
+        post_body=body.post_body,
+        first_comment=body.first_comment,
+        media_url=body.media_url,
+        position=next_pos,
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return AutolistItemResponse.model_validate(item)
+
+
+@router.delete("/publishing/autolists/{autolist_id}/items/{item_id}")
+async def delete_autolist_item(
+    autolist_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    item = (
+        await db.execute(
+            select(AutolistItem).where(
+                AutolistItem.id == item_id,
+                AutolistItem.autolist_id == autolist_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Autolist item not found.")
+    await db.delete(item)
+    await db.commit()
+    return {"deleted": True, "item_id": str(item_id)}
+
+
+@router.post("/publishing/scheduler/tick")
+async def trigger_publishing_scheduler_tick(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Manually trigger one scheduler pass to dispatch due scheduled posts."""
+    results = await run_due_scheduled_posts(db)
+    return {"processed_count": len(results), "results": results}
+
 
 
 

@@ -1,4 +1,8 @@
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+
 @import "tailwindcss";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
 
 @theme {
   --color-slate-950: #020306;
@@ -12,19 +16,19 @@
 :root {
   color-scheme: dark;
 
-  /* KigalContent Pro NLE Dark Studio Tokens (Premiere / DaVinci Resolve Studio OLED Pitch Black) */
+  /* KigalContent Pro NLE Dark Studio Tokens (OLED Pitch Black + Astryx High-Contrast Surfaces) */
   --kc-canvas: #020306;
   --kc-panel: #07090e;
-  --kc-surface: #0b0e16;
-  --kc-border: #151a26;
+  --kc-surface: #0c111d;
+  --kc-border: #1e2638;
   --kc-accent: #22d3ee;
   --kc-text: #f1f5f9;
   --kc-text-muted: #94a3b8;
 
   /* Derived tints via color-mix(in oklab, ...) — never in oklch with neutrals */
-  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 82%, var(--kc-panel));
-  --kc-border-specular: color-mix(in oklab, var(--kc-border) 70%, white 14%);
-  --kc-specular-highlight: color-mix(in oklab, white 6%, transparent);
+  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 84%, var(--kc-panel));
+  --kc-border-specular: color-mix(in oklab, #334155 68%, white 18%);
+  --kc-specular-highlight: color-mix(in oklab, white 7%, transparent);
   --kc-accent-soft: color-mix(in oklab, var(--kc-accent) 16%, transparent);
   --kc-accent-border: color-mix(in oklab, var(--kc-accent) 44%, var(--kc-border));
   --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border) 60%, white 25%);
@@ -145,6 +149,36 @@ dialog.teleprompter-dialog:modal {
 
 dialog.wide-dialog:modal {
   max-width: min(96vw, 56rem);
+}
+
+dialog.composer-dialog:modal {
+  max-width: min(96vw, 76rem);
+  max-height: 92dvh;
+  border-color: var(--kc-border-specular);
+  background: var(--kc-panel);
+  overscroll-behavior: contain;
+}
+
+/* Metricool Best Time to Post Heatmap Cell Intensity Levels (0–5) */
+.metricool-heatmap-cell-0 {
+  background-color: rgba(12, 17, 29, 0.45);
+}
+.metricool-heatmap-cell-1 {
+  background-color: rgba(8, 145, 178, 0.08);
+}
+.metricool-heatmap-cell-2 {
+  background-color: rgba(6, 182, 212, 0.16);
+}
+.metricool-heatmap-cell-3 {
+  background-color: rgba(16, 185, 129, 0.22);
+}
+.metricool-heatmap-cell-4 {
+  background-color: rgba(16, 185, 129, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.25);
+}
+.metricool-heatmap-cell-5 {
+  background-color: rgba(34, 211, 238, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.45);
 }
 
 /* Accessible tabbed navigation indicator (modern-web-guidance: tabs) */

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import shutil
@@ -9,8 +10,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -38,7 +40,11 @@ from app.services.domain_engines import (
     diagnose_rmta,
     generate_parametric_script,
 )
-from app.services.social_connectors import SocialCopyCraftEngine, validate_preflight
+from app.services.social_connectors import (
+    LinkedInUGCConnector,
+    SocialCopyCraftEngine,
+    validate_preflight,
+)
 from app.workers.media_pipeline import (
     NATIVE_EDITOR_SIGNATURES,
     build_native_editor_ffmpeg_flags,
@@ -602,6 +608,449 @@ class TestFastAPIEndToEnd:
             assert radar_proj["source_origin"] == "radar_matutino"
             assert radar_proj["context_notes"]
             assert "TikTok" in radar_proj["target_platforms"]
+
+    def test_linkedin_ads_campaign_spec_and_utms(self):
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/v1/ads/generate-campaign",
+                json={
+                    "topic": "Automatización B2B con Agentes IA para Directores de Operaciones",
+                    "platforms": ["Meta Ads", "Google Ads", "LinkedIn Ads"],
+                    "objective": "Demos B2B",
+                    "target_url": "https://kigalcontent.studio/b2b-demo",
+                    "trigger_keyword": "SISTEMA",
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+
+            li = data.get("linkedin_ads")
+            assert li is not None
+            assert li["thought_leader_ad"]["intro_hook"]
+            assert li["thought_leader_ad"]["full_post_body"]
+            assert li["thought_leader_ad"]["cta_soft"]
+            assert li["thought_leader_ad"]["estimated_ctr_benchmark"]
+
+            si = li["single_image_ad"]
+            assert len(si["intro_text"]) <= 600
+            assert len(si["headline"]) <= 70
+            assert len(si["description"]) <= 100
+            assert si["cta_label"]
+
+            doc = li["document_carousel_ad"]
+            assert len(doc["intro_text"]) <= 600
+            assert len(doc["headline"]) <= 70
+            assert len(doc["slides_outline"]) >= 5
+            assert len(doc["lead_gen_form_fields"]) >= 3
+
+            conv = li["conversation_ad"]
+            assert conv["subject"]
+            assert conv["opening_message"]
+            assert len(conv["cta_buttons"]) >= 2
+
+            tb = li["targeting_blueprint"]
+            assert len(tb["job_titles"]) >= 2
+            assert len(tb["seniorities"]) >= 2
+            assert len(tb["company_sizes"]) >= 2
+            assert len(tb["industries"]) >= 2
+
+            utms = data["ga4_utm_links"]
+            assert any(link.get("utm_source") == "linkedin" for link in utms)
+            for link in utms:
+                assert link["url"]
+                assert link["utm_url"]
+                assert link["url"] == link["utm_url"]
+
+    def test_linkedin_ad_library_mocked_status_search_403_and_to_idea(self):
+        with TestClient(app) as client:
+            # 1. Without configured token -> unconfigured diagnostic, no live calls
+            unconf_status = client.get("/api/v1/ads/linkedin-library/status")
+            assert unconf_status.status_code == 200
+            assert unconf_status.json()["configured"] is False
+            assert unconf_status.json()["live_verified"] is False
+
+            unconf_search = client.post(
+                "/api/v1/ads/linkedin-library/search",
+                json={"keyword": "automatizacion ia", "countries": ["ES"]},
+            )
+            assert unconf_search.status_code == 200
+            assert unconf_search.json()["live"] is False
+            assert unconf_search.json()["source"] == "not_configured"
+            assert unconf_search.json()["items"] == []
+
+            # 2. Save mock linkedin_ads token in DB
+            save_cred = client.put(
+                "/api/v1/social/credentials",
+                json={"channel": "linkedin_ads", "access_token": "mock_li_ads_token_123456"},
+            )
+            assert save_cred.status_code == 200
+            assert save_cred.json()["channel"] == "linkedin_ads"
+
+            # 3. Mock httpx.AsyncClient.get: version 202505 returns 400 NONEXISTENT_VERSION -> falls back to 202503 -> 200
+            sample_elements = [
+                {
+                    "adUrl": "https://www.linkedin.com/ad-library/detail/99887766",
+                    "isRestricted": False,
+                    "details": {
+                        "type": "SPONSORED_CONTENT",
+                        "advertiser": {
+                            "advertiserName": "Acme B2B SaaS",
+                            "advertiserUrl": "https://www.linkedin.com/company/acme-b2b",
+                            "adPayer": "Acme Corp",
+                        },
+                        "creative": {
+                            "text": "Descarga nuestra guía PDF para ahorrar 12 horas semanales en operaciones B2B.",
+                            "headline": "Guía de Automatización B2B 2026",
+                            "landingPageUrl": "https://acme.example.com/guia",
+                        },
+                        "adStatistics": {
+                            "firstImpressionAt": 1735689600000,
+                            "latestImpressionAt": 1738368000000,
+                            "totalImpressions": {"from": 10000, "to": 50000},
+                            "impressionsDistributionByCountry": [{"country": "ES", "impressionPercentage": 70.0}],
+                        },
+                    },
+                }
+            ]
+
+            async def fake_get_version_fallback(self_client, url, headers=None, **kwargs):
+                ver = (headers or {}).get("Linkedin-Version")
+                req = httpx.Request("GET", url)
+                if ver == "202505":
+                    return httpx.Response(
+                        400,
+                        json={"code": "NONEXISTENT_VERSION", "message": "Invalid Linkedin-Version"},
+                        request=req,
+                    )
+                return httpx.Response(
+                    200,
+                    json={"elements": sample_elements},
+                    request=req,
+                )
+
+            with patch.object(httpx.AsyncClient, "get", new=fake_get_version_fallback):
+                status_ok = client.get("/api/v1/ads/linkedin-library/status")
+                assert status_ok.status_code == 200
+                st_data = status_ok.json()
+                assert st_data["configured"] is True
+                assert st_data["live_verified"] is True
+                assert st_data["api_version_used"] == "202503"
+
+                test_cred_ok = client.post(
+                    "/api/v1/social/credentials/test",
+                    json={"channel": "linkedin_ads"},
+                )
+                assert test_cred_ok.status_code == 200
+                assert test_cred_ok.json()["ok"] is True
+                assert test_cred_ok.json()["api_version_used"] == "202503"
+
+                search_ok = client.post(
+                    "/api/v1/ads/linkedin-library/search",
+                    json={
+                        "keyword": "automatizacion",
+                        "advertiser": "Acme",
+                        "countries": ["ES", "US"],
+                        "date_start": "2025-01-01",
+                        "date_end": "2025-02-01",
+                        "count": 10,
+                    },
+                )
+                assert search_ok.status_code == 200
+                s_data = search_ok.json()
+                assert s_data["live"] is True
+                assert s_data["source"] == "linkedin_live_api"
+                assert s_data["api_version_used"] == "202503"
+                assert s_data["total_returned"] == 1
+                item = s_data["items"][0]
+                assert item["ad_id"] == "99887766"
+                assert item["advertiser_name"] == "Acme B2B SaaS"
+                assert item["top_countries"] == ["ES"]
+                assert s_data["insights"]["avg_copy_chars"] > 0
+                assert s_data["insights"]["top_formats"][0]["format"] == "SPONSORED_CONTENT"
+                assert len(s_data["insights"]["detected_angles"]) >= 1
+
+            # 4. Mock 403 -> needs_token_refresh=True and zero fabricated ads
+            async def fake_get_403(self_client, url, headers=None, **kwargs):
+                return httpx.Response(
+                    403,
+                    json={"message": "Not enough permissions to access adLibrary"},
+                    request=httpx.Request("GET", url),
+                )
+
+            with patch.object(httpx.AsyncClient, "get", new=fake_get_403):
+                status_403 = client.get("/api/v1/ads/linkedin-library/status")
+                assert status_403.status_code == 200
+                assert status_403.json()["live_verified"] is False
+                assert status_403.json()["needs_token_refresh"] is True
+                assert status_403.json()["status_code"] == 403
+
+                search_403 = client.post(
+                    "/api/v1/ads/linkedin-library/search",
+                    json={"keyword": "automatizacion"},
+                )
+                assert search_403.status_code == 200
+                assert search_403.json()["live"] is False
+                assert search_403.json()["needs_token_refresh"] is True
+                assert search_403.json()["status_code"] == 403
+                assert search_403.json()["items"] == []
+
+            # 5. Convert ad inspiration -> Idea + Kanban ContentProject
+            to_idea = client.post(
+                "/api/v1/ads/linkedin-library/to-idea",
+                json={
+                    "advertiser_name": "Acme B2B SaaS",
+                    "headline": "Guía de Automatización B2B 2026",
+                    "body_text": "Descarga nuestra guía PDF para ahorrar 12 horas semanales en operaciones B2B.",
+                    "format": "SPONSORED_CONTENT",
+                    "landing_page_url": "https://acme.example.com/guia",
+                },
+            )
+            assert to_idea.status_code == 200
+            idea_proj = to_idea.json()
+            assert idea_proj["imported"] is True
+            assert idea_proj["asset_code"].startswith("LI-")
+            detail = client.get(f"/api/v1/projects/{idea_proj['project_id']}")
+            assert detail.status_code == 200
+            assert detail.json()["project"]["source_origin"] == "linkedin_ad_library"
+            assert any(p["channel"] == "LinkedIn" for p in detail.json()["social_posts"])
+
+    async def test_linkedin_ugc_connector_first_comment_graceful_fallback(self):
+        mgr = HITLSecurityManager()
+        pid = "proj-li-comment-01"
+        tok = mgr.issue_hitl_token(project_id=pid, tier=3, action="publish_linkedin", actor="creator")["token"]
+        connector = LinkedInUGCConnector(
+            access_token="mock_oauth_token",
+            person_urn="urn:li:person:123456",
+        )
+
+        # Case 1: Both post and first comment succeed
+        async def fake_post_both(self_client, url, headers=None, json=None, **kwargs):
+            req = httpx.Request("POST", url)
+            if "ugcPosts" in url:
+                return httpx.Response(201, json={"id": "urn:li:share:555"}, request=req)
+            if "socialActions" in url:
+                assert (headers or {}).get("Linkedin-Version") == "202503"
+                return httpx.Response(201, json={"id": "urn:li:comment:1"}, request=req)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with patch.object(httpx.AsyncClient, "post", new=fake_post_both):
+            res_ok = await connector.publish(
+                project_id=pid,
+                payload={
+                    "title": "Arquitectura B2B",
+                    "post_body": "Publicación sin enlaces en el cuerpo principal.",
+                    "first_comment": "Enlace al blueprint: https://kigalcontent.studio",
+                    "metadata_payload": {"auto_first_comment": True},
+                },
+                hitl_token=tok,
+                actor="creator",
+                security_manager=mgr,
+            )
+            assert res_ok["status"] == "PUBLISHED"
+            assert res_ok["first_comment_status"] == "posted"
+
+        # Case 2: First comment fails with 403 -> main post still succeeds
+        async def fake_post_comment_403(self_client, url, headers=None, json=None, **kwargs):
+            req = httpx.Request("POST", url)
+            if "ugcPosts" in url:
+                return httpx.Response(201, json={"id": "urn:li:share:777"}, request=req)
+            return httpx.Response(403, json={"message": "Missing comment scope"}, request=req)
+
+        with patch.object(httpx.AsyncClient, "post", new=fake_post_comment_403):
+            res_fallback = await connector.publish(
+                project_id=pid,
+                payload={
+                    "title": "Arquitectura B2B",
+                    "post_body": "Publicación sin enlaces en el cuerpo principal.",
+                    "first_comment": "Enlace al blueprint: https://kigalcontent.studio",
+                    "metadata_payload": {"auto_first_comment": True},
+                },
+                hitl_token=tok,
+                actor="creator",
+                security_manager=mgr,
+            )
+            assert res_fallback["status"] == "PUBLISHED"
+            assert res_fallback["external_platform_id"] == "urn:li:share:777"
+            assert res_fallback["first_comment_status"] == "skipped_http_403"
+
+    def test_metricool_publishing_suite_and_sandbox_scheduler_tick(self):
+        with (
+            patch.object(httpx.AsyncClient, "post", new=AsyncMock()) as mock_http_post,
+            TestClient(app) as client,
+        ):
+            # 1. Create a DRAFT post without HITL PIN
+            draft_resp = client.post(
+                "/api/v1/publishing/posts",
+                json={
+                    "channels": ["LinkedIn"],
+                    "title": "Borrador Estratégico",
+                    "post_body": "Contenido de prueba para borrador sin enlaces en el cuerpo.",
+                    "first_comment": "Enlace aquí: https://kigalcontent.studio",
+                    "publish_mode": "DRAFT",
+                    "timezone": "Europe/Madrid",
+                    "auto_publish": False,
+                },
+            )
+            assert draft_resp.status_code == 200
+            draft_data = draft_resp.json()
+            assert draft_data["created_count"] == 1
+            draft_post = draft_data["posts"][0]
+            assert draft_post["publish_status"] == "DRAFT"
+            assert draft_post["project_title"]
+
+            # 2. SCHEDULED with auto_publish=True without PIN must be rejected (400)
+            future_10d = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
+            blocked_sched = client.post(
+                "/api/v1/publishing/posts",
+                json={
+                    "channels": ["LinkedIn"],
+                    "post_body": "Post programado sin PIN",
+                    "publish_mode": "SCHEDULED",
+                    "scheduled_at": future_10d,
+                    "auto_publish": True,
+                },
+            )
+            assert blocked_sched.status_code == 400
+
+            # 3. Create multi-channel SCHEDULED posts with PIN + per_channel_overrides
+            sched_resp = client.post(
+                "/api/v1/publishing/posts",
+                json={
+                    "channels": ["LinkedIn", "Instagram"],
+                    "title": "Lanzamiento Sistema Metricool",
+                    "post_body": "Primera línea optimizada para gancho.\n\nCuerpo principal sin enlaces.",
+                    "per_channel_overrides": {
+                        "Instagram": {
+                            "post_body": "Gancho corto para Instagram Reels.\n\nGuarda este post para aplicarlo hoy."
+                        }
+                    },
+                    "first_comment": "Recurso en https://kigalcontent.studio/recurso",
+                    "hashtags": ["#SistemasIA", "#B2B", "#Automatizacion"],
+                    "publish_mode": "SCHEDULED",
+                    "scheduled_at": future_10d,
+                    "timezone": "Europe/Madrid",
+                    "auto_publish": True,
+                    "hitl_pin": "884210",
+                },
+            )
+            assert sched_resp.status_code == 200
+            sched_data = sched_resp.json()
+            assert sched_data["created_count"] == 2
+            li_sched = next(p for p in sched_data["posts"] if p["channel"] == "LinkedIn")
+            ig_sched = next(p for p in sched_data["posts"] if p["channel"] == "Instagram")
+            assert li_sched["publish_status"] == "SCHEDULED"
+            assert li_sched["auto_publish"] is True
+            assert li_sched["hitl_approval_token"] and "_T3_" in li_sched["hitl_approval_token"]
+            assert "Instagram Reels" in ig_sched["post_body"]
+
+            # 4. Calendar query returns posts + connected_channels
+            end_30d = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+            cal_resp = client.get("/api/v1/publishing/calendar", params={"end": end_30d})
+            assert cal_resp.status_code == 200
+            cal_data = cal_resp.json()
+            cal_ids = {p["id"] for p in cal_data["posts"]}
+            assert draft_post["id"] in cal_ids
+            assert li_sched["id"] in cal_ids
+            assert set(cal_data["connected_channels"].keys()) == {"YouTube", "Instagram", "TikTok", "LinkedIn"}
+
+            # 5. Drag & drop reschedule later (+20 days) -> renews Tier 3 token cleanly
+            future_20d = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+            resched_later = client.patch(
+                f"/api/v1/publishing/schedule/{li_sched['id']}",
+                json={"scheduled_at": future_20d, "timezone": "Europe/Madrid"},
+            )
+            assert resched_later.status_code == 200
+            later_post = resched_later.json()
+            assert later_post["hitl_approval_token"] != li_sched["hitl_approval_token"]
+
+            # 6. Best times heatmap (7x24 = 168 slots)
+            bt_resp = client.get("/api/v1/publishing/best-times?channel=LinkedIn&timezone=Europe/Madrid")
+            assert bt_resp.status_code == 200
+            bt_data = bt_resp.json()
+            assert bt_data["channel"] == "LinkedIn"
+            assert len(bt_data["grid"]) == 168
+            assert bt_data["peak_slot"]["score"] >= 85
+
+            # 7. Autolists CRUD + calendar projection
+            now_utc = datetime.now(timezone.utc)
+            all_day_slots = [{"day_of_week": d, "time": "10:00"} for d in range(7)]
+            al_create = client.post(
+                "/api/v1/publishing/autolists",
+                json={
+                    "name": "Evergreen B2B LinkedIn",
+                    "description": "Cola cíclica semanal",
+                    "channels": ["LinkedIn"],
+                    "schedule_slots": all_day_slots,
+                    "timezone": "Europe/Madrid",
+                    "is_active": True,
+                    "repeat_loop": True,
+                },
+            )
+            assert al_create.status_code == 200
+            al_id = al_create.json()["id"]
+
+            al_item = client.post(
+                f"/api/v1/publishing/autolists/{al_id}/items",
+                json={
+                    "title": "Regla Zero-Link LinkedIn",
+                    "post_body": "Nunca metas enlaces externos dentro del cuerpo principal en LinkedIn.",
+                    "first_comment": "Enlace en comentarios: https://kigalcontent.studio",
+                },
+            )
+            assert al_item.status_code == 200
+            item_id = al_item.json()["id"]
+
+            al_upd = client.put(
+                f"/api/v1/publishing/autolists/{al_id}",
+                json={"name": "Evergreen B2B LinkedIn v2"},
+            )
+            assert al_upd.status_code == 200
+            assert al_upd.json()["name"] == "Evergreen B2B LinkedIn v2"
+            assert len(al_upd.json()["items"]) == 1
+
+            al_list = client.get("/api/v1/publishing/autolists")
+            assert al_list.status_code == 200
+            assert any(a["id"] == al_id for a in al_list.json())
+
+            start_cal = (now_utc - timedelta(days=1)).isoformat()
+            end_cal = (now_utc + timedelta(days=10)).isoformat()
+            cal_proj = client.get(
+                "/api/v1/publishing/calendar",
+                params={"start": start_cal, "end": end_cal},
+            )
+            assert cal_proj.status_code == 200
+            projected = cal_proj.json()["projected_autolist_slots"]
+            assert len(projected) >= 5
+            assert all(slot["is_projected"] is True for slot in projected)
+
+            # 8. Move scheduled post to past due time and trigger scheduler tick in Sandbox mode (0 live HTTP writes!)
+            past_due = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+            make_due = client.patch(
+                f"/api/v1/publishing/schedule/{li_sched['id']}",
+                json={"scheduled_at": past_due, "auto_publish": True},
+            )
+            assert make_due.status_code == 200
+
+            tick_resp = client.post("/api/v1/publishing/scheduler/tick")
+            assert tick_resp.status_code == 200
+            tick_data = tick_resp.json()
+            assert tick_data["processed_count"] >= 1
+            dispatched = [r for r in tick_data["results"] if r["post_id"] == li_sched["id"]]
+            assert len(dispatched) == 1
+            assert dispatched[0]["status"] == "PUBLISHED"
+            assert dispatched[0]["mode"] == "sandbox_verified"
+            mock_http_post.assert_not_called()
+
+            # 9. Clean up items, autolist, and draft post
+            del_item = client.delete(f"/api/v1/publishing/autolists/{al_id}/items/{item_id}")
+            assert del_item.status_code == 200 and del_item.json()["deleted"] is True
+
+            del_al = client.delete(f"/api/v1/publishing/autolists/{al_id}")
+            assert del_al.status_code == 200 and del_al.json()["deleted"] is True
+
+            del_post = client.delete(f"/api/v1/publishing/posts/{draft_post['id']}")
+            assert del_post.status_code == 200 and del_post.json()["deleted"] is True
+
 
 
 

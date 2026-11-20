@@ -3,6 +3,10 @@ import type {
   AdCampaignResponse,
   AnalyticsOverview,
   AuditLogEntry,
+  AutolistItemRecord,
+  AutolistRecord,
+  BestTimeHeatmapResponse,
+  ComposerPostCreateRequest,
   ContentProject,
   ContentFormat,
   ConversionGoal,
@@ -16,9 +20,13 @@ import type {
   IdeaChatRefineResponse,
   KigalChatInteraction,
   LeadMagnetItem,
+  LinkedInAdLibrarySearchRequest,
+  LinkedInAdLibrarySearchResponse,
+  LinkedInAdLibraryStatusResponse,
   MediaQCReport,
   N8nWorkflowTemplate,
   ProjectDetail,
+  PublishingCalendarResponse,
   RadarMatutinoIngestRequest,
   RadarMatutinoIngestResponse,
   RMTADiagnosisResponse,
@@ -526,6 +534,140 @@ export const apiClient = {
 
   generateAdCampaign: (payload: AdCampaignGenerateRequest) =>
     requestJson<AdCampaignResponse>("/ads/generate-campaign", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // --- Metricool-style Publishing Scheduler, Best Times & Autolists ---
+
+  getPublishingCalendar: (params?: { start?: string; end?: string; channel?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.start) qs.set("start", params.start);
+    if (params?.end) qs.set("end", params.end);
+    if (params?.channel) qs.set("channel", params.channel);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return requestJson<PublishingCalendarResponse>(`/publishing/calendar${suffix}`);
+  },
+
+  createComposerPost: (payload: ComposerPostCreateRequest) =>
+    requestJson<{
+      created_count: number;
+      posts: SocialPost[];
+      publications?: Array<Record<string, unknown>>;
+    }>("/publishing/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  rescheduleSocialPost: (
+    postId: string,
+    payload: {
+      scheduled_at?: string | null;
+      timezone?: string;
+      auto_publish?: boolean;
+      publish_status?: string;
+      hitl_pin?: string;
+      hitl_token?: string | null;
+    }
+  ) =>
+    requestJson<SocialPost>(`/publishing/schedule/${postId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteSocialPost: (postId: string) =>
+    requestJson<{ deleted: boolean; post_id: string }>(`/publishing/posts/${postId}`, {
+      method: "DELETE",
+    }),
+
+  getBestTimes: (channel: string, timezone = "Europe/Madrid") =>
+    requestJson<BestTimeHeatmapResponse>(
+      `/publishing/best-times?channel=${encodeURIComponent(channel)}&timezone=${encodeURIComponent(timezone)}`
+    ),
+
+  listAutolists: () => requestJson<AutolistRecord[]>("/publishing/autolists"),
+
+  createAutolist: (payload: {
+    name: string;
+    description?: string;
+    channels: string[];
+    schedule_slots: Array<{ day_of_week: number; time: string }>;
+    timezone?: string;
+    is_active?: boolean;
+    repeat_loop?: boolean;
+  }) =>
+    requestJson<AutolistRecord>("/publishing/autolists", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateAutolist: (
+    id: string,
+    payload: Partial<{
+      name: string;
+      description: string;
+      channels: string[];
+      schedule_slots: Array<{ day_of_week: number; time: string }>;
+      timezone: string;
+      is_active: boolean;
+      repeat_loop: boolean;
+    }>
+  ) =>
+    requestJson<AutolistRecord>(`/publishing/autolists/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAutolist: (id: string) =>
+    requestJson<{ deleted: boolean; autolist_id: string }>(`/publishing/autolists/${id}`, {
+      method: "DELETE",
+    }),
+
+  addAutolistItem: (
+    id: string,
+    payload: {
+      project_id?: string | null;
+      title?: string | null;
+      post_body: string;
+      first_comment?: string | null;
+      media_url?: string | null;
+    }
+  ) =>
+    requestJson<AutolistItemRecord>(`/publishing/autolists/${id}/items`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAutolistItem: (id: string, itemId: string) =>
+    requestJson<{ deleted: boolean; item_id: string }>(
+      `/publishing/autolists/${id}/items/${itemId}`,
+      { method: "DELETE" }
+    ),
+
+  // --- LinkedIn Ads Library API & Idea Conversion ---
+
+  getLinkedInAdLibraryStatus: () =>
+    requestJson<LinkedInAdLibraryStatusResponse>("/ads/linkedin-library/status"),
+
+  searchLinkedInAdLibrary: (payload: LinkedInAdLibrarySearchRequest) =>
+    requestJson<LinkedInAdLibrarySearchResponse>("/ads/linkedin-library/search", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  importLinkedInAdToIdea: (payload: {
+    advertiser_name: string;
+    headline?: string | null;
+    body_text: string;
+    format: string;
+    landing_page_url?: string | null;
+  }) =>
+    requestJson<{
+      imported: boolean;
+      project_id: string;
+      asset_code: string;
+      working_title: string;
+    }>("/ads/linkedin-library/to-idea", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

@@ -65,6 +65,10 @@ async def init_db() -> None:
             ("content_projects", "content_format", "VARCHAR(50) DEFAULT 'TEXT_AND_VIDEO'"),
             ("ideas", "context_notes", "TEXT"),
             ("ideas", "target_platforms", "JSON DEFAULT '[]'"),
+            ("social_posts", "auto_publish", "BOOLEAN DEFAULT TRUE"),
+            ("social_posts", "timezone", "VARCHAR(64) DEFAULT 'Europe/Madrid'"),
+            ("social_posts", "publish_error", "TEXT"),
+            ("social_posts", "autolist_id", "UUID" if dialect == "postgresql" else "VARCHAR(36)"),
         ]
         for table, col, col_type in columns_to_add:
             try:

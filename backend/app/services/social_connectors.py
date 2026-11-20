@@ -6,6 +6,7 @@ import hashlib
 import re
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -575,6 +576,38 @@ class LinkedInUGCConnector(BaseSocialConnector):
             resp = await client.post(self.api_base, headers=headers, json=ugc_body)
             resp.raise_for_status()
             post_urn = resp.json().get("id", f"urn:li:share:{idempotency_key[:8]}")
+
+            first_comment_text = str(payload.get("first_comment") or "").strip()
+            meta = payload.get("metadata_payload") or {}
+            auto_first_comment = bool(meta.get("auto_first_comment", True))
+            first_comment_status = "not_configured"
+            if first_comment_text and auto_first_comment:
+                try:
+                    encoded_urn = quote(post_urn, safe="")
+                    comment_headers = {
+                        "Authorization": f"Bearer {self.access_token}",
+                        "X-Restli-Protocol-Version": "2.0.0",
+                        "Linkedin-Version": "202503",
+                        "Content-Type": "application/json",
+                    }
+                    comment_body = {
+                        "actor": author_urn,
+                        "message": {"text": first_comment_text},
+                    }
+                    c_resp = await client.post(
+                        f"https://api.linkedin.com/rest/socialActions/{encoded_urn}/comments",
+                        headers=comment_headers,
+                        json=comment_body,
+                    )
+                    if 200 <= c_resp.status_code < 300:
+                        first_comment_status = "posted"
+                    else:
+                        first_comment_status = f"skipped_http_{c_resp.status_code}"
+                except Exception as exc:
+                    first_comment_status = f"skipped_error:{type(exc).__name__}"
+            elif first_comment_text and not auto_first_comment:
+                first_comment_status = "disabled"
+
             return {
                 "status": "PUBLISHED",
                 "mode": "live_oauth2",
@@ -582,6 +615,7 @@ class LinkedInUGCConnector(BaseSocialConnector):
                 "external_platform_id": post_urn,
                 "canonical_url": f"https://www.linkedin.com/feed/update/{post_urn}/",
                 "idempotency_key": idempotency_key,
+                "first_comment_status": first_comment_status,
                 "auth_verified": True,
             }
 

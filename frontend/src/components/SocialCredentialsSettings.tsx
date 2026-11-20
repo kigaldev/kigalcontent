@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Youtube,
   Instagram,
@@ -20,8 +20,12 @@ import {
   Sparkles,
   Zap,
   Save,
+  Search,
+  RefreshCw,
 } from "lucide-react";
+import { AstryxBadge, AstryxButton } from "@/components/ui/AstryxPrimitives";
 import { apiClient } from "@/lib/api";
+import type { LinkedInAdLibraryStatusResponse } from "@/types/engine";
 
 interface SocialChannelGuide {
   id: "youtube" | "instagram" | "tiktok" | "linkedin";
@@ -305,6 +309,16 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [showTutorial, setShowTutorial] = useState(true);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // LinkedIn Ads Library status & optional dedicated token state
+  const [adLibStatus, setAdLibStatus] = useState<LinkedInAdLibraryStatusResponse | null>(null);
+  const [checkingAdLib, setCheckingAdLib] = useState(false);
+  const [adLibError, setAdLibError] = useState<string | null>(null);
+  const [showDedicatedAdsToken, setShowDedicatedAdsToken] = useState(false);
+  const [linkedinAdsToken, setLinkedinAdsToken] = useState("");
+  const [savingAdsCred, setSavingAdsCred] = useState(false);
+  const [testingAdsCred, setTestingAdsCred] = useState(false);
+  const [adsCredFeedback, setAdsCredFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
   const loadSocialCredentials = async () => {
     try {
       const data = await apiClient.getSocialCredentials();
@@ -321,9 +335,33 @@ export const SocialCredentialsSettings: React.FC = () => {
     }
   };
 
+  const checkLinkedInAdLibraryStatus = useCallback(async () => {
+    setCheckingAdLib(true);
+    setAdLibError(null);
+    try {
+      const status = await apiClient.getLinkedInAdLibraryStatus();
+      setAdLibStatus(status);
+    } catch (err) {
+      setAdLibStatus(null);
+      setAdLibError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo verificar el estado de LinkedIn Ads Library API."
+      );
+    } finally {
+      setCheckingAdLib(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadSocialCredentials();
   }, []);
+
+  useEffect(() => {
+    if (activeChannelId === "linkedin") {
+      void checkLinkedInAdLibraryStatus();
+    }
+  }, [activeChannelId, checkLinkedInAdLibraryStatus]);
 
   const handleSaveChannelToken = async () => {
     const tokenVal = tokens[activeChannelId]?.trim() || "";
@@ -344,6 +382,9 @@ export const SocialCredentialsSettings: React.FC = () => {
       });
       setTokens((prev) => ({ ...prev, [activeChannelId]: "" }));
       await loadSocialCredentials();
+      if (activeChannelId === "linkedin") {
+        await checkLinkedInAdLibraryStatus();
+      }
       setCredFeedback({
         ok: true,
         message: `✅ Token de ${activeGuide.name} guardado en el servidor. Pulsa 'Probar Conexión' para verificar permisos en vivo.`,
@@ -374,6 +415,9 @@ export const SocialCredentialsSettings: React.FC = () => {
         setTokens((prev) => ({ ...prev, [activeChannelId]: "" }));
         await loadSocialCredentials();
       }
+      if (activeChannelId === "linkedin") {
+        await checkLinkedInAdLibraryStatus();
+      }
       setCredFeedback({ ok: res.ok, message: res.message });
     } catch (err) {
       setCredFeedback({
@@ -382,6 +426,63 @@ export const SocialCredentialsSettings: React.FC = () => {
       });
     } finally {
       setTestingCred(false);
+    }
+  };
+
+  const handleSaveLinkedinAdsToken = async () => {
+    const tokenVal = linkedinAdsToken.trim();
+    if (!tokenVal) {
+      setAdsCredFeedback({
+        ok: false,
+        message: "Pega un Access Token OAuth autorizado para LinkedIn Ad Library antes de guardar.",
+      });
+      return;
+    }
+    setSavingAdsCred(true);
+    setAdsCredFeedback(null);
+    try {
+      await apiClient.saveSocialCredential({
+        channel: "linkedin_ads",
+        access_token: tokenVal,
+      });
+      setLinkedinAdsToken("");
+      await loadSocialCredentials();
+      await checkLinkedInAdLibraryStatus();
+      setAdsCredFeedback({
+        ok: true,
+        message: "✅ Token dedicado para LinkedIn Ads Library guardado en el servidor.",
+      });
+    } catch (err) {
+      setAdsCredFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error guardando token dedicado de LinkedIn Ads.",
+      });
+    } finally {
+      setSavingAdsCred(false);
+    }
+  };
+
+  const handleTestLinkedinAdsToken = async () => {
+    setTestingAdsCred(true);
+    setAdsCredFeedback(null);
+    try {
+      const res = await apiClient.testSocialCredential({
+        channel: "linkedin_ads",
+        access_token: linkedinAdsToken.trim() || undefined,
+      });
+      if (res.ok) {
+        setLinkedinAdsToken("");
+        await loadSocialCredentials();
+      }
+      await checkLinkedInAdLibraryStatus();
+      setAdsCredFeedback({ ok: res.ok, message: res.message });
+    } catch (err) {
+      setAdsCredFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error probando el token de LinkedIn Ads Library.",
+      });
+    } finally {
+      setTestingAdsCred(false);
     }
   };
 
@@ -986,6 +1087,180 @@ export const SocialCredentialsSettings: React.FC = () => {
             🔒 Tu token se guarda en la base de datos PostgreSQL del servidor y se verifica en vivo contra la API oficial.
           </p>
         </div>
+
+        {/* LinkedIn Ads Library API Status & Optional Dedicated Token */}
+        {activeChannelId === "linkedin" && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--kc-border-specular)] bg-[var(--kc-surface)] p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Search className="w-4 h-4 text-cyan-400" />
+                    <h4 className="text-xs sm:text-sm font-bold text-white">
+                      Estado de LinkedIn Ads Library API
+                    </h4>
+                    <AstryxBadge
+                      label={
+                        checkingAdLib
+                          ? "Verificando..."
+                          : adLibStatus?.live_verified
+                          ? "Verificada en Vivo"
+                          : adLibStatus?.status_code
+                          ? `HTTP ${adLibStatus.status_code}`
+                          : "Pendiente / Sin Acceso"
+                      }
+                      variant={
+                        checkingAdLib
+                          ? "info"
+                          : adLibStatus?.live_verified
+                          ? "success"
+                          : "warning"
+                      }
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Verifica si el token actual tiene acceso al producto oficial LinkedIn Ad Library para buscar anuncios B2B reales desde el Estudio Paid Ads.
+                  </p>
+                </div>
+
+                <AstryxButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  label="Verificar Acceso Ads Library"
+                  icon={
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${checkingAdLib ? "animate-spin" : ""}`}
+                    />
+                  }
+                  isLoading={checkingAdLib}
+                  onClick={() => void checkLinkedInAdLibraryStatus()}
+                />
+              </div>
+
+              {/* Diagnostic Details */}
+              <div className="rounded-lg border border-slate-800 bg-[#020306] p-3 text-xs space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-200">
+                    live_verified:{" "}
+                    <strong
+                      className={
+                        adLibStatus?.live_verified
+                          ? "text-emerald-400"
+                          : "text-amber-300"
+                      }
+                    >
+                      {adLibStatus ? String(adLibStatus.live_verified) : "—"}
+                    </strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-200">
+                    api_version_used:{" "}
+                    <strong>{adLibStatus?.api_version_used || "—"}</strong>
+                  </span>
+                  {adLibStatus?.token_source && (
+                    <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300">
+                      origen: <strong>{adLibStatus.token_source}</strong>
+                    </span>
+                  )}
+                </div>
+
+                <p
+                  className={`text-xs leading-relaxed ${
+                    adLibStatus?.live_verified
+                      ? "text-emerald-200"
+                      : "text-amber-200"
+                  }`}
+                >
+                  {adLibError ||
+                    adLibStatus?.message ||
+                    "Pulsa «Verificar Acceso Ads Library» para comprobar el endpoint oficial en vivo."}
+                </p>
+              </div>
+            </div>
+
+            {/* Collapsible Optional Dedicated Token for LinkedIn Ads Library */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowDedicatedAdsToken((prev) => !prev)}
+                className="w-full p-3.5 flex items-center justify-between text-xs font-semibold text-slate-200 hover:bg-slate-900/60 transition"
+              >
+                <span className="flex flex-wrap items-center gap-2">
+                  <Key className="w-4 h-4 text-sky-400" />
+                  <span>Token dedicado para LinkedIn Ads Library (opcional)</span>
+                  {serverCreds.linkedin_ads?.configured ? (
+                    <AstryxBadge
+                      label={`Dedicado activo (${serverCreds.linkedin_ads.masked_token})`}
+                      variant="success"
+                    />
+                  ) : (
+                    <AstryxBadge
+                      label="Reutilizando token principal"
+                      variant="neutral"
+                    />
+                  )}
+                </span>
+                {showDedicatedAdsToken ? (
+                  <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                )}
+              </button>
+
+              {showDedicatedAdsToken && (
+                <div className="p-4 border-t border-slate-800 space-y-3 text-xs">
+                  <p className="text-slate-300 leading-relaxed">
+                    Por defecto, KigalContent reutiliza automáticamente tu token principal de LinkedIn para consultar la API de Ads Library. Configura este campo únicamente si necesitas usar un token separado de una aplicación de Marketing / LinkedIn Ad Library.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="password"
+                      value={linkedinAdsToken}
+                      onChange={(e) => setLinkedinAdsToken(e.target.value)}
+                      placeholder={
+                        serverCreds.linkedin_ads?.configured
+                          ? "Deja vacío para mantener el token dedicado actual o pega uno nuevo..."
+                          : "AQV... (Token OAuth autorizado para LinkedIn Ad Library)"
+                      }
+                      className="flex-1 min-w-[220px] bg-[#020306] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                    />
+                    <AstryxButton
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      label={savingAdsCred ? "Guardando..." : "Guardar Token Ads"}
+                      icon={<Save className="w-3.5 h-3.5" />}
+                      isLoading={savingAdsCred}
+                      onClick={() => void handleSaveLinkedinAdsToken()}
+                    />
+                    <AstryxButton
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      label={testingAdsCred ? "Probando..." : "Probar Token Ads"}
+                      icon={<Zap className="w-3.5 h-3.5" />}
+                      isLoading={testingAdsCred}
+                      onClick={() => void handleTestLinkedinAdsToken()}
+                    />
+                  </div>
+
+                  {adsCredFeedback && (
+                    <div
+                      className={`rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed ${
+                        adsCredFeedback.ok
+                          ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-200"
+                          : "border-rose-500/40 bg-rose-950/30 text-rose-200"
+                      }`}
+                    >
+                      {adsCredFeedback.message}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Anti-Penalty Best Practices Notice */}
         <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-xs text-amber-200/90 flex items-start gap-2.5">
