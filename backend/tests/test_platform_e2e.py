@@ -716,7 +716,7 @@ class TestFastAPIEndToEnd:
             async def fake_get_version_fallback(self_client, url, headers=None, **kwargs):
                 ver = (headers or {}).get("Linkedin-Version")
                 req = httpx.Request("GET", url)
-                if ver == "202505":
+                if ver == "202601":
                     return httpx.Response(
                         400,
                         json={"code": "NONEXISTENT_VERSION", "message": "Invalid Linkedin-Version"},
@@ -734,7 +734,7 @@ class TestFastAPIEndToEnd:
                 st_data = status_ok.json()
                 assert st_data["configured"] is True
                 assert st_data["live_verified"] is True
-                assert st_data["api_version_used"] == "202503"
+                assert st_data["api_version_used"] == "202602"
 
                 test_cred_ok = client.post(
                     "/api/v1/social/credentials/test",
@@ -742,7 +742,7 @@ class TestFastAPIEndToEnd:
                 )
                 assert test_cred_ok.status_code == 200
                 assert test_cred_ok.json()["ok"] is True
-                assert test_cred_ok.json()["api_version_used"] == "202503"
+                assert test_cred_ok.json()["api_version_used"] == "202602"
 
                 search_ok = client.post(
                     "/api/v1/ads/linkedin-library/search",
@@ -759,7 +759,7 @@ class TestFastAPIEndToEnd:
                 s_data = search_ok.json()
                 assert s_data["live"] is True
                 assert s_data["source"] == "linkedin_live_api"
-                assert s_data["api_version_used"] == "202503"
+                assert s_data["api_version_used"] == "202602"
                 assert s_data["total_returned"] == 1
                 item = s_data["items"][0]
                 assert item["ad_id"] == "99887766"

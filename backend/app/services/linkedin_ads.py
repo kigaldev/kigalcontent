@@ -25,7 +25,7 @@ from app.schemas.contracts import (
 )
 
 
-CANDIDATE_LINKEDIN_VERSIONS: tuple[str, ...] = ("202505", "202503", "202502", "202601")
+CANDIDATE_LINKEDIN_VERSIONS: tuple[str, ...] = ("202601", "202602", "202505", "202503")
 AD_LIBRARY_ENDPOINT = "https://api.linkedin.com/rest/adLibrary"
 
 
@@ -88,6 +88,7 @@ class LinkedInAdLibraryClient:
         date_start: str | None = None,
         date_end: str | None = None,
         count: int = 12,
+        countries_style: str = "urn_list",
     ) -> str:
         params: list[str] = ["q=criteria"]
         if keyword.strip():
@@ -96,12 +97,16 @@ class LinkedInAdLibraryClient:
             params.append(f"advertiser={quote(advertiser.strip(), safe='')}")
 
         clean_countries = [
-            re.sub(r"[^A-Z]", "", c.strip().upper())[:2]
+            re.sub(r"[^A-Za-z]", "", c.strip()).lower()[:2]
             for c in (countries or [])
-            if re.sub(r"[^A-Z]", "", c.strip().upper())
+            if re.sub(r"[^A-Za-z]", "", c.strip())
         ]
-        if clean_countries:
-            params.append(f"countries=List({','.join(clean_countries)})")
+        if clean_countries and countries_style != "omit":
+            urns = ",".join(f"urn%3Ali%3Acountry%3A{cc}" for cc in clean_countries)
+            if countries_style == "wrapped_urn":
+                params.append(f"countries=(value:List({urns}))")
+            else:
+                params.append(f"countries=List({urns})")
 
         start_part = _format_restli_date(date_start)
         end_part = _format_restli_date(date_end)
@@ -334,9 +339,18 @@ class LinkedInAdLibraryClient:
                 ),
             )
 
-        probe_url = self._build_query_url(countries=["ES"], count=1)
+        probe_attempts = [
+            self._build_query_url(keyword="B2B", countries=["ES"], count=1, countries_style="urn_list"),
+            self._build_query_url(keyword="B2B", countries=["ES"], count=1, countries_style="wrapped_urn"),
+            self._build_query_url(keyword="B2B", countries=[], count=1, countries_style="omit"),
+        ]
+        resp: httpx.Response | None = None
+        version_used = self.candidate_versions[0]
         try:
-            resp, version_used = await self._request_with_version_fallback(clean_token, probe_url)
+            for probe_url in probe_attempts:
+                resp, version_used = await self._request_with_version_fallback(clean_token, probe_url)
+                if resp.status_code != 400:
+                    break
         except httpx.HTTPError as exc:
             return LinkedInAdLibraryStatusResponse(
                 configured=True,
@@ -347,6 +361,7 @@ class LinkedInAdLibraryClient:
                 message=f"No se pudo conectar con LinkedIn Ad Library API: {exc}",
             )
 
+        assert resp is not None
         if resp.status_code == 200:
             return LinkedInAdLibraryStatusResponse(
                 configured=True,
@@ -379,7 +394,7 @@ class LinkedInAdLibraryClient:
             api_version_used=version_used,
             status_code=resp.status_code,
             needs_token_refresh=False,
-            message=f"LinkedIn Ad Library respondió HTTP {resp.status_code}: {resp.text[:220]}",
+            message=f"LinkedIn Ad Library respondió HTTP {resp.status_code}: {resp.text[:500]}",
         )
 
     async def search(
@@ -404,16 +419,24 @@ class LinkedInAdLibraryClient:
                 insights=empty_insights,
             )
 
-        url = self._build_query_url(
-            keyword=req.keyword,
-            advertiser=req.advertiser,
-            countries=req.countries,
-            date_start=req.date_start,
-            date_end=req.date_end,
-            count=req.count,
-        )
+        styles = ["urn_list", "wrapped_urn", "omit"] if req.countries else ["omit"]
+        effective_keyword = req.keyword.strip() or ("" if req.advertiser.strip() else "B2B")
+        resp: httpx.Response | None = None
+        version_used = self.candidate_versions[0]
         try:
-            resp, version_used = await self._request_with_version_fallback(clean_token, url)
+            for style in styles:
+                url = self._build_query_url(
+                    keyword=effective_keyword,
+                    advertiser=req.advertiser,
+                    countries=req.countries,
+                    date_start=req.date_start,
+                    date_end=req.date_end,
+                    count=req.count,
+                    countries_style=style,
+                )
+                resp, version_used = await self._request_with_version_fallback(clean_token, url)
+                if resp.status_code != 400:
+                    break
         except httpx.HTTPError as exc:
             return LinkedInAdLibrarySearchResponse(
                 live=False,
@@ -426,6 +449,7 @@ class LinkedInAdLibraryClient:
                 insights=empty_insights,
             )
 
+        assert resp is not None
         if resp.status_code in (401, 403):
             return LinkedInAdLibrarySearchResponse(
                 live=False,
@@ -445,7 +469,7 @@ class LinkedInAdLibraryClient:
                 source="error",
                 status_code=resp.status_code,
                 needs_token_refresh=False,
-                message=f"Error LinkedIn Ad Library (HTTP {resp.status_code}): {resp.text[:240]}",
+                message=f"Error LinkedIn Ad Library (HTTP {resp.status_code}): {resp.text[:500]}",
                 api_version_used=version_used,
                 total_returned=0,
                 items=[],
