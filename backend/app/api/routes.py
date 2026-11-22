@@ -2131,6 +2131,7 @@ async def generate_social_copy_matrix(
     if project.context_notes and project.context_notes.strip():
         gem_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
         oai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
+        anth_key, _, _, _ = await _get_effective_social_credential(db, "anthropic_claude")
         prof_row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
         prof_dict = _serialize_creator_profile(prof_row).model_dump() if prof_row else None
         polished = await get_llm_router().polish_linkedin_post(
@@ -2139,6 +2140,7 @@ async def generate_social_copy_matrix(
             creator_profile=prof_dict,
             gemini_api_key=gem_key,
             openai_api_key=oai_key,
+            anthropic_api_key=anth_key,
         )
         for item in generated:
             if item.get("channel") == SocialChannel.LINKEDIN.value:
@@ -2254,6 +2256,8 @@ async def polish_linkedin_draft_endpoint(
 
     gem_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
     oai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
+    anth_key, _, _, _ = await _get_effective_social_credential(db, "anthropic_claude")
+    preferred_engine = str(payload.get("preferred_engine") or "auto").strip().lower()
     prof_row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
     prof_dict = _serialize_creator_profile(prof_row).model_dump() if prof_row else None
 
@@ -2264,6 +2268,8 @@ async def polish_linkedin_draft_endpoint(
         creator_profile=prof_dict,
         gemini_api_key=gem_key,
         openai_api_key=oai_key,
+        anthropic_api_key=anth_key,
+        preferred_engine=preferred_engine,
     )
 
 
@@ -2471,6 +2477,7 @@ SUPPORTED_CREDENTIAL_CHANNELS = (
     "linkedin_ads",
     "gemini_nano_banana",
     "openai_gpt_images",
+    "anthropic_claude",
     "canva",
 )
 
@@ -2601,6 +2608,35 @@ async def test_social_credential(
                 "ok": False,
                 "channel": ch,
                 "message": f"OpenAI rechazó la API Key (HTTP {r.status_code}). Comprueba tu clave en platform.openai.com/api-keys.",
+            }
+
+    if ch == "anthropic_claude":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": token,
+                    "anthropic-version": "2023-06-01",
+                },
+            )
+            if r.status_code == 200:
+                row = (await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))).scalar_one_or_none()
+                if row is None:
+                    db.add(SocialCredential(channel=ch, access_token=token, account_name="Anthropic Claude API"))
+                else:
+                    row.access_token = token
+                    row.account_name = "Anthropic Claude API"
+                await db.commit()
+                return {
+                    "ok": True,
+                    "channel": ch,
+                    "account_name": "Anthropic Claude API",
+                    "message": "✅ API Key de Anthropic (Claude) verificada y guardada. Activa para redacción y pulido IA de LinkedIn.",
+                }
+            return {
+                "ok": False,
+                "channel": ch,
+                "message": f"Anthropic rechazó la API Key (HTTP {r.status_code}). Comprueba tu clave en console.anthropic.com/settings/keys.",
             }
 
     if ch == "canva":

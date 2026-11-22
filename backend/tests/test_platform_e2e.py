@@ -1148,10 +1148,11 @@ class TestFastAPIEndToEnd:
             assert ed_data["first_comment"]
             assert ed_data["post_body"] != raw_notes  # genuinely restructured/polished
 
-            # 2. Save & live-test Visual/AI credentials (Nano Banana, GPT Images, Canva)
+            # 2. Save & live-test Visual/AI credentials (OpenAI, Anthropic, Gemini Nano Banana, Canva)
             for channel, token in [
                 ("gemini_nano_banana", "AIzaSyMockGeminiKey1234567890"),
                 ("openai_gpt_images", "sk-proj-mockOpenAIKey1234567890"),
+                ("anthropic_claude", "sk-ant-mockAnthropicKey1234567890"),
                 ("canva", "canva_mock_oauth_token_1234567890"),
             ]:
                 save_r = client.put(
@@ -1166,6 +1167,7 @@ class TestFastAPIEndToEnd:
             channels_map = creds_r.json()["channels"]
             assert channels_map["gemini_nano_banana"]["configured"] is True
             assert channels_map["openai_gpt_images"]["configured"] is True
+            assert channels_map["anthropic_claude"]["configured"] is True
             assert channels_map["canva"]["configured"] is True
 
             async def fake_provider_get(self_client, url, headers=None, **kwargs):
@@ -1174,18 +1176,20 @@ class TestFastAPIEndToEnd:
                     return httpx.Response(200, json={"models": [{"name": "models/gemini-2.5-flash"}]}, request=req)
                 if "api.openai.com/v1/models" in url:
                     return httpx.Response(200, json={"data": [{"id": "gpt-image-1"}]}, request=req)
+                if "api.anthropic.com/v1/models" in url:
+                    return httpx.Response(200, json={"data": [{"id": "claude-sonnet-4-20250514"}]}, request=req)
                 if "api.canva.com/rest/v1/users/me" in url:
                     return httpx.Response(200, json={"team_user": {"display_name": "Kike Estudio"}}, request=req)
                 raise AssertionError(f"Unexpected GET URL: {url}")
 
             with patch.object(httpx.AsyncClient, "get", new=fake_provider_get):
-                for ch in ("gemini_nano_banana", "openai_gpt_images", "canva"):
+                for ch in ("gemini_nano_banana", "openai_gpt_images", "anthropic_claude", "canva"):
                     t_r = client.post("/api/v1/social/credentials/test", json={"channel": ch})
                     assert t_r.status_code == 200
                     assert t_r.json()["ok"] is True
 
-            # 3. With Gemini key saved in DB, /social/polish-linkedin upgrades to Gemini 2.5 Flash
-            async def fake_gemini_post(self_client, url, headers=None, json=None, **kwargs):
+            # 3. With Gemini/Anthropic/Ollama, /social/polish-linkedin respects preferred_engine
+            async def fake_ai_post(self_client, url, headers=None, json=None, **kwargs):
                 req = httpx.Request("POST", url)
                 if "gemini-2.5-flash:generateContent" in url:
                     ai_json = (
@@ -1199,6 +1203,32 @@ class TestFastAPIEndToEnd:
                     return httpx.Response(
                         200,
                         json={"candidates": [{"content": {"parts": [{"text": ai_json}]}}]},
+                        request=req,
+                    )
+                if "api.anthropic.com/v1/messages" in url:
+                    anth_json = (
+                        '{"hook": "No te faltan clientes: te faltan horas.",'
+                        '"post_body": "No te faltan clientes: te faltan horas.\\n\\n'
+                        'Cada semana en empresas de servicios se pierden horas en WhatsApps repetitivos.\\n\\n#Pymes #IA",'
+                        '"first_comment": "Si quieres auditar tu operativa, escríbeme por DM.",'
+                        '"hashtags": ["#Pymes", "#IA"]}'
+                    )
+                    return httpx.Response(
+                        200,
+                        json={"content": [{"type": "text", "text": anth_json}]},
+                        request=req,
+                    )
+                if "/api/chat" in url:
+                    ollama_json = (
+                        '{"hook": "Tu cuello de botella no es comercial.",'
+                        '"post_body": "Tu cuello de botella no es comercial.\\n\\n'
+                        'Automatiza los WhatsApps repetitivos en tu pyme de servicios.\\n\\n#IA #Local",'
+                        '"first_comment": "¿Te ocurre lo mismo en tu equipo?",'
+                        '"hashtags": ["#IA", "#Local"]}'
+                    )
+                    return httpx.Response(
+                        200,
+                        json={"message": {"content": ollama_json}},
                         request=req,
                     )
                 if "gemini-2.5-flash-image:generateContent" in url:
@@ -1224,19 +1254,51 @@ class TestFastAPIEndToEnd:
                     )
                 raise AssertionError(f"Unexpected POST URL: {url}")
 
-            with patch.object(httpx.AsyncClient, "post", new=fake_gemini_post):
-                polish_ai = client.post(
+            with patch.object(httpx.AsyncClient, "post", new=fake_ai_post):
+                polish_gemini = client.post(
                     "/api/v1/social/polish-linkedin",
                     json={
                         "title": "Cuando el problema no es que te falten clientes",
                         "body": raw_notes,
+                        "preferred_engine": "gemini",
                     },
                 )
-                assert polish_ai.status_code == 200
-                ai_data = polish_ai.json()
+                assert polish_gemini.status_code == 200
+                ai_data = polish_gemini.json()
                 assert ai_data["used_ai_llm"] is True
                 assert "Gemini" in ai_data["engine"]
                 assert "cuello de botella" in ai_data["post_body"]
+
+                polish_anth = client.post(
+                    "/api/v1/social/polish-linkedin",
+                    json={
+                        "title": "Cuando el problema no es que te falten clientes",
+                        "body": raw_notes,
+                        "preferred_engine": "anthropic",
+                    },
+                )
+                assert polish_anth.status_code == 200
+                assert polish_anth.json()["used_ai_llm"] is True
+                assert "Anthropic" in polish_anth.json()["engine"]
+
+                # Test Local IA (Ollama) when active
+                from app.services.skill_llm_router import HybridLLMRouter
+
+                async def fake_probe_ollama(self_router, base_url):
+                    return {"reachable": True, "models": ["qwen3:14b"]}
+
+                with patch.object(HybridLLMRouter, "probe_ollama", new=fake_probe_ollama):
+                    polish_local = client.post(
+                        "/api/v1/social/polish-linkedin",
+                        json={
+                            "title": "Cuando el problema no es que te falten clientes",
+                            "body": raw_notes,
+                            "preferred_engine": "ollama_local",
+                        },
+                    )
+                    assert polish_local.status_code == 200
+                    assert polish_local.json()["used_ai_llm"] is True
+                    assert "Ollama" in polish_local.json()["engine"]
 
                 # 4. /social/generate-visual with nano_banana uses DB-saved key and returns PNG data URI
                 vis_r = client.post(

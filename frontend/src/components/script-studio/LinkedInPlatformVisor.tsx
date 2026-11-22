@@ -61,20 +61,28 @@ interface LinkedInPlatformVisorProps {
 
 const VISUAL_API_PROVIDERS = [
   {
+    channel: "openai_gpt_images" as const,
+    label: "🎨 OpenAI (GPT + Images)",
+    placeholder: "sk-proj-... (OpenAI API Key)",
+    portalUrl: "https://platform.openai.com/api-keys",
+    portalName: "OpenAI Platform",
+    hint: "Activa GPT-Image-1 / DALL-E 3 para imágenes Y también GPT-4o-mini para redactar y pulir tus posts.",
+  },
+  {
+    channel: "anthropic_claude" as const,
+    label: "🟣 Anthropic (Claude)",
+    placeholder: "sk-ant-... (Anthropic API Key)",
+    portalUrl: "https://console.anthropic.com/settings/keys",
+    portalName: "Anthropic Console",
+    hint: "Activa Claude Sonnet para redacción editorial humana de alta calidad en LinkedIn y guiones.",
+  },
+  {
     channel: "gemini_nano_banana" as const,
-    label: "🍌 Nano Banana (Google Gemini)",
+    label: "🍌 Google Gemini (Nano Banana)",
     placeholder: "AIzaSy... (Google AI Studio API Key)",
     portalUrl: "https://aistudio.google.com/apikey",
     portalName: "Google AI Studio",
     hint: "Activa Nano Banana / Imagen 3 para gráficos Y también Gemini 2.5 Flash para redactar tus posts con IA.",
-  },
-  {
-    channel: "openai_gpt_images" as const,
-    label: "🎨 GPT Images (OpenAI)",
-    placeholder: "sk-proj-... (OpenAI API Key)",
-    portalUrl: "https://platform.openai.com/api-keys",
-    portalName: "OpenAI Platform",
-    hint: "Activa GPT-Image-1 / DALL-E 3 para imágenes Y también GPT-4o-mini para pulir tus borradores.",
   },
   {
     channel: "canva" as const,
@@ -120,6 +128,13 @@ export function LinkedInPlatformVisor({
   const [visualNote, setVisualNote] = useState<string | null>(null);
 
   // AI LinkedIn copywriter / polisher state
+  const [preferredAiEngine, setPreferredAiEngine] = useState<
+    "auto" | "ollama_local" | "anthropic" | "gemini" | "openai"
+  >("auto");
+  const [ollamaStatus, setOllamaStatus] = useState<{ reachable: boolean; models: string[] }>({
+    reachable: false,
+    models: [],
+  });
   const [polishingAI, setPolishingAI] = useState(false);
   const [polishFeedback, setPolishFeedback] = useState<{
     engine: string;
@@ -127,11 +142,11 @@ export function LinkedInPlatformVisor({
     note: string;
   } | null>(null);
 
-  // Inline API key configuration for Nano Banana, GPT Images & Canva
+  // Inline API key configuration for OpenAI, Anthropic, Gemini (Nano Banana) & Canva
   const [showApiKeysPanel, setShowApiKeysPanel] = useState(false);
-  const [selectedKeyChannel, setSelectedKeyChannel] = useState<"gemini_nano_banana" | "openai_gpt_images" | "canva">(
-    "gemini_nano_banana"
-  );
+  const [selectedKeyChannel, setSelectedKeyChannel] = useState<
+    "openai_gpt_images" | "anthropic_claude" | "gemini_nano_banana" | "canva"
+  >("gemini_nano_banana");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [savingApiKey, setSavingApiKey] = useState(false);
   const [testingApiKey, setTestingApiKey] = useState(false);
@@ -142,9 +157,18 @@ export function LinkedInPlatformVisor({
 
   const loadProviderCredentials = async () => {
     try {
-      const res = await apiClient.getSocialCredentials();
-      if (res?.channels) {
-        setProviderCreds(res.channels);
+      const [credRes, llmRes] = await Promise.allSettled([
+        apiClient.getSocialCredentials(),
+        apiClient.getLLMConfig(),
+      ]);
+      if (credRes.status === "fulfilled" && credRes.value?.channels) {
+        setProviderCreds(credRes.value.channels);
+      }
+      if (llmRes.status === "fulfilled" && llmRes.value) {
+        setOllamaStatus({
+          reachable: Boolean(llmRes.value.ollama_reachable),
+          models: llmRes.value.ollama_models_detected ?? [],
+        });
       }
     } catch {
       // ignore silent fetch failure
@@ -260,6 +284,7 @@ export function LinkedInPlatformVisor({
         body: linkedInBody,
         context_notes: contextNotes || "",
         project_id: projectId,
+        preferred_engine: preferredAiEngine,
       });
       if (res.hook) onUpdateHook(res.hook);
       if (res.post_body) onUpdateBody(res.post_body);
@@ -359,6 +384,31 @@ export function LinkedInPlatformVisor({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Motor IA para redactar LinkedIn"
+            value={preferredAiEngine}
+            onChange={(e) =>
+              setPreferredAiEngine(
+                e.target.value as "auto" | "ollama_local" | "anthropic" | "gemini" | "openai"
+              )
+            }
+            className="rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-400"
+          >
+            <option value="auto">⚡ Auto (IA Local → Cloud)</option>
+            <option value="ollama_local">
+              🖥️ IA Local Ollama ({ollamaStatus.reachable ? `✓ ${ollamaStatus.models[0] || "Activo"}` : "Offline"})
+            </option>
+            <option value="anthropic">
+              🟣 Anthropic Claude ({providerCreds.anthropic_claude?.configured ? "✓ Key" : "Sin Key"})
+            </option>
+            <option value="gemini">
+              🍌 Google Gemini ({providerCreds.gemini_nano_banana?.configured ? "✓ Key" : "Sin Key"})
+            </option>
+            <option value="openai">
+              🎨 OpenAI GPT ({providerCreds.openai_gpt_images?.configured ? "✓ Key" : "Sin Key"})
+            </option>
+          </select>
+
           <button
             type="button"
             onClick={() => void handlePolishWithAI()}
@@ -683,12 +733,12 @@ export function LinkedInPlatformVisor({
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       <span
                         className={`px-2 py-0.5 rounded-full border font-medium ${
-                          providerCreds.gemini_nano_banana?.configured
+                          ollamaStatus.reachable
                             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                             : "border-slate-700 bg-slate-900 text-slate-400"
                         }`}
                       >
-                        🍌 Nano Banana: {providerCreds.gemini_nano_banana?.configured ? "✓ Conectado" : "Sin API Key"}
+                        🖥️ IA Local: {ollamaStatus.reachable ? `✓ ${ollamaStatus.models[0] || "Activa"}` : "Offline"}
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded-full border font-medium ${
@@ -697,7 +747,25 @@ export function LinkedInPlatformVisor({
                             : "border-slate-700 bg-slate-900 text-slate-400"
                         }`}
                       >
-                        🎨 GPT Images: {providerCreds.openai_gpt_images?.configured ? "✓ Conectado" : "Sin API Key"}
+                        🎨 OpenAI: {providerCreds.openai_gpt_images?.configured ? "✓ Conectado" : "Sin Key"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.anthropic_claude?.configured
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        🟣 Anthropic: {providerCreds.anthropic_claude?.configured ? "✓ Conectado" : "Sin Key"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.gemini_nano_banana?.configured
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        🍌 Gemini: {providerCreds.gemini_nano_banana?.configured ? "✓ Conectado" : "Sin Key"}
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded-full border font-medium ${

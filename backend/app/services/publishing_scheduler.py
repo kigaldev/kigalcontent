@@ -373,6 +373,7 @@ async def resolve_effective_social_credential(
         "linkedin": (settings.linkedin_access_token, settings.linkedin_person_urn),
         "gemini_nano_banana": (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "", ""),
         "openai_gpt_images": (os.environ.get("OPENAI_API_KEY") or "", ""),
+        "anthropic_claude": (settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or "", ""),
         "canva": (os.environ.get("CANVA_ACCESS_TOKEN") or "", ""),
     }
     env_token, env_urn = env_map.get(key, ("", ""))

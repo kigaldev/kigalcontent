@@ -422,6 +422,7 @@ export const apiClient = {
     body?: string;
     context_notes?: string;
     project_id?: string | null;
+    preferred_engine?: "auto" | "ollama_local" | "anthropic" | "gemini" | "openai";
   }) =>
     requestJson<{
       hook: string;
@@ -432,6 +433,35 @@ export const apiClient = {
       used_ai_llm: boolean;
       note: string;
     }>("/social/polish-linkedin", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getLLMConfig: () =>
+    requestJson<{
+      active_provider: string;
+      effective_provider: string;
+      ollama_base_url: string;
+      ollama_model: string;
+      ollama_reachable: boolean;
+      ollama_models_detected: string[];
+      anthropic_model: string;
+      anthropic_key_configured: boolean;
+      openai_compatible_base_url: string;
+      openai_compatible_model: string;
+      openai_compatible_key_configured: boolean;
+    }>("/llm/config"),
+
+  testLLMConnection: (payload: { provider?: string; ollama_base_url?: string; ollama_model?: string }) =>
+    requestJson<{
+      reachable: boolean;
+      provider: string;
+      active_model: string;
+      latency_ms: number;
+      sample_output: string;
+      fallback_used: boolean;
+      message: string;
+    }>("/llm/test", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

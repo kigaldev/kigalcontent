@@ -903,10 +903,13 @@ class HybridLLMRouter:
         creator_profile: dict[str, Any] | None = None,
         gemini_api_key: str = "",
         openai_api_key: str = "",
+        anthropic_api_key: str = "",
+        preferred_engine: str = "auto",
     ) -> dict[str, Any]:
         """
-        Rewrite and polish a LinkedIn post using real AI (Gemini / OpenAI / Claude / Ollama)
-        when credentials are available, or a high-craft Spanish editorial LinkedIn rewriter fallback.
+        Rewrite and polish a LinkedIn post using real AI (Local Ollama / Anthropic Claude /
+        Google Gemini / OpenAI) when credentials or local models are available, or a high-craft
+        Spanish editorial LinkedIn rewriter fallback.
         """
         from app.services.social_connectors import SocialCopyCraftEngine
 
@@ -936,12 +939,102 @@ class HybridLLMRouter:
             "Redacta y pule la publicación de LinkedIn lista para publicar (en español natural de España)."
         )
 
-        # 1. Try Google Gemini API (Nano Banana / Gemini 2.5 Flash) if key configured
-        if gemini_api_key.strip():
+        cfg = self._effective_settings()
+        eff_anthropic = anthropic_api_key.strip() or (cfg.get("anthropic_api_key") or "").strip()
+        eff_gemini = gemini_api_key.strip()
+        eff_openai = openai_api_key.strip()
+        pref = (preferred_engine or "auto").strip().lower()
+
+        async def _try_ollama() -> dict[str, Any] | None:
+            try:
+                probe = await self.probe_ollama(cfg["ollama_base_url"])
+                if not probe["reachable"]:
+                    return None
+                available_models = probe.get("models") or []
+                model_name = cfg.get("ollama_model") or (available_models[0] if available_models else "")
+                if not model_name:
+                    return None
+                if available_models and model_name not in available_models:
+                    matched = next((m for m in available_models if m.startswith(model_name.split(":")[0])), None)
+                    model_name = matched or available_models[0]
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    resp = await client.post(
+                        f"{cfg['ollama_base_url'].rstrip('/')}/api/chat",
+                        json={
+                            "model": model_name,
+                            "stream": False,
+                            "format": "json",
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                        },
+                    )
+                    if resp.status_code == 200:
+                        raw_text = resp.json().get("message", {}).get("content", "")
+                        parsed = _extract_json_object(raw_text)
+                        if parsed and parsed.get("post_body"):
+                            return {
+                                "hook": str(parsed.get("hook") or clean_title)[:135],
+                                "post_body": str(parsed["post_body"]).strip(),
+                                "first_comment": str(parsed.get("first_comment") or "").strip(),
+                                "hashtags": parsed.get("hashtags") or SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes),
+                                "engine": f"IA Local (Ollama · {model_name})",
+                                "used_ai_llm": True,
+                                "note": f"🖥️ Borrador reescrito y optimizado con tu modelo local Ollama ({model_name}, 0 € coste).",
+                            }
+            except Exception as exc:
+                logger.warning("Ollama local polish_linkedin_post failed: %s", exc)
+            return None
+
+        async def _try_anthropic() -> dict[str, Any] | None:
+            if not eff_anthropic:
+                return None
+            model_name = cfg.get("anthropic_model") or "claude-sonnet-4-20250514"
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key.strip()}",
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": eff_anthropic,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": model_name,
+                            "max_tokens": 1600,
+                            "temperature": 0.7,
+                            "system": system_prompt,
+                            "messages": [{"role": "user", "content": user_prompt}],
+                        },
+                    )
+                    if resp.status_code == 200:
+                        content_blocks = resp.json().get("content", [])
+                        raw_text = "".join(
+                            b.get("text", "") for b in content_blocks if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                        parsed = _extract_json_object(raw_text)
+                        if parsed and parsed.get("post_body"):
+                            return {
+                                "hook": str(parsed.get("hook") or clean_title)[:135],
+                                "post_body": str(parsed["post_body"]).strip(),
+                                "first_comment": str(parsed.get("first_comment") or "").strip(),
+                                "hashtags": parsed.get("hashtags") or SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes),
+                                "engine": f"Anthropic Claude ({model_name})",
+                                "used_ai_llm": True,
+                                "note": f"✨ Borrador reescrito y optimizado para LinkedIn con Anthropic Claude ({model_name}).",
+                            }
+            except Exception as exc:
+                logger.warning("Anthropic polish_linkedin_post failed: %s", exc)
+            return None
+
+        async def _try_gemini() -> dict[str, Any] | None:
+            if not eff_gemini:
+                return None
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={eff_gemini}",
                         json={
                             "systemInstruction": {"parts": [{"text": system_prompt}]},
                             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -969,14 +1062,16 @@ class HybridLLMRouter:
                             }
             except Exception as exc:
                 logger.warning("Gemini polish_linkedin_post failed: %s", exc)
+            return None
 
-        # 2. Try OpenAI API (GPT-4o-mini) if key configured
-        if openai_api_key.strip():
+        async def _try_openai() -> dict[str, Any] | None:
+            if not eff_openai:
+                return None
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(
                         "https://api.openai.com/v1/chat/completions",
-                        headers={"Authorization": f"Bearer {openai_api_key.strip()}"},
+                        headers={"Authorization": f"Bearer {eff_openai}"},
                         json={
                             "model": "gpt-4o-mini",
                             "response_format": {"type": "json_object"},
@@ -1002,18 +1097,33 @@ class HybridLLMRouter:
                             }
             except Exception as exc:
                 logger.warning("OpenAI polish_linkedin_post failed: %s", exc)
+            return None
 
-        # 3. Try configured LLM Router (Claude / OpenRouter / Ollama)
-        cfg = self._effective_settings()
-        if cfg["active_provider"] != "deterministic" and (
-            cfg["anthropic_api_key"] or cfg["openai_compatible_api_key"] or cfg["active_provider"] == "ollama"
-        ):
+        runners = {
+            "ollama_local": _try_ollama,
+            "anthropic": _try_anthropic,
+            "gemini": _try_gemini,
+            "openai": _try_openai,
+        }
+        default_order = ["ollama_local", "anthropic", "gemini", "openai"]
+        if pref in runners:
+            order = [pref] + [k for k in default_order if k != pref]
+        else:
+            order = default_order
+
+        for engine_key in order:
+            res = await runners[engine_key]()
+            if res:
+                return res
+
+        # Try configured OpenAI-compatible router (OpenRouter, etc.) if available
+        if cfg["active_provider"] != "deterministic" and cfg.get("openai_compatible_api_key"):
             try:
-                raw_text, used_provider = await self._call_llm_json(
+                parsed, used_provider = await self._invoke_json(
                     agent_id="publisher_distributor",
                     user_prompt=f"{system_prompt}\n\n{user_prompt}",
+                    creator_profile=creator_profile,
                 )
-                parsed = self._extract_json_block(raw_text)
                 if parsed and parsed.get("post_body"):
                     return {
                         "hook": str(parsed.get("hook") or clean_title)[:135],

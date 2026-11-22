@@ -319,10 +319,11 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [testingAdsCred, setTestingAdsCred] = useState(false);
   const [adsCredFeedback, setAdsCredFeedback] = useState<{ ok: boolean; message: string } | null>(null);
 
-  // Visual & AI generation providers (Nano Banana / Gemini, GPT Images / OpenAI, Canva)
+  // Visual & AI generation providers (OpenAI, Anthropic, Gemini/Nano Banana, Canva, Local Ollama)
   const [visualApiKeys, setVisualApiKeys] = useState<Record<string, string>>({
-    gemini_nano_banana: "",
     openai_gpt_images: "",
+    anthropic_claude: "",
+    gemini_nano_banana: "",
     canva: "",
   });
   const [savingVisualKey, setSavingVisualKey] = useState<string | null>(null);
@@ -330,23 +331,44 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [visualKeyFeedback, setVisualKeyFeedback] = useState<
     Record<string, { ok: boolean; message: string }>
   >({});
+  const [localOllamaInfo, setLocalOllamaInfo] = useState<{
+    reachable: boolean;
+    models: string[];
+    baseUrl: string;
+    testing: boolean;
+    message: string | null;
+  }>({
+    reachable: false,
+    models: [],
+    baseUrl: "http://127.0.0.1:11434",
+    testing: false,
+    message: null,
+  });
 
   const VISUAL_AI_PROVIDERS = [
     {
-      channel: "gemini_nano_banana" as const,
-      title: "🍌 Nano Banana (Google Gemini)",
-      subtitle: "Generación de imágenes/infografías (Gemini 2.5 Flash Image / Imagen 3) + Redactor IA LinkedIn (Gemini 2.5 Flash)",
-      placeholder: "AIzaSy... (Google AI Studio API Key)",
-      portalUrl: "https://aistudio.google.com/apikey",
-      portalLabel: "Obtener API Key en Google AI Studio",
-    },
-    {
       channel: "openai_gpt_images" as const,
-      title: "🎨 GPT Images (OpenAI)",
+      title: "🎨 OpenAI (GPT + GPT Images)",
       subtitle: "Generación de imágenes (GPT-Image-1 / DALL-E 3) + Redactor IA LinkedIn (GPT-4o-mini)",
       placeholder: "sk-proj-... (OpenAI API Key)",
       portalUrl: "https://platform.openai.com/api-keys",
       portalLabel: "Obtener API Key en OpenAI",
+    },
+    {
+      channel: "anthropic_claude" as const,
+      title: "🟣 Anthropic (Claude)",
+      subtitle: "Redactor y pulidor editorial con Claude Sonnet para LinkedIn, guiones y estrategia B2B",
+      placeholder: "sk-ant-... (Anthropic API Key)",
+      portalUrl: "https://console.anthropic.com/settings/keys",
+      portalLabel: "Obtener API Key en Anthropic",
+    },
+    {
+      channel: "gemini_nano_banana" as const,
+      title: "🍌 Google Gemini (Nano Banana)",
+      subtitle: "Generación de imágenes/infografías (Gemini 2.5 Flash Image / Imagen 3) + Redactor IA LinkedIn (Gemini 2.5 Flash)",
+      placeholder: "AIzaSy... (Google AI Studio API Key)",
+      portalUrl: "https://aistudio.google.com/apikey",
+      portalLabel: "Obtener API Key en Google AI Studio",
     },
     {
       channel: "canva" as const,
@@ -358,7 +380,9 @@ export const SocialCredentialsSettings: React.FC = () => {
     },
   ];
 
-  const handleSaveVisualKey = async (channel: "gemini_nano_banana" | "openai_gpt_images" | "canva") => {
+  const handleSaveVisualKey = async (
+    channel: "openai_gpt_images" | "anthropic_claude" | "gemini_nano_banana" | "canva"
+  ) => {
     const rawKey = (visualApiKeys[channel] || "").trim();
     if (!rawKey) {
       setVisualKeyFeedback((prev) => ({
@@ -395,7 +419,9 @@ export const SocialCredentialsSettings: React.FC = () => {
     }
   };
 
-  const handleTestVisualKey = async (channel: "gemini_nano_banana" | "openai_gpt_images" | "canva") => {
+  const handleTestVisualKey = async (
+    channel: "openai_gpt_images" | "anthropic_claude" | "gemini_nano_banana" | "canva"
+  ) => {
     setTestingVisualKey(channel);
     try {
       const res = await apiClient.testSocialCredential({
@@ -423,16 +449,51 @@ export const SocialCredentialsSettings: React.FC = () => {
     }
   };
 
+  const handleCheckLocalOllama = async () => {
+    setLocalOllamaInfo((prev) => ({ ...prev, testing: true, message: null }));
+    try {
+      const [cfg, testRes] = await Promise.all([
+        apiClient.getLLMConfig(),
+        apiClient.testLLMConnection({ provider: "ollama" }),
+      ]);
+      setLocalOllamaInfo({
+        reachable: Boolean(testRes.reachable || cfg.ollama_reachable),
+        models: cfg.ollama_models_detected ?? [],
+        baseUrl: cfg.ollama_base_url || "http://127.0.0.1:11434",
+        testing: false,
+        message: testRes.message,
+      });
+    } catch {
+      setLocalOllamaInfo((prev) => ({
+        ...prev,
+        reachable: false,
+        testing: false,
+        message: "No se detectó un servidor Ollama local activo en este entorno.",
+      }));
+    }
+  };
+
   const loadSocialCredentials = async () => {
     try {
-      const data = await apiClient.getSocialCredentials();
-      if (data?.channels) {
-        setServerCreds(data.channels);
-        if (data.channels.linkedin?.person_urn) {
-          setLinkedinPersonUrn(data.channels.linkedin.person_urn);
+      const [data, llmCfg] = await Promise.allSettled([
+        apiClient.getSocialCredentials(),
+        apiClient.getLLMConfig(),
+      ]);
+      if (data.status === "fulfilled" && data.value?.channels) {
+        setServerCreds(data.value.channels);
+        if (data.value.channels.linkedin?.person_urn) {
+          setLinkedinPersonUrn(data.value.channels.linkedin.person_urn);
         }
-        const anyConfigured = Object.values(data.channels).some((c) => c.configured);
+        const anyConfigured = Object.values(data.value.channels).some((c) => c.configured);
         if (anyConfigured) setIsSandboxMode(false);
+      }
+      if (llmCfg.status === "fulfilled" && llmCfg.value) {
+        setLocalOllamaInfo((prev) => ({
+          ...prev,
+          reachable: Boolean(llmCfg.value.ollama_reachable),
+          models: llmCfg.value.ollama_models_detected ?? [],
+          baseUrl: llmCfg.value.ollama_base_url || prev.baseUrl,
+        }));
       }
     } catch {
       // silent offline fallback
@@ -1434,26 +1495,82 @@ export const SocialCredentialsSettings: React.FC = () => {
       </div>
 
       {/* ================================================================= */}
-      {/* MOTORES VISUALES E IA (NANO BANANA · GPT IMAGES · CANVA)           */}
+      {/* MOTORES VISUALES E IA (OPENAI · ANTHROPIC · GEMINI · IA LOCAL)     */}
       {/* ================================================================= */}
       <div className="rounded-2xl border border-violet-500/30 bg-[#0b101d] p-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 pb-4">
           <div className="space-y-1">
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-violet-400" />
-              Motores Visuales e IA (Nano Banana · GPT Images · Canva)
+              Motores Visuales e IA (OpenAI · Anthropic · Gemini · IA Local)
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed max-w-3xl">
-              Conecta tus API Keys de <strong>Google Gemini (Nano Banana)</strong>, <strong>OpenAI (GPT Images)</strong> o{" "}
-              <strong>Canva Connect</strong> para generar imágenes e infografías directamente desde Paso 2. Además, al guardar una API Key de{" "}
-              <strong className="text-cyan-300">Gemini</strong> o <strong className="text-cyan-300">OpenAI</strong>, el botón{" "}
-              <em>&ldquo;✨ Redactar / Pulir con IA&rdquo;</em> reescribirá automáticamente tus borradores de LinkedIn con IA real.
+              Añade tus API Keys de <strong>OpenAI</strong>, <strong>Anthropic (Claude)</strong>,{" "}
+              <strong>Google Gemini (Nano Banana)</strong> y <strong>Canva Connect</strong>, o utiliza automáticamente tus{" "}
+              <strong className="text-emerald-300">modelos de IA Local (Ollama)</strong> cuando estén activos. En modo automático, el sistema prioriza tu IA Local si está encendida y si no usa la API cloud que tengas conectada.
             </p>
           </div>
           <AstryxBadge
             label="Guardado seguro en PostgreSQL"
             variant="info"
           />
+        </div>
+
+        {/* Local IA (Ollama) Card */}
+        <div className="rounded-xl border border-emerald-500/30 bg-[#070d12] p-4 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <Cpu className="w-4 h-4 text-emerald-400" />
+                  🖥️ Modelos de IA Local (Ollama)
+                </h4>
+                {localOllamaInfo.reachable ? (
+                  <AstryxBadge
+                    label={`Activo (${localOllamaInfo.models.length} modelos)`}
+                    variant="success"
+                  />
+                ) : (
+                  <AstryxBadge label="No detectado" variant="neutral" />
+                )}
+              </div>
+              <p className="text-xs text-slate-400">
+                Endpoint: <code className="text-cyan-300">{localOllamaInfo.baseUrl}</code> · Cuando Ollama está activo, puedes redactar y pulir publicaciones a 0 € y con privacidad total.
+              </p>
+              {localOllamaInfo.models.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {localOllamaInfo.models.slice(0, 6).map((m) => (
+                    <span
+                      key={m}
+                      className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 font-mono text-[11px] text-emerald-200"
+                    >
+                      {m}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <AstryxButton
+              type="button"
+              variant="secondary"
+              size="sm"
+              label={localOllamaInfo.testing ? "Comprobando..." : "Probar IA Local"}
+              icon={<RefreshCw className="w-3.5 h-3.5" />}
+              isLoading={localOllamaInfo.testing}
+              onClick={() => void handleCheckLocalOllama()}
+            />
+          </div>
+          {localOllamaInfo.message && (
+            <div
+              className={`rounded-xl border px-3.5 py-2 text-xs ${
+                localOllamaInfo.reachable
+                  ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-200"
+                  : "border-amber-500/40 bg-amber-950/30 text-amber-200"
+              }`}
+            >
+              {localOllamaInfo.message}
+            </div>
+          )}
         </div>
 
         <div className="grid gap-4">
