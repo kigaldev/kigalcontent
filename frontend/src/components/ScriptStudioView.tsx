@@ -118,11 +118,19 @@ function extractSentences(blocks: TwoColumnScriptBlock[]): string[] {
 }
 
 function sanitizePromptArtifacts(text: string): string {
-  return text
+  const cleaned = text
     .replace(/^Contexto afinado por Copiloto Estratega:\s*/i, "")
     .replace(/^Publicaci[oó]n en LinkedIn sobre[^:\n]*:\s*/i, "")
-    .replace(/^(redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(un\s+)?(post|publicaci[oó]n|video|hilo|guion)\s+(en|para|sobre)?\s*(linkedin|instagram|tiktok|youtube|x|twitter)?\s*(indicando|explicando|hablando|que|sobre)?\s*/i, "")
+    .replace(
+      /^La idea es\s+(?:comentar|explicar|hablar|contar|redactar|escribir)\s+(?:c[oó]mo\s+|que\s+|sobre\s+)?/i,
+      ""
+    )
+    .replace(
+      /^(redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(un\s+)?(post|publicaci[oó]n|video|hilo|guion)\s+(en|para|sobre)?\s*(linkedin|instagram|tiktok|youtube|x|twitter)?\s*(indicando|explicando|hablando|que|sobre)?\s*/i,
+      ""
+    )
     .trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "";
 }
 
 function isTemplateSlopHook(text: string): boolean {
@@ -134,6 +142,32 @@ function isTemplateSlopHook(text: string): boolean {
     low.startsWith("estás perdiendo el 80%") ||
     low.startsWith("redactar un post")
   );
+}
+
+function extractDynamicLinkedInHashtags(title: string, notes: string): string[] {
+  const corpus = `${title} ${notes}`.toLowerCase();
+  const rules: Array<[string, string[]]> = [
+    ["#HERO24", ["hero24", "heroe", "héroe"]],
+    ["#Servicios", ["fontanero", "electricista", "reforma", "servicios", "profesionales", "albañil", "mudanza"]],
+    ["#Productividad", ["horas", "tiempo", "optimiz", "productividad", "factur", "contabilidad"]],
+    ["#CaptacionClientes", ["clientes", "captación", "captacion", "presupuesto", "boca-oreja"]],
+    ["#PymesEspaña", ["españa", "pyme", "negocio", "empresa"]],
+    ["#B2B", ["b2b", "ventas", "leads", "inbound", "growth"]],
+    ["#IA", ["inteligencia artificial", " ia ", "automatiz"]],
+    ["#Liderazgo", ["liderazgo", "equipo", "estrategia", "crecimiento"]],
+  ];
+  const tags: string[] = [];
+  for (const [tag, keywords] of rules) {
+    if (keywords.some((k) => corpus.includes(k)) && !tags.includes(tag)) {
+      tags.push(tag);
+    }
+    if (tags.length >= 5) break;
+  }
+  for (const fb of ["#Crecimiento", "#Negocios", "#Estrategia"]) {
+    if (tags.length >= 3) break;
+    if (!tags.includes(fb)) tags.push(fb);
+  }
+  return tags;
 }
 
 function buildLinkedInDraft(params: {
@@ -149,71 +183,60 @@ function buildLinkedInDraft(params: {
   const cleanTitle = sanitizePromptArtifacts(title);
   const cleanHookCandidate = sanitizePromptArtifacts(hookText);
 
-  const notesLower = (contextNotes || "").toLowerCase();
-  const isPersonalOrHero =
-    notesLower.includes("hero24") ||
-    notesLower.includes("artificial") ||
-    notesLower.includes("engagement") ||
-    notesLower.includes("reenfocado") ||
-    notesLower.includes("estudiantes") ||
-    notesLower.includes("country lead") ||
-    title.toLowerCase().includes("hero24") ||
-    title.toLowerCase().includes("nueva etapa");
-
-  if (isPersonalOrHero && contextNotes) {
-    const hook =
-      cleanHookCandidate && !isTemplateSlopHook(cleanHookCandidate) && cleanHookCandidate !== cleanTitle
-        ? clampText(stripUrls(cleanHookCandidate), 132)
-        : "Las publicaciones que hice con IA tuvieron buenas visitas, pero 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 𝗿𝗲𝗮𝗹. 💡";
-
-    const bodyLines = [
-      "Hace tiempo que no publico por aquí, y quería compartir con total transparencia el motivo. 👋",
-      "",
-      "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi en su totalidad con IA. " +
-        "Tuvieron buen número de visualizaciones, pero la realidad fue clara: 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 y una sensación completamente artificial.",
-      "",
-      "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
-      "",
-      "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 𝟭𝟬𝟬% 𝗻𝗮𝘁𝘂𝗿𝗮𝗹, " +
-        "con presencia asidua y compartiendo aprendizajes reales de trinchera. Agradezco de corazón todo vuestro feedback y apoyo en este camino. 🙌",
-      "",
-      "Uno de los proyectos en los que estoy inmerso actualmente es mi papel como 𝗚𝗿𝗼𝘄𝘁𝗵 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 𝗟𝗲𝗮𝗱 para 𝗛𝗘𝗥𝗢𝟮𝟰 en España. 🚀 " +
-        "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, " +
-        "eliminando intermediarios innecesarios y digitalizando la captación.",
-      "",
-      "👉 Si tienes una empresa de servicios en España y estás interesado en abrir un nuevo canal de captación de clientes " +
-        "para tu negocio de forma 𝘁𝗼𝘁𝗮𝗹𝗺𝗲𝗻𝘁𝗲 𝗴𝗿𝗮𝘁𝘂𝗶𝘁𝗮, escríbeme por mensaje privado o déjame un comentario y lo comentamos.",
-      "",
-      "💬 ¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
-      "",
-      "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
-    ];
-
-    const body = bodyLines.join("\n");
-    const firstComment = `Gracias por acompañarme en esta nueva etapa. Si lideras una empresa de servicios y quieres explorar este nuevo canal gratuito con HERO24, tienes mi mensaje directo abierto.`;
-    return { hook, body, firstComment };
-  }
-
   const hook =
     cleanHookCandidate && !isTemplateSlopHook(cleanHookCandidate)
       ? clampText(stripUrls(cleanHookCandidate), 132)
       : clampText(stripUrls(cleanTitle || "Lo que cambia cuando aplicas criterio real frente al volumen."), 132);
 
-  if (contextNotes && contextNotes.trim().length > 60) {
-    const cleanContext = sanitizePromptArtifacts(stripUrls(contextNotes.trim()));
-    const paragraphs = cleanContext
-      .split(/\n\s*\n/)
-      .map((p) => p.replace(/^[-•]\s*(Objetivo|Tesis|Llamada a la acción|Reflexión transparente|Nuevo enfoque|Anuncio|CTA B2B):\s*/gim, "").trim())
+  if (contextNotes && contextNotes.trim().length > 30) {
+    const rawNotes = contextNotes.trim();
+    const paragraphs = rawNotes
+      .split(/\n\s*\n+/)
+      .map((p) =>
+        sanitizePromptArtifacts(
+          stripUrls(
+            p.replace(
+              /^[-•]\s*(Objetivo|Tesis|Llamada a la acci[oó]n|Reflexi[oó]n transparente|Nuevo enfoque|Anuncio|CTA B2B):\s*/gim,
+              ""
+            )
+          )
+        )
+      )
       .filter(Boolean);
-    const bodyLines = [
-      ...paragraphs,
-      "",
-      `💬 Comenta o escríbeme por mensaje privado para compartir impresiones o recibir más detalles.`,
-    ];
+
+    const formatted = paragraphs.map((para, idx) => {
+      if (
+        idx === paragraphs.length - 1 &&
+        /(dm|mensaje|escrib|coment|contact)/i.test(para)
+      ) {
+        return `👉 ${para}`;
+      }
+      return para;
+    });
+
+    const hashtags = extractDynamicLinkedInHashtags(cleanTitle, rawNotes);
+    const hasQuestion = formatted.some((p) => p.includes("?"));
+    const bodyLines: string[] = [];
+    for (const p of formatted) {
+      bodyLines.push(p, "");
+    }
+    if (!hasQuestion) {
+      bodyLines.push(
+        "💬 ¿Te encuentras con esta misma situación en tu sector? Te leo en comentarios.",
+        ""
+      );
+    }
+    bodyLines.push(hashtags.join(" "));
+
+    const wantsDm = /(dm|mensaje|escrib|registr)/i.test(rawNotes);
+    const firstComment = wantsDm
+      ? "Si quieres que lo comentemos para tu caso concreto, escríbeme por mensaje directo o deja un comentario aquí abajo y te respondo personalmente."
+      : `👇 Acceso o más detalles sobre esta publicación: ${deliveryUrl || "https://contentengine.local/recurso"}`;
+
     return {
       hook,
-      body: bodyLines.join("\n"),
-      firstComment: `👇 Acceso o más detalles sobre esta publicación: ${deliveryUrl || "https://contentengine.local/recurso"}`,
+      body: bodyLines.join("\n").trim(),
+      firstComment,
     };
   }
 

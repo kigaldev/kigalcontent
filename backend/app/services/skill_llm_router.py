@@ -797,84 +797,74 @@ class HybridLLMRouter:
             except Exception as exc:
                 logger.warning("Error invoking LLM in chat_refine_idea: %s", exc)
 
-        # Deterministic / Smart Heuristic Co-pilot Engine
+        # Deterministic / Smart Heuristic Co-pilot Engine (strictly driven by user's actual message & context)
         lower_msg = (last_user_msg + " " + (current_context or "")).lower()
         has_linkedin = "linkedin" in lower_msg
-        has_hero = "hero24" in lower_msg or "hero" in lower_msg
-        has_ia_reflection = "ia" in lower_msg or "artificial" in lower_msg or "estudiantes" in lower_msg or "engagement" in lower_msg
-        wants_video = "video" in lower_msg and not ("sin video" in lower_msg or "solo texto" in lower_msg or "solo escrito" in lower_msg or "publicacion escrita" in lower_msg)
+        wants_video = "video" in lower_msg and not (
+            "sin video" in lower_msg
+            or "solo texto" in lower_msg
+            or "solo escrito" in lower_msg
+            or "publicacion escrita" in lower_msg
+            or "publicación escrita" in lower_msg
+        )
 
-        detected_format = "TEXT_AND_VIDEO" if wants_video else "TEXT_ONLY"
+        detected_format = "TEXT_AND_VIDEO" if wants_video else (preferred_format or "TEXT_ONLY")
         detected_platforms = ["LinkedIn"] if has_linkedin else list(platforms)
-        if ("twitter" in lower_msg or "x" in lower_msg) and "X" not in detected_platforms:
+        if ("twitter" in lower_msg or " x " in f" {lower_msg} ") and "X" not in detected_platforms:
             detected_platforms.append("X")
 
-        if has_hero or has_ia_reflection:
-            suggested_title = "Por qué dejé de publicar contenido 100% con IA y mi nuevo reto en HERO24 España"
-            reply_text = (
-                "🎯 **Excelente dirección estratégica.** La honestidad radical es el contenido que mejor funciona hoy en LinkedIn. "
-                "Admitir que tus publicaciones automatizadas con IA tuvieron visualizaciones pero cero engagement conecta directamente con el cansancio que siente tu audiencia hacia el contenido artificial.\n\n"
-                "Te propongo esta estructura en 4 tiempos para tu publicación (sin frases hechas de marketing):\n"
-                "1. **Gancho de apertura (Vulnerabilidad):** *'Las últimas publicaciones que hice con IA tuvieron miles de visualizaciones. ¿El engagement real? Cero. Un resultado artificial que no construyó relaciones.'*\n"
-                "2. **El reenfoque:** Por qué comienzas una etapa de contenido más natural, con presencia asidua y pidiendo feedback genuino.\n"
-                "3. **La novedad profesional:** Tu papel como **Growth Country Lead para HERO24 en España**, explicando lo que hace la compañía y el valor para el tejido de servicios local.\n"
-                "4. **Llamada a la acción (Colaboración B2B):** Invitar a empresas de servicios interesadas en abrir un nuevo canal de captación de clientes de forma gratuita a contactar o comentar."
-            )
-            context_brief = (
-                f"Publicación en LinkedIn sobre reinvención profesional y autocrítica honesta de la IA:\n"
-                f"- Reflexión transparente: Las publicaciones anteriores creadas 100% con IA para estudiantes lograron visitas pero cero conversaciones reales.\n"
-                f"- Nuevo enfoque: Creación de contenido natural, humano y asiduo, valorando el feedback de la comunidad.\n"
-                f"- Anuncio: Growth Country Lead para HERO24 en España, conectando empresas de servicios con clientes cualificados sin costes iniciales.\n"
-                f"- CTA B2B: Empresas de servicios que quieran abrir un nuevo canal gratuito pueden contactar por mensaje directo."
-            )
-            hooks = [
-                {
-                    "category": "Vulnerabilidad y Autocrítica",
-                    "hook_text": "Las publicaciones automáticas que hice con IA tuvieron miles de visitas. ¿El engagement real? Prácticamente cero.",
-                    "pattern_interrupt": "Primer plano sin filtro + Texto: 'El fallo de la IA'",
-                    "estimated_hold_rate": 86.5,
-                },
-                {
-                    "category": "Giro Profesional",
-                    "hook_text": "Llevo tiempo en silencio en LinkedIn por una razón: he reenfocado mi carrera y asumo el rol de Growth Country Lead en HERO24 España.",
-                    "pattern_interrupt": "Captura real + saludo directo",
-                    "estimated_hold_rate": 82.0,
-                },
-                {
-                    "category": "Oportunidad B2B",
-                    "hook_text": "Si tienes una empresa de servicios en España, esto te interesa: estamos abriendo un canal de captación 100% gratuito.",
-                    "pattern_interrupt": "Subtítulo resaltado en zona segura",
-                    "estimated_hold_rate": 84.5,
-                },
-            ]
+        raw_clean = re.sub(
+            r"^(?:la idea es\s+(?:comentar|explicar|hablar|contar)?\s*(?:c[oó]mo|que|sobre)?\s*|"
+            r"(?:redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(?:un\s+)?(?:post|publicaci[oó]n|video|hilo|guion)\s+(?:en|para|sobre)?\s*(?:linkedin|instagram|tiktok|youtube|x|twitter)?\s*(?:indicando|explicando|hablando|que|sobre)?\s*)",
+            "",
+            last_user_msg.strip(),
+            flags=re.IGNORECASE,
+        ).strip()
+
+        first_sentence = re.split(r"(?<=[.!?])\s+|\n", raw_clean)[0].strip() if raw_clean else ""
+        suggested_title = (
+            (current_title or "").strip()
+            or (first_sentence[:72].rstrip(" ,.;:") if first_sentence else "Nueva Publicación Estratégica")
+        )
+        if suggested_title and suggested_title[0].islower():
+            suggested_title = suggested_title[0].upper() + suggested_title[1:]
+
+        # Preserve full user context without replacing it with canned templates
+        if current_context and last_user_msg and last_user_msg.strip() not in current_context:
+            context_brief = f"{current_context.strip()}\n\n{last_user_msg.strip()}"
         else:
-            raw_clean = re.sub(
-                r"^(redactar|crear|escribir|hacer|quiero|necesito|prepara|genera)\s+(un\s+)?(post|publicaci[oó]n|video|hilo|guion)\s+(en|para|sobre)?\s*(linkedin|instagram|tiktok|youtube|x|twitter)?\s*(indicando|explicando|hablando|que|sobre)?\s*",
-                "",
-                last_user_msg.strip(),
-                flags=re.IGNORECASE,
-            ).strip()
-            suggested_title = current_title or (raw_clean[:65].capitalize() if raw_clean else "Nueva Estrategia de Contenido")
-            reply_text = (
-                f"💡 He analizado tu idea: **{suggested_title}**.\n\n"
-                f"Para que destaque en **{', '.join(detected_platforms)}**, te recomiendo centrarte en una historia concreta o lección operativa en lugar de teoría general. "
-                f"Al ser formato **{('Solo Texto / Post Escrito' if detected_format == 'TEXT_ONLY' else 'Video + Post Escrito')}**, optimizaremos la primera línea antes del botón *'ver más'* para retener al lector."
-            )
-            context_brief = current_context or raw_clean or last_user_msg
-            hooks = [
-                {
-                    "category": "Contraintuitivo",
-                    "hook_text": f"La mayoría de profesionales abordan {suggested_title.lower()} con la estrategia equivocada.",
-                    "pattern_interrupt": "Corte rápido + tipografía limpia",
-                    "estimated_hold_rate": 79.0,
-                },
-                {
-                    "category": "Lección Práctica",
-                    "hook_text": f"Lo que aprendí tras semanas analizando cómo optimizar {suggested_title.lower()}.",
-                    "pattern_interrupt": "Punto de vista en primera persona",
-                    "estimated_hold_rate": 76.5,
-                },
-            ]
+            context_brief = (current_context or "").strip() or last_user_msg.strip()
+
+        reply_text = (
+            f"💡 He analizado tu enfoque: **{suggested_title}**.\n\n"
+            f"Para que destaque en **{', '.join(detected_platforms)}** en formato "
+            f"**{('Solo Texto / Post Escrito' if detected_format == 'TEXT_ONLY' else 'Video + Post Escrito')}**, "
+            f"mantendremos íntegra tu experiencia real y la estructuraremos en 4 tiempos:\n"
+            f"1. **Gancho inicial (<135 caracteres):** Una primera línea que rompa la expectativa antes del botón *'...ver más'*.\n"
+            f"2. **Contexto real de campo:** Lo que pensabas al principio frente a lo que descubriste en la práctica.\n"
+            f"3. **Aprendizaje / Propuesta de valor:** El giro concreto que resuelve el dolor real de tu audiencia.\n"
+            f"4. **Cierre conversacional (CTA):** Invitación directa y natural a comentar o escribir por DM sin sonar a venta fría."
+        )
+        hooks = [
+            {
+                "category": "Contraintuitivo",
+                "hook_text": suggested_title[:130],
+                "pattern_interrupt": "Contraste directo entre expectativa y realidad",
+                "estimated_hold_rate": 83.5,
+            },
+            {
+                "category": "Experiencia de Campo",
+                "hook_text": f"Lo que descubrí en la práctica sobre {suggested_title.lower()[:85]} (y por qué cambia el enfoque).",
+                "pattern_interrupt": "Historia real en primera persona",
+                "estimated_hold_rate": 80.5,
+            },
+            {
+                "category": "Dolor Real",
+                "hook_text": f"El verdadero cuello de botella detrás de {suggested_title.lower()[:85]}.",
+                "pattern_interrupt": "Diagnóstico directo al punto de dolor",
+                "estimated_hold_rate": 78.5,
+            },
+        ]
 
         return {
             "reply": reply_text,

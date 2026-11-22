@@ -2118,12 +2118,13 @@ async def generate_social_copy_matrix(
     goal = body.conversion_goal or ConversionGoal(project.conversion_goal)
     engine = SocialCopyCraftEngine()
     generated = engine.generate_all_channels(
-        headline=body.headline,
+        headline=body.headline or project.working_title,
         core_value=body.core_value,
         debate_question=body.debate_question,
         thesis_points=body.thesis_points,
         chapters=body.chapters,
         goal=goal,
+        context_notes=project.context_notes,
     )
 
     # Replace existing unpublished drafts for this project

@@ -1051,6 +1051,76 @@ class TestFastAPIEndToEnd:
             del_post = client.delete(f"/api/v1/publishing/posts/{draft_post['id']}")
             assert del_post.status_code == 200 and del_post.json()["deleted"] is True
 
+    def test_second_linkedin_post_mentioning_hero24_uses_own_context(self):
+        with TestClient(app) as client:
+            second_context = (
+                "La idea es comentar cómo al fomentar Hero24 en España descubrimos que los fontaneros y electricistas "
+                "digitalizados ya están saturados de trabajo.\n\n"
+                "Por eso el argumento real no es solo conseguir más clientes, sino optimizar horas y evitar mareos con presupuestos y facturas.\n\n"
+                "Si tienes una empresa de servicios y quieres optimizar tus horas, escríbeme por DM."
+            )
+
+            # 1. Chat refine mentioning Hero24 must NOT return the old 1st post title
+            chat_resp = client.post(
+                "/api/v1/ideas/chat-refine",
+                json={
+                    "messages": [{"role": "user", "content": second_context}],
+                    "current_title": "Cuando el problema no es que te falten clientes",
+                    "target_platforms": ["LinkedIn"],
+                    "preferred_format": "TEXT_ONLY",
+                },
+            )
+            assert chat_resp.status_code == 200
+            chat_data = chat_resp.json()
+            assert "100% con IA" not in chat_data["suggested_title"]
+            assert "Cuando el problema no es que te falten clientes" in chat_data["suggested_title"]
+            assert "fontaneros" in chat_data["suggested_context_notes"]
+
+            # 2. Creating project generates LinkedIn draft from THIS project's real context
+            create_resp = client.post(
+                "/api/v1/projects",
+                json={
+                    "working_title": "Cuando el problema no es que te falten clientes",
+                    "target_duration": "STANDARD_SHORT",
+                    "conversion_goal": "B2B_INBOUND_CONVERSATION",
+                    "tam_classification": "EXPANSION_20",
+                    "impact": 8.5,
+                    "confidence": 8.0,
+                    "ease": 8.5,
+                    "context_notes": second_context,
+                    "target_platforms": ["LinkedIn"],
+                    "content_format": "TEXT_ONLY",
+                    "auto_generate_script": True,
+                },
+            )
+            assert create_resp.status_code == 201
+            pid = create_resp.json()["id"]
+
+            detail = client.get(f"/api/v1/projects/{pid}").json()
+            li_posts = [p for p in detail["social_posts"] if p["channel"] == "LinkedIn"]
+            assert len(li_posts) == 1
+            li_post = li_posts[0]
+            assert "Hace tiempo que no publico" not in li_post["post_body"]
+            assert "herramientas para estudiantes" not in li_post["post_body"]
+            assert "fontaneros" in li_post["post_body"]
+            assert "optimizar horas" in li_post["post_body"]
+            assert "Cuando el problema no es que te falten clientes" in (li_post["title"] or "")
+
+            # 3. Regenerating copy via /social/copycraft also preserves project context_notes
+            regen = client.post(
+                "/api/v1/social/copycraft",
+                json={
+                    "project_id": pid,
+                    "headline": "Cuando el problema no es que te falten clientes",
+                    "core_value": "Optimizar horas de profesionales de servicios",
+                },
+            )
+            assert regen.status_code == 200
+            regen_li = [p for p in regen.json() if p["channel"] == "LinkedIn"][0]
+            assert "Hace tiempo que no publico" not in regen_li["post_body"]
+            assert "fontaneros" in regen_li["post_body"]
+
+
 
 
 

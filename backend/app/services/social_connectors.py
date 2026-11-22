@@ -140,6 +140,49 @@ class SocialCopyCraftEngine:
             },
         }
 
+    @staticmethod
+    def _clean_context_paragraph(text: str) -> str:
+        """Remove prompt-wrapper prefixes while keeping the author's real story intact."""
+        cleaned = URL_PATTERN.sub("[enlace en 1er comentario]", text.strip())
+        cleaned = re.sub(
+            r"^(?:Contexto afinado por Copiloto Estratega:\s*|Publicaci[oó]n en LinkedIn sobre[^:\n]*:\s*|"
+            r"La idea es (?:comentar|explicar|hablar|contar|redactar|escribir)\s+(?:c[oó]mo\s+|que\s+|sobre\s+)?|"
+            r"(?:Quiero|Necesito|Voy a)\s+(?:redactar|crear|escribir|publicar|comentar)\s+(?:un\s+)?(?:post|publicaci[oó]n)\s+(?:en\s+linkedin\s+)?(?:sobre|indicando|explicando|donde)?\s*)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+        if cleaned and cleaned[0].islower():
+            cleaned = cleaned[0].upper() + cleaned[1:]
+        return cleaned
+
+    @staticmethod
+    def _extract_dynamic_hashtags(headline: str, notes: str) -> list[str]:
+        corpus = f"{headline} {notes}".lower()
+        tag_rules: list[tuple[str, tuple[str, ...]]] = [
+            ("#HERO24", ("hero24", "heroe", "héroe")),
+            ("#Servicios", ("fontanero", "electricista", "reforma", "servicios", "profesionales", "albañil", "mudanza")),
+            ("#Productividad", ("horas", "tiempo", "optimiz", "productividad", "factur", "contabilidad")),
+            ("#CaptacionClientes", ("clientes", "captación", "captacion", "presupuesto", "boca-oreja")),
+            ("#PymesEspaña", ("españa", "pyme", "negocio", "empresa")),
+            ("#B2B", ("b2b", "ventas", "leads", "inbound", "growth")),
+            ("#IA", ("inteligencia artificial", " ia ", "automatiz")),
+            ("#Liderazgo", ("liderazgo", "equipo", "estrategia", "crecimiento")),
+        ]
+        tags: list[str] = []
+        for tag, keywords in tag_rules:
+            if any(k in corpus for k in keywords) and tag not in tags:
+                tags.append(tag)
+            if len(tags) >= 5:
+                break
+        if len(tags) < 3:
+            for fallback_tag in ("#Crecimiento", "#Negocios", "#Estrategia"):
+                if fallback_tag not in tags:
+                    tags.append(fallback_tag)
+                if len(tags) >= 3:
+                    break
+        return tags
+
     def generate_linkedin(
         self,
         headline: str,
@@ -147,39 +190,68 @@ class SocialCopyCraftEngine:
         goal: ConversionGoal,
         context_notes: str | None = None,
     ) -> dict[str, Any]:
-        hook = headline.strip()[:135]
+        clean_headline = self._clean_context_paragraph(headline) if headline else ""
+        hook = (clean_headline or headline.strip())[:135].rstrip()
         cta_text = get_cta_for_goal(self.profile, goal)
-        notes = (context_notes or "").lower()
+        raw_notes = (context_notes or "").strip()
 
-        if "hero24" in notes or "hero24" in hook.lower() or "artificial" in notes or "engagement" in notes:
-            hook = "Las publicaciones que hice con IA tuvieron buenas visitas, pero 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 𝗿𝗲𝗮𝗹. 💡"
-            body_lines = [
-                "Hace tiempo que no publico por aquí, y quería ser transparente con el motivo. 👋",
-                "",
-                "Las últimas publicaciones que hice para dar visibilidad a herramientas para estudiantes estaban generadas casi íntegramente con IA. "
-                "Tuvieron buen número de visualizaciones, pero la realidad fue aplastante: 𝗰𝗲𝗿𝗼 𝗲𝗻𝗴𝗮𝗴𝗲𝗺𝗲𝗻𝘁 y una sensación completamente artificial.",
-                "",
-                "Ese contenido no construía conversaciones reales ni reflejaba quién soy.",
-                "",
-                "Hoy que he reenfocado mi situación profesional, he decidido volver a publicar con un enfoque 𝟭𝟬𝟬% 𝗻𝗮𝘁𝘂𝗿𝗮𝗹, "
-                "con presencia asidua y compartiendo aprendizajes de trinchera. Agradezco de corazón todo vuestro feedback. 🙌",
-                "",
-                "Uno de los proyectos en los que estoy inmerso es mi rol como 𝗚𝗿𝗼𝘄𝘁𝗵 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 𝗟𝗲𝗮𝗱 para 𝗛𝗘𝗥𝗢𝟮𝟰 en España. 🚀 "
-                "En HERO24 ayudamos a conectar a profesionales y empresas de servicios locales con clientes cualificados, "
-                "eliminando intermediarios innecesarios y digitalizando la captación.",
-                "",
-                "👉 Si tienes una empresa de servicios en España y te interesa abrir un nuevo canal de captación de clientes "
-                "para tu negocio de forma 𝘁𝗼𝘁𝗮𝗹𝗺𝗲𝗻𝘁𝗲 𝗴𝗿𝗮𝘁𝘂𝗶𝘁𝗮, escríbeme por mensaje privado o déjame un comentario.",
-                "",
-                "💬 ¿Qué opinas del contenido generado 100% por IA que inunda hoy LinkedIn? Te leo en comentarios.",
-                "",
-                "#Crecimiento #HERO24 #Liderazgo #ServiciosEspaña #Autenticidad",
+        if raw_notes and len(raw_notes) > 30:
+            raw_paragraphs = [
+                p.strip()
+                for p in re.split(r"\n\s*\n+", raw_notes)
+                if p.strip()
             ]
-            first_comment = (
-                "Gracias por acompañarme en esta nueva etapa. Si lideras una empresa de servicios y quieres explorar "
-                "este nuevo canal gratuito con HERO24, tienes mi mensaje directo abierto."
-            )
-            hashtags = ["#Crecimiento", "#HERO24", "#Liderazgo", "#ServiciosEspaña", "#Autenticidad"]
+            # If the user wrote a single dense block, split into readable 2-sentence paragraphs
+            if len(raw_paragraphs) == 1 and len(raw_paragraphs[0]) > 260:
+                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw_paragraphs[0]) if s.strip()]
+                raw_paragraphs = [
+                    " ".join(sentences[i : i + 2])
+                    for i in range(0, len(sentences), 2)
+                ]
+
+            formatted_paragraphs: list[str] = []
+            for idx, para in enumerate(raw_paragraphs):
+                clean_p = self._clean_context_paragraph(para)
+                clean_p = re.sub(
+                    r"^[-•]\s*(Objetivo|Tesis|Llamada a la acci[oó]n|Reflexi[oó]n|Nuevo enfoque|Anuncio|CTA B2B):\s*",
+                    "",
+                    clean_p,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if not clean_p:
+                    continue
+                if idx == len(raw_paragraphs) - 1 and any(
+                    tok in clean_p.lower() for tok in ("dm", "mensaje", "escrib", "coment", "contact")
+                ):
+                    formatted_paragraphs.append(f"👉 {clean_p}")
+                else:
+                    formatted_paragraphs.append(clean_p)
+
+            hashtags = self._extract_dynamic_hashtags(hook, raw_notes)
+            body_lines: list[str] = []
+            for para in formatted_paragraphs:
+                body_lines.append(para)
+                body_lines.append("")
+
+            has_question = any("?" in p for p in formatted_paragraphs)
+            if not has_question:
+                body_lines.append("💬 ¿Te encuentras con esta misma situación en tu sector? Te leo en comentarios.")
+                body_lines.append("")
+
+            body_lines.append(" ".join(hashtags))
+
+            found_urls = URL_PATTERN.findall(raw_notes)
+            if found_urls:
+                first_comment = f"👉 Enlace mencionado en la publicación: {found_urls[0]}"
+            elif goal == ConversionGoal.B2B_INBOUND_CONVERSATION or any(
+                tok in raw_notes.lower() for tok in ("dm", "mensaje", "escrib", "registr")
+            ):
+                first_comment = (
+                    "Si quieres que lo comentemos para tu caso concreto, escríbeme por mensaje directo "
+                    "o deja un comentario aquí abajo y te respondo personalmente."
+                )
+            else:
+                first_comment = f"👉 {cta_text}"
         else:
             hashtags = ["#Sistemas", "#Automatizacion", "#LiderazgoDigital"]
             body_lines = [
@@ -210,7 +282,7 @@ class SocialCopyCraftEngine:
         return {
             "channel": SocialChannel.LINKEDIN.value,
             "title": hook,
-            "post_body": "\n".join(body_lines),
+            "post_body": "\n".join(body_lines).strip(),
             "first_comment": first_comment,
             "hashtags": hashtags,
             "metadata_payload": {
