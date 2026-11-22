@@ -1120,6 +1120,140 @@ class TestFastAPIEndToEnd:
             assert "Hace tiempo que no publico" not in regen_li["post_body"]
             assert "fontaneros" in regen_li["post_body"]
 
+    def test_polish_linkedin_post_and_visual_ai_credentials_e2e(self):
+        with TestClient(app) as client:
+            raw_notes = (
+                "En muchas empresas de servicios, como fontaneros o electricistas, el cuello de botella "
+                "no es conseguir más clientes. Sin embargo, cada semana se pierden horas respondiendo "
+                "WhatsApps repetitivos, persiguiendo presupuestos y coordinando agendas a mano. "
+                "La clave está en automatizar la operativa diaria con herramientas prácticas. "
+                "Si tienes una empresa de servicios y quieres recuperar horas, escríbeme por DM."
+            )
+
+            # 1. Without LLM keys, /social/polish-linkedin uses the smart editorial rewriter
+            polish_editorial = client.post(
+                "/api/v1/social/polish-linkedin",
+                json={
+                    "title": "Cuando el problema no es que te falten clientes",
+                    "body": raw_notes,
+                    "context_notes": raw_notes,
+                },
+            )
+            assert polish_editorial.status_code == 200
+            ed_data = polish_editorial.json()
+            assert ed_data["used_ai_llm"] is False
+            assert "Editor Editorial" in ed_data["engine"]
+            assert "fontaneros" in ed_data["post_body"]
+            assert len(ed_data["hashtags"]) >= 2
+            assert ed_data["first_comment"]
+            assert ed_data["post_body"] != raw_notes  # genuinely restructured/polished
+
+            # 2. Save & live-test Visual/AI credentials (Nano Banana, GPT Images, Canva)
+            for channel, token in [
+                ("gemini_nano_banana", "AIzaSyMockGeminiKey1234567890"),
+                ("openai_gpt_images", "sk-proj-mockOpenAIKey1234567890"),
+                ("canva", "canva_mock_oauth_token_1234567890"),
+            ]:
+                save_r = client.put(
+                    "/api/v1/social/credentials",
+                    json={"channel": channel, "access_token": token},
+                )
+                assert save_r.status_code == 200
+                assert save_r.json()["saved"] is True
+
+            creds_r = client.get("/api/v1/social/credentials")
+            assert creds_r.status_code == 200
+            channels_map = creds_r.json()["channels"]
+            assert channels_map["gemini_nano_banana"]["configured"] is True
+            assert channels_map["openai_gpt_images"]["configured"] is True
+            assert channels_map["canva"]["configured"] is True
+
+            async def fake_provider_get(self_client, url, headers=None, **kwargs):
+                req = httpx.Request("GET", url)
+                if "generativelanguage.googleapis.com" in url:
+                    return httpx.Response(200, json={"models": [{"name": "models/gemini-2.5-flash"}]}, request=req)
+                if "api.openai.com/v1/models" in url:
+                    return httpx.Response(200, json={"data": [{"id": "gpt-image-1"}]}, request=req)
+                if "api.canva.com/rest/v1/users/me" in url:
+                    return httpx.Response(200, json={"team_user": {"display_name": "Kike Estudio"}}, request=req)
+                raise AssertionError(f"Unexpected GET URL: {url}")
+
+            with patch.object(httpx.AsyncClient, "get", new=fake_provider_get):
+                for ch in ("gemini_nano_banana", "openai_gpt_images", "canva"):
+                    t_r = client.post("/api/v1/social/credentials/test", json={"channel": ch})
+                    assert t_r.status_code == 200
+                    assert t_r.json()["ok"] is True
+
+            # 3. With Gemini key saved in DB, /social/polish-linkedin upgrades to Gemini 2.5 Flash
+            async def fake_gemini_post(self_client, url, headers=None, json=None, **kwargs):
+                req = httpx.Request("POST", url)
+                if "gemini-2.5-flash:generateContent" in url:
+                    ai_json = (
+                        '{"hook": "El cuello de botella no es falta de clientes.",'
+                        '"post_body": "El cuello de botella no es falta de clientes.\\n\\n'
+                        'En empresas de servicios (fontaneros, electricistas) el tiempo se fuga en WhatsApps.\\n\\n'
+                        'Automatizar la agenda devuelve horas reales.\\n\\n#Automatizacion #Pymes",'
+                        '"first_comment": "¿Qué tarea manual te roba más tiempo hoy? Te leo 👇",'
+                        '"hashtags": ["#Automatizacion", "#Pymes"]}'
+                    )
+                    return httpx.Response(
+                        200,
+                        json={"candidates": [{"content": {"parts": [{"text": ai_json}]}}]},
+                        request=req,
+                    )
+                if "gemini-2.5-flash-image:generateContent" in url:
+                    return httpx.Response(
+                        200,
+                        json={
+                            "candidates": [
+                                {
+                                    "content": {
+                                        "parts": [
+                                            {
+                                                "inlineData": {
+                                                    "mimeType": "image/png",
+                                                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        request=req,
+                    )
+                raise AssertionError(f"Unexpected POST URL: {url}")
+
+            with patch.object(httpx.AsyncClient, "post", new=fake_gemini_post):
+                polish_ai = client.post(
+                    "/api/v1/social/polish-linkedin",
+                    json={
+                        "title": "Cuando el problema no es que te falten clientes",
+                        "body": raw_notes,
+                    },
+                )
+                assert polish_ai.status_code == 200
+                ai_data = polish_ai.json()
+                assert ai_data["used_ai_llm"] is True
+                assert "Gemini" in ai_data["engine"]
+                assert "cuello de botella" in ai_data["post_body"]
+
+                # 4. /social/generate-visual with nano_banana uses DB-saved key and returns PNG data URI
+                vis_r = client.post(
+                    "/api/v1/social/generate-visual",
+                    json={
+                        "title": "Cuando el problema no es que te falten clientes",
+                        "body": ai_data["post_body"],
+                        "visual_type": "INFOGRAPHIC",
+                        "provider": "nano_banana",
+                    },
+                )
+                assert vis_r.status_code == 200
+                vis_data = vis_r.json()
+                assert vis_data["provider"] == "nano_banana"
+                assert vis_data["image_url"].startswith("data:image/png;base64,")
+
+
 
 
 

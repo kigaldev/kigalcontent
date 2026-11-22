@@ -6,6 +6,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -370,6 +371,9 @@ async def resolve_effective_social_credential(
         "instagram": (settings.instagram_access_token, ""),
         "tiktok": (settings.tiktok_access_token, ""),
         "linkedin": (settings.linkedin_access_token, settings.linkedin_person_urn),
+        "gemini_nano_banana": (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "", ""),
+        "openai_gpt_images": (os.environ.get("OPENAI_API_KEY") or "", ""),
+        "canva": (os.environ.get("CANVA_ACCESS_TOKEN") or "", ""),
     }
     env_token, env_urn = env_map.get(key, ("", ""))
 

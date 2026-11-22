@@ -1405,6 +1405,8 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
         >
           {activeSubTab === "linkedin" && (
             <LinkedInPlatformVisor
+              projectId={selectedDetail.project.id}
+              contextNotes={selectedDetail.project.context_notes}
               assetCode={selectedDetail.project.asset_code}
               projectTitle={selectedDetail.project.working_title}
               authorName={creatorProfile?.name || "Kike Gallego"}

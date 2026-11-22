@@ -878,6 +878,233 @@ class HybridLLMRouter:
             "ready_to_create": True,
         }
 
+    @staticmethod
+    def _to_unicode_bold(text: str) -> str:
+        """Convert ASCII letters/digits to Mathematical Sans-Serif Bold for native LinkedIn emphasis."""
+        out: list[str] = []
+        for ch in text:
+            code = ord(ch)
+            if 65 <= code <= 90:
+                out.append(chr(0x1D5D4 + (code - 65)))
+            elif 97 <= code <= 122:
+                out.append(chr(0x1D5EE + (code - 97)))
+            elif 48 <= code <= 57:
+                out.append(chr(0x1D7EC + (code - 48)))
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    async def polish_linkedin_post(
+        self,
+        *,
+        title: str,
+        body: str = "",
+        context_notes: str = "",
+        creator_profile: dict[str, Any] | None = None,
+        gemini_api_key: str = "",
+        openai_api_key: str = "",
+    ) -> dict[str, Any]:
+        """
+        Rewrite and polish a LinkedIn post using real AI (Gemini / OpenAI / Claude / Ollama)
+        when credentials are available, or a high-craft Spanish editorial LinkedIn rewriter fallback.
+        """
+        from app.services.social_connectors import SocialCopyCraftEngine
+
+        source_notes = (context_notes or "").strip() or (body or "").strip()
+        clean_title = SocialCopyCraftEngine._clean_context_paragraph(title) if title else ""
+        creator_name = (creator_profile or {}).get("name") or "Kike Gallego"
+        voice = (creator_profile or {}).get("voice_guidelines") or "Directo, humano, cercano, sin humo ni clichés corporativos."
+        niche = (creator_profile or {}).get("niche") or "Negocios, servicios y crecimiento B2B"
+
+        system_prompt = (
+            "Eres un copywriter senior especializado en LinkedIn en español (España) con enfoque 100% humano y anti-slop.\n"
+            f"Autor: {creator_name}. Nicho: {niche}. Tono de voz: {voice}.\n"
+            "REGLAS ESTRICTAS:\n"
+            "1. Transforma las notas en bruto del autor en una publicación de LinkedIn lista para publicar, "
+            "conservando TODOS los hechos, ejemplos reales y propuestas de valor del autor sin inventar datos falsos.\n"
+            "2. Gancho de apertura (`hook`): máximo 130 caracteres (visible antes de '...ver más'), directo y con tensión narrativa.\n"
+            "3. Cuerpo (`post_body`): párrafos muy cortos de 1-2 frases con ritmo visual, líneas en blanco entre bloques, "
+            "viñetas limpias (• o →) si enumera ejemplos/beneficios, 3-5 emojis sobrios bien colocados y negritas Unicode "
+            "(como 𝗲𝘀𝘁𝗲 𝗲𝗷𝗲𝗺𝗽𝗹𝗼) SOLO en 2-3 frases clave de contraste. NUNCA uses markdown `**` ni enlaces URL en el cuerpo.\n"
+            "4. Cierra con una llamada a la acción conversacional natural y 4-5 hashtags relevantes al final.\n"
+            "5. `first_comment`: texto natural para el primer comentario (donde irían enlaces o invitación directa por DM).\n"
+            "Devuelve SOLO un JSON válido con claves exactas: `hook`, `post_body`, `first_comment`, `hashtags` (lista de strings)."
+        )
+        user_prompt = (
+            f"Título/idea principal: {clean_title or title}\n\n"
+            f"Contexto o borrador en bruto del autor:\n{source_notes}\n\n"
+            "Redacta y pule la publicación de LinkedIn lista para publicar (en español natural de España)."
+        )
+
+        # 1. Try Google Gemini API (Nano Banana / Gemini 2.5 Flash) if key configured
+        if gemini_api_key.strip():
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key.strip()}",
+                        json={
+                            "systemInstruction": {"parts": [{"text": system_prompt}]},
+                            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+                            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.7},
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        raw_text = (
+                            data.get("candidates", [{}])[0]
+                            .get("content", {})
+                            .get("parts", [{}])[0]
+                            .get("text", "")
+                        )
+                        parsed = _extract_json_object(raw_text)
+                        if parsed and parsed.get("post_body"):
+                            return {
+                                "hook": str(parsed.get("hook") or clean_title)[:135],
+                                "post_body": str(parsed["post_body"]).strip(),
+                                "first_comment": str(parsed.get("first_comment") or "").strip(),
+                                "hashtags": parsed.get("hashtags") or SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes),
+                                "engine": "Google Gemini 2.5 Flash",
+                                "used_ai_llm": True,
+                                "note": "✨ Borrador reescrito y optimizado para LinkedIn con Google Gemini 2.5 Flash.",
+                            }
+            except Exception as exc:
+                logger.warning("Gemini polish_linkedin_post failed: %s", exc)
+
+        # 2. Try OpenAI API (GPT-4o-mini) if key configured
+        if openai_api_key.strip():
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openai_api_key.strip()}"},
+                        json={
+                            "model": "gpt-4o-mini",
+                            "response_format": {"type": "json_object"},
+                            "temperature": 0.7,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                        },
+                    )
+                    if resp.status_code == 200:
+                        raw_text = resp.json()["choices"][0]["message"]["content"]
+                        parsed = _extract_json_object(raw_text)
+                        if parsed and parsed.get("post_body"):
+                            return {
+                                "hook": str(parsed.get("hook") or clean_title)[:135],
+                                "post_body": str(parsed["post_body"]).strip(),
+                                "first_comment": str(parsed.get("first_comment") or "").strip(),
+                                "hashtags": parsed.get("hashtags") or SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes),
+                                "engine": "OpenAI GPT-4o-mini",
+                                "used_ai_llm": True,
+                                "note": "✨ Borrador reescrito y optimizado para LinkedIn con OpenAI GPT-4o-mini.",
+                            }
+            except Exception as exc:
+                logger.warning("OpenAI polish_linkedin_post failed: %s", exc)
+
+        # 3. Try configured LLM Router (Claude / OpenRouter / Ollama)
+        cfg = self._effective_settings()
+        if cfg["active_provider"] != "deterministic" and (
+            cfg["anthropic_api_key"] or cfg["openai_compatible_api_key"] or cfg["active_provider"] == "ollama"
+        ):
+            try:
+                raw_text, used_provider = await self._call_llm_json(
+                    agent_id="publisher_distributor",
+                    user_prompt=f"{system_prompt}\n\n{user_prompt}",
+                )
+                parsed = self._extract_json_block(raw_text)
+                if parsed and parsed.get("post_body"):
+                    return {
+                        "hook": str(parsed.get("hook") or clean_title)[:135],
+                        "post_body": str(parsed["post_body"]).strip(),
+                        "first_comment": str(parsed.get("first_comment") or "").strip(),
+                        "hashtags": parsed.get("hashtags") or SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes),
+                        "engine": used_provider,
+                        "used_ai_llm": True,
+                        "note": f"✨ Borrador reescrito y optimizado para LinkedIn con {used_provider}.",
+                    }
+            except Exception as exc:
+                logger.warning("Active LLM router polish_linkedin_post failed: %s", exc)
+
+        # 4. Smart Spanish LinkedIn Editorial Rewriter Fallback (zero fake facts, real LinkedIn pacing & structure)
+        raw_paragraphs = [
+            SocialCopyCraftEngine._clean_context_paragraph(p)
+            for p in re.split(r"\n\s*\n+", source_notes)
+            if p.strip()
+        ]
+        raw_paragraphs = [p for p in raw_paragraphs if p and not p.startswith("#")]
+
+        polished_blocks: list[str] = []
+        pivot_regex = re.compile(
+            r"(?<=[\.\!\?])\s+(?=(?:Pero\b|Sin embargo\b|Es por esto\b|Por eso\b|El problema\b|La realidad\b|Y lo\b))",
+            re.IGNORECASE,
+        )
+
+        for idx, para in enumerate(raw_paragraphs):
+            # Split long run-on paragraphs at narrative pivots for LinkedIn readability
+            chunks = pivot_regex.split(para)
+            for c_idx, chunk in enumerate(chunks):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                # Extract long parenthetical list of examples into a cleaner inline emphasis
+                if len(chunk) > 220 and ". " in chunk:
+                    sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", chunk) if s.strip()]
+                    if len(sents) >= 2:
+                        first_s = sents[0]
+                        rest_s = " ".join(sents[1:])
+                        if idx == 1 and c_idx == 0:
+                            polished_blocks.append(f"🔎 {self._to_unicode_bold('La realidad que estamos viendo en la calle:')}\n{first_s}")
+                        else:
+                            polished_blocks.append(first_s)
+                        polished_blocks.append(rest_s)
+                        continue
+
+                lower_c = chunk.lower()
+                if idx == 0 and c_idx == 0:
+                    polished_blocks.append(f"💭 {chunk}")
+                elif any(lower_c.startswith(p) for p in ("pero ", "sin embargo", "el problema")):
+                    polished_blocks.append(f"⚡ {self._to_unicode_bold('Pero la realidad en la práctica es otra:')}\n{chunk}")
+                elif any(lower_c.startswith(p) for p in ("es por esto", "por eso ", "por ello")):
+                    if any(tok in lower_c for tok in ("dm", "mensaje", "escrib", "coment", "contact")):
+                        polished_blocks.append(f"👉 {chunk}")
+                    else:
+                        polished_blocks.append(f"💡 {self._to_unicode_bold('El verdadero cambio de enfoque:')}\n{chunk}")
+                elif idx == len(raw_paragraphs) - 1 and any(tok in lower_c for tok in ("dm", "mensaje", "escrib", "coment", "contact")):
+                    polished_blocks.append(f"👉 {chunk}")
+                else:
+                    polished_blocks.append(chunk)
+
+        hashtags = SocialCopyCraftEngine._extract_dynamic_hashtags(clean_title, source_notes)
+        if not any("?" in b for b in polished_blocks):
+            polished_blocks.append("💬 ¿Cómo lo ves en tu sector? Te leo en comentarios.")
+        polished_blocks.append(" ".join(hashtags))
+
+        polished_hook = clean_title or (raw_paragraphs[0][:120] if raw_paragraphs else "Reflexión real desde la trinchera")
+        if len(polished_hook) <= 128 and not any(ord(ch) > 127000 for ch in polished_hook):
+            polished_hook = f"{polished_hook} 👇"
+
+        wants_dm = any(tok in source_notes.lower() for tok in ("dm", "mensaje", "escrib", "registr"))
+        first_comment = (
+            "Si tienes una empresa de servicios y quieres ver cómo optimizar tus horas sin perder tiempo en tareas comerciales ni administrativas, escríbeme por DM o comenta abajo."
+            if wants_dm
+            else "👇 Si quieres profundizar en este tema o compartir tu experiencia, te leo en comentarios."
+        )
+
+        return {
+            "hook": polished_hook[:135],
+            "post_body": "\n\n".join(polished_blocks),
+            "first_comment": first_comment,
+            "hashtags": hashtags,
+            "engine": "Editor Editorial Nativo (sin API Key IA)",
+            "used_ai_llm": False,
+            "note": (
+                "✍️ Borrador estructurado con ritmo LinkedIn (gancho, pivotes en negrita Unicode y pausas). "
+                "💡 Añade tu API Key de Gemini (Nano Banana) u OpenAI en 'Configurar API Keys' para reescritura creativa completa con IA."
+            ),
+        }
+
     async def compute_embedding_hybrid(self, text: str, dims: int = 1536) -> list[float]:
         """Compute semantic vector via Ollama (bge-m3 padded/projected to dims) or deterministic fallback."""
         cfg = self._effective_settings()

@@ -417,6 +417,25 @@ export const apiClient = {
       body: JSON.stringify(payload),
     }),
 
+  polishLinkedInPost: (payload: {
+    title: string;
+    body?: string;
+    context_notes?: string;
+    project_id?: string | null;
+  }) =>
+    requestJson<{
+      hook: string;
+      post_body: string;
+      first_comment: string;
+      hashtags: string[];
+      engine: string;
+      used_ai_llm: boolean;
+      note: string;
+    }>("/social/polish-linkedin", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   publishSocial: (payload: {
     project_id: string;
     channels: SocialChannel[];

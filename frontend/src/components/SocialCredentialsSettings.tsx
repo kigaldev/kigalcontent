@@ -319,6 +319,110 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [testingAdsCred, setTestingAdsCred] = useState(false);
   const [adsCredFeedback, setAdsCredFeedback] = useState<{ ok: boolean; message: string } | null>(null);
 
+  // Visual & AI generation providers (Nano Banana / Gemini, GPT Images / OpenAI, Canva)
+  const [visualApiKeys, setVisualApiKeys] = useState<Record<string, string>>({
+    gemini_nano_banana: "",
+    openai_gpt_images: "",
+    canva: "",
+  });
+  const [savingVisualKey, setSavingVisualKey] = useState<string | null>(null);
+  const [testingVisualKey, setTestingVisualKey] = useState<string | null>(null);
+  const [visualKeyFeedback, setVisualKeyFeedback] = useState<
+    Record<string, { ok: boolean; message: string }>
+  >({});
+
+  const VISUAL_AI_PROVIDERS = [
+    {
+      channel: "gemini_nano_banana" as const,
+      title: "🍌 Nano Banana (Google Gemini)",
+      subtitle: "Generación de imágenes/infografías (Gemini 2.5 Flash Image / Imagen 3) + Redactor IA LinkedIn (Gemini 2.5 Flash)",
+      placeholder: "AIzaSy... (Google AI Studio API Key)",
+      portalUrl: "https://aistudio.google.com/apikey",
+      portalLabel: "Obtener API Key en Google AI Studio",
+    },
+    {
+      channel: "openai_gpt_images" as const,
+      title: "🎨 GPT Images (OpenAI)",
+      subtitle: "Generación de imágenes (GPT-Image-1 / DALL-E 3) + Redactor IA LinkedIn (GPT-4o-mini)",
+      placeholder: "sk-proj-... (OpenAI API Key)",
+      portalUrl: "https://platform.openai.com/api-keys",
+      portalLabel: "Obtener API Key en OpenAI",
+    },
+    {
+      channel: "canva" as const,
+      title: "🧩 Canva Connect API",
+      subtitle: "Verifica tu cuenta Canva Connect para integración directa de diseños y plantillas",
+      placeholder: "OAuth 2.0 Access Token de Canva Connect",
+      portalUrl: "https://www.canva.dev/",
+      portalLabel: "Abrir Canva Developers",
+    },
+  ];
+
+  const handleSaveVisualKey = async (channel: "gemini_nano_banana" | "openai_gpt_images" | "canva") => {
+    const rawKey = (visualApiKeys[channel] || "").trim();
+    if (!rawKey) {
+      setVisualKeyFeedback((prev) => ({
+        ...prev,
+        [channel]: { ok: false, message: "Pega tu API Key o Token antes de guardar." },
+      }));
+      return;
+    }
+    setSavingVisualKey(channel);
+    try {
+      await apiClient.saveSocialCredential({
+        channel,
+        access_token: rawKey,
+      });
+      setVisualApiKeys((prev) => ({ ...prev, [channel]: "" }));
+      await loadSocialCredentials();
+      setVisualKeyFeedback((prev) => ({
+        ...prev,
+        [channel]: {
+          ok: true,
+          message: `Clave guardada en PostgreSQL. Pulsa "Probar Conexión" para verificarla en vivo.`,
+        },
+      }));
+    } catch (err) {
+      setVisualKeyFeedback((prev) => ({
+        ...prev,
+        [channel]: {
+          ok: false,
+          message: err instanceof Error ? err.message : "No se pudo guardar la clave.",
+        },
+      }));
+    } finally {
+      setSavingVisualKey(null);
+    }
+  };
+
+  const handleTestVisualKey = async (channel: "gemini_nano_banana" | "openai_gpt_images" | "canva") => {
+    setTestingVisualKey(channel);
+    try {
+      const res = await apiClient.testSocialCredential({
+        channel,
+        access_token: (visualApiKeys[channel] || "").trim() || undefined,
+      });
+      await loadSocialCredentials();
+      setVisualKeyFeedback((prev) => ({
+        ...prev,
+        [channel]: {
+          ok: res.ok,
+          message: res.message,
+        },
+      }));
+    } catch (err) {
+      setVisualKeyFeedback((prev) => ({
+        ...prev,
+        [channel]: {
+          ok: false,
+          message: err instanceof Error ? err.message : "Error al verificar la conexión.",
+        },
+      }));
+    } finally {
+      setTestingVisualKey(null);
+    }
+  };
+
   const loadSocialCredentials = async () => {
     try {
       const data = await apiClient.getSocialCredentials();
@@ -1326,6 +1430,122 @@ export const SocialCredentialsSettings: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ================================================================= */}
+      {/* MOTORES VISUALES E IA (NANO BANANA · GPT IMAGES · CANVA)           */}
+      {/* ================================================================= */}
+      <div className="rounded-2xl border border-violet-500/30 bg-[#0b101d] p-6 space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-violet-400" />
+              Motores Visuales e IA (Nano Banana · GPT Images · Canva)
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-3xl">
+              Conecta tus API Keys de <strong>Google Gemini (Nano Banana)</strong>, <strong>OpenAI (GPT Images)</strong> o{" "}
+              <strong>Canva Connect</strong> para generar imágenes e infografías directamente desde Paso 2. Además, al guardar una API Key de{" "}
+              <strong className="text-cyan-300">Gemini</strong> o <strong className="text-cyan-300">OpenAI</strong>, el botón{" "}
+              <em>&ldquo;✨ Redactar / Pulir con IA&rdquo;</em> reescribirá automáticamente tus borradores de LinkedIn con IA real.
+            </p>
+          </div>
+          <AstryxBadge
+            label="Guardado seguro en PostgreSQL"
+            variant="info"
+          />
+        </div>
+
+        <div className="grid gap-4">
+          {VISUAL_AI_PROVIDERS.map((prov) => {
+            const cred = serverCreds[prov.channel];
+            const feedback = visualKeyFeedback[prov.channel];
+            const isSaving = savingVisualKey === prov.channel;
+            const isTesting = testingVisualKey === prov.channel;
+
+            return (
+              <div
+                key={prov.channel}
+                className="rounded-xl border border-slate-800 bg-[#070a13] p-4 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-bold text-white">{prov.title}</h4>
+                      {cred?.configured ? (
+                        <AstryxBadge
+                          label={`Conectado (${cred.masked_token || cred.source})`}
+                          variant="success"
+                        />
+                      ) : (
+                        <AstryxBadge label="Sin API Key" variant="neutral" />
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">{prov.subtitle}</p>
+                  </div>
+
+                  <a
+                    href={prov.portalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:border-cyan-400 text-xs font-semibold text-cyan-300 transition"
+                  >
+                    <span>{prov.portalLabel}</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="password"
+                    value={visualApiKeys[prov.channel] || ""}
+                    onChange={(e) =>
+                      setVisualApiKeys((prev) => ({
+                        ...prev,
+                        [prov.channel]: e.target.value,
+                      }))
+                    }
+                    placeholder={
+                      cred?.configured
+                        ? "Deja vacío para mantener la clave guardada o pega una nueva para sustituirla..."
+                        : prov.placeholder
+                    }
+                    className="flex-1 min-w-[240px] bg-[#020306] border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-violet-400"
+                  />
+                  <AstryxButton
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    label={isSaving ? "Guardando..." : "Guardar Key"}
+                    icon={<Save className="w-3.5 h-3.5" />}
+                    isLoading={isSaving}
+                    onClick={() => void handleSaveVisualKey(prov.channel)}
+                  />
+                  <AstryxButton
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    label={isTesting ? "Probando..." : "Probar Conexión"}
+                    icon={<Zap className="w-3.5 h-3.5" />}
+                    isLoading={isTesting}
+                    onClick={() => void handleTestVisualKey(prov.channel)}
+                  />
+                </div>
+
+                {feedback && (
+                  <div
+                    className={`rounded-xl border px-3.5 py-2 text-xs leading-relaxed ${
+                      feedback.ok
+                        ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-200"
+                        : "border-rose-500/40 bg-rose-950/30 text-rose-200"
+                    }`}
+                  >
+                    {feedback.message}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

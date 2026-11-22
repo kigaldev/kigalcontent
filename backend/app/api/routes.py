@@ -2127,6 +2127,28 @@ async def generate_social_copy_matrix(
         context_notes=project.context_notes,
     )
 
+    # Upgrade LinkedIn copy with AI / Smart Editorial polish when project has context_notes
+    if project.context_notes and project.context_notes.strip():
+        gem_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
+        oai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
+        prof_row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+        prof_dict = _serialize_creator_profile(prof_row).model_dump() if prof_row else None
+        polished = await get_llm_router().polish_linkedin_post(
+            title=body.headline or project.working_title,
+            context_notes=project.context_notes,
+            creator_profile=prof_dict,
+            gemini_api_key=gem_key,
+            openai_api_key=oai_key,
+        )
+        for item in generated:
+            if item.get("channel") == SocialChannel.LINKEDIN.value:
+                item["title"] = polished["hook"]
+                item["post_body"] = polished["post_body"]
+                if polished.get("first_comment"):
+                    item["first_comment"] = polished["first_comment"]
+                if polished.get("hashtags"):
+                    item["hashtags"] = polished["hashtags"]
+
     # Replace existing unpublished drafts for this project
     existing = (await db.execute(select(SocialPost).where(SocialPost.project_id == project.id))).scalars().all()
     for e in existing:
@@ -2203,6 +2225,48 @@ async def update_social_post(
     return SocialPostResponse.model_validate(post)
 
 
+@router.post("/social/polish-linkedin")
+async def polish_linkedin_draft_endpoint(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Rewrite and polish a LinkedIn post using Gemini, OpenAI, Claude/Ollama, or Spanish Editorial Rewriter."""
+    title = str(payload.get("title") or "").strip()
+    body = str(payload.get("body") or "").strip()
+    context_notes = str(payload.get("context_notes") or "").strip()
+    project_id = payload.get("project_id")
+
+    if project_id and (not context_notes or not title):
+        try:
+            proj = (
+                await db.execute(select(ContentProject).where(ContentProject.id == uuid.UUID(str(project_id))))
+            ).scalar_one_or_none()
+            if proj:
+                if not title:
+                    title = proj.working_title
+                if not context_notes and proj.context_notes:
+                    context_notes = proj.context_notes
+        except ValueError:
+            pass
+
+    if not (title or body or context_notes):
+        raise HTTPException(status_code=400, detail="Envía un título, borrador o contexto para pulir con IA.")
+
+    gem_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
+    oai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
+    prof_row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
+    prof_dict = _serialize_creator_profile(prof_row).model_dump() if prof_row else None
+
+    return await get_llm_router().polish_linkedin_post(
+        title=title,
+        body=body,
+        context_notes=context_notes,
+        creator_profile=prof_dict,
+        gemini_api_key=gem_key,
+        openai_api_key=oai_key,
+    )
+
+
 @router.post("/social/generate-visual")
 async def generate_social_visual(
     payload: dict[str, Any],
@@ -2243,39 +2307,103 @@ async def generate_social_visual(
     used_provider = "svg_local"
     provider_note = "Infografía vectorial generada al instante desde el texto de tu publicación."
 
-    if provider == "gpt_images" and os.environ.get("OPENAI_API_KEY"):
-        try:
-            async with httpx.AsyncClient(timeout=35.0) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/images/generations",
-                    headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                    json={"model": "dall-e-3", "prompt": ai_prompt, "size": "1024x1024", "n": 1},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    image_url = data["data"][0]["url"]
-                    used_provider = "gpt_images"
-                    provider_note = "Imagen generada con GPT Images (OpenAI)."
-        except Exception as exc:
-            logger.warning("GPT Images fallback to SVG: %s", exc)
+    openai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
+    gemini_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
+
+    if provider == "gpt_images":
+        if not openai_key:
+            provider_note = (
+                "⚠️ No tienes guardada tu API Key de GPT Images (OpenAI). "
+                "Añádela en 'Configurar API Keys' aquí mismo o en Conexiones Oficiales. "
+                "Mientras tanto, hemos generado la infografía SVG nativa."
+            )
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    # Try gpt-image-1 first, then dall-e-3 fallback
+                    for model_name, req_json in (
+                        ("gpt-image-1", {"model": "gpt-image-1", "prompt": ai_prompt, "size": "1024x1024", "n": 1}),
+                        ("dall-e-3", {"model": "dall-e-3", "prompt": ai_prompt, "size": "1024x1024", "n": 1}),
+                    ):
+                        resp = await client.post(
+                            "https://api.openai.com/v1/images/generations",
+                            headers={"Authorization": f"Bearer {openai_key}"},
+                            json=req_json,
+                        )
+                        if resp.status_code == 200:
+                            item = resp.json()["data"][0]
+                            if item.get("b64_json"):
+                                image_url = f"data:image/png;base64,{item['b64_json']}"
+                            elif item.get("url"):
+                                image_url = item["url"]
+                            if image_url:
+                                used_provider = "gpt_images"
+                                provider_note = f"✅ Imagen generada en vivo con GPT Images ({model_name})."
+                                break
+                    if not image_url:
+                        provider_note = (
+                            "⚠️ OpenAI no pudo generar la imagen con la clave actual (revisa saldo/permisos en platform.openai.com). "
+                            "Se generó infografía SVG nativa como respaldo."
+                        )
+            except Exception as exc:
+                logger.warning("GPT Images fallback to SVG: %s", exc)
+                provider_note = f"⚠️ Error conectando con GPT Images ({exc}). Se generó infografía SVG nativa."
 
     if not image_url and provider == "nano_banana":
-        gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if gemini_key:
+        if not gemini_key:
+            provider_note = (
+                "⚠️ No tienes guardada tu API Key de Nano Banana (Google Gemini). "
+                "Añádela en 'Configurar API Keys' aquí mismo o en Conexiones Oficiales. "
+                "Mientras tanto, hemos generado la infografía SVG nativa."
+            )
+        else:
             try:
-                async with httpx.AsyncClient(timeout=35.0) as client:
-                    resp = await client.post(
-                        f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={gemini_key}",
-                        json={"instances": [{"prompt": ai_prompt}], "parameters": {"sampleCount": 1, "aspectRatio": "3:4"}},
+                async with httpx.AsyncClient(timeout=45.0) as client:
+                    # 1. Try Gemini 2.5 Flash Image (Nano Banana) via generateContent
+                    nb_resp = await client.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key={gemini_key}",
+                        json={
+                            "contents": [{"parts": [{"text": ai_prompt}]}],
+                            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+                        },
                     )
-                    if resp.status_code == 200:
-                        preds = resp.json().get("predictions", [])
-                        if preds and preds[0].get("bytesBase64Encoded"):
-                            image_url = f"data:image/png;base64,{preds[0]['bytesBase64Encoded']}"
-                            used_provider = "nano_banana"
-                            provider_note = "Imagen generada con Nano Banana (Google Gemini Imagen)."
+                    if nb_resp.status_code == 200:
+                        parts = (
+                            nb_resp.json()
+                            .get("candidates", [{}])[0]
+                            .get("content", {})
+                            .get("parts", [])
+                        )
+                        for part in parts:
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if isinstance(inline, dict) and inline.get("data"):
+                                mime = inline.get("mimeType") or inline.get("mime_type") or "image/png"
+                                image_url = f"data:{mime};base64,{inline['data']}"
+                                used_provider = "nano_banana"
+                                provider_note = "✅ Imagen generada en vivo con Nano Banana (Gemini 2.5 Flash Image)."
+                                break
+
+                    # 2. Fallback to Imagen 3 predict endpoint
+                    if not image_url:
+                        im_resp = await client.post(
+                            f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={gemini_key}",
+                            json={"instances": [{"prompt": ai_prompt}], "parameters": {"sampleCount": 1, "aspectRatio": "3:4"}},
+                        )
+                        if im_resp.status_code == 200:
+                            preds = im_resp.json().get("predictions", [])
+                            if preds and preds[0].get("bytesBase64Encoded"):
+                                image_url = f"data:image/png;base64,{preds[0]['bytesBase64Encoded']}"
+                                used_provider = "nano_banana"
+                                provider_note = "✅ Imagen generada en vivo con Nano Banana (Google Imagen 3)."
+
+                    if not image_url:
+                        provider_note = (
+                            "⚠️ Google Gemini no devolvió imagen con la clave actual (verifica que tu API Key tenga habilitada la generación de imágenes en Google AI Studio). "
+                            "Se generó infografía SVG nativa como respaldo."
+                        )
             except Exception as exc:
                 logger.warning("Nano Banana fallback to SVG: %s", exc)
+                provider_note = f"⚠️ Error conectando con Nano Banana ({exc}). Se generó infografía SVG nativa."
 
     if not image_url:
         # Render crisp 1080x1350 SVG Infographic from the user's real post content
@@ -2335,12 +2463,23 @@ async def _get_effective_social_credential(
     return await resolve_effective_social_credential(db, channel_key)
 
 
+SUPPORTED_CREDENTIAL_CHANNELS = (
+    "youtube",
+    "instagram",
+    "tiktok",
+    "linkedin",
+    "linkedin_ads",
+    "gemini_nano_banana",
+    "openai_gpt_images",
+    "canva",
+)
+
+
 @router.get("/social/credentials")
 async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """List connection status (masked) for YouTube, Instagram, TikTok, LinkedIn, and LinkedIn Ads."""
-    channels = ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads")
+    """List connection status (masked) for social networks and visual/AI engines."""
     result: dict[str, Any] = {}
-    for ch in channels:
+    for ch in SUPPORTED_CREDENTIAL_CHANNELS:
         token, urn, source, account_name = await _get_effective_social_credential(db, ch)
         masked = f"{token[:6]}…{token[-4:]}" if len(token) > 12 else ("••••" if token else "")
         result[ch] = {
@@ -2359,9 +2498,9 @@ async def save_social_credential(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Persist an OAuth2 access token (and optional LinkedIn Person URN) in PostgreSQL."""
+    """Persist an OAuth2 access token or Visual/AI API key in PostgreSQL."""
     ch = str(payload.get("channel") or "").strip().lower()
-    if ch not in ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads"):
+    if ch not in SUPPORTED_CREDENTIAL_CHANNELS:
         raise HTTPException(status_code=400, detail="Canal no soportado.")
 
     token = str(payload.get("access_token") or "").strip()
@@ -2396,11 +2535,11 @@ async def test_social_credential(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Test a social channel OAuth2 token live against the official API."""
+    """Test a social channel OAuth2 token or Visual/AI API key live against the official API."""
     import httpx
 
     ch = str(payload.get("channel") or "").strip().lower()
-    if ch not in ("youtube", "instagram", "tiktok", "linkedin", "linkedin_ads"):
+    if ch not in SUPPORTED_CREDENTIAL_CHANNELS:
         raise HTTPException(status_code=400, detail="Canal no soportado.")
 
     provided_token = str(payload.get("access_token") or "").strip()
@@ -2412,8 +2551,89 @@ async def test_social_credential(
         return {
             "ok": False,
             "channel": ch,
-            "message": f"No hay ningún token de {ch.capitalize()} guardado ni introducido. Pega tu Access Token y pulsa Guardar.",
+            "message": f"No hay ninguna clave/token de {ch} guardada ni introducida. Pégala y pulsa Guardar.",
         }
+
+    if ch == "gemini_nano_banana":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={token}")
+            if r.status_code == 200:
+                row = (await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))).scalar_one_or_none()
+                if row is None:
+                    db.add(SocialCredential(channel=ch, access_token=token, account_name="Google Gemini API"))
+                else:
+                    row.access_token = token
+                    row.account_name = "Google Gemini API"
+                await db.commit()
+                return {
+                    "ok": True,
+                    "channel": ch,
+                    "account_name": "Google Gemini API",
+                    "message": "✅ API Key de Nano Banana (Google Gemini) verificada y guardada. Activa para imágenes, infografías y redacción IA.",
+                }
+            return {
+                "ok": False,
+                "channel": ch,
+                "message": f"Google Gemini rechazó la API Key (HTTP {r.status_code}). Comprueba tu clave en aistudio.google.com/apikey.",
+            }
+
+    if ch == "openai_gpt_images":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 200:
+                row = (await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))).scalar_one_or_none()
+                if row is None:
+                    db.add(SocialCredential(channel=ch, access_token=token, account_name="OpenAI API"))
+                else:
+                    row.access_token = token
+                    row.account_name = "OpenAI API"
+                await db.commit()
+                return {
+                    "ok": True,
+                    "channel": ch,
+                    "account_name": "OpenAI API",
+                    "message": "✅ API Key de GPT Images (OpenAI) verificada y guardada. Activa para imágenes y redacción IA.",
+                }
+            return {
+                "ok": False,
+                "channel": ch,
+                "message": f"OpenAI rechazó la API Key (HTTP {r.status_code}). Comprueba tu clave en platform.openai.com/api-keys.",
+            }
+
+    if ch == "canva":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://api.canva.com/rest/v1/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 200:
+                profile_data = r.json()
+                cname = (
+                    profile_data.get("team_user", {}).get("display_name")
+                    or profile_data.get("display_name")
+                    or "Cuenta Canva Connect"
+                )
+                row = (await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))).scalar_one_or_none()
+                if row is None:
+                    db.add(SocialCredential(channel=ch, access_token=token, account_name=cname))
+                else:
+                    row.access_token = token
+                    row.account_name = cname
+                await db.commit()
+                return {
+                    "ok": True,
+                    "channel": ch,
+                    "account_name": cname,
+                    "message": f"✅ Canva Connect verificado y guardado ({cname}).",
+                }
+            return {
+                "ok": False,
+                "channel": ch,
+                "message": f"Canva Connect rechazó el token (HTTP {r.status_code}). Genera un token OAuth válido en canva.dev.",
+            }
 
     if ch == "linkedin_ads":
         status_res = await LinkedInAdLibraryClient().check_status(

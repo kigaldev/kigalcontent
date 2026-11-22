@@ -1,17 +1,20 @@
 "use client";
 
-import React, { useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { RichTextToolbar } from "@/components/RichTextToolbar";
 import {
   AlertTriangle,
   Briefcase,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   ExternalLink,
   FileText,
   Image as ImageIcon,
+  Key,
   Layers,
   Link2,
   Loader2,
@@ -19,6 +22,8 @@ import {
   RefreshCw,
   Save,
   Sparkles,
+  Wand2,
+  Zap,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import type {
@@ -29,6 +34,8 @@ import type {
 } from "@/types/engine";
 
 interface LinkedInPlatformVisorProps {
+  projectId?: string | null;
+  contextNotes?: string | null;
   assetCode: string;
   projectTitle: string;
   authorName?: string;
@@ -52,7 +59,36 @@ interface LinkedInPlatformVisorProps {
   onSyncFromMaster: () => void;
 }
 
+const VISUAL_API_PROVIDERS = [
+  {
+    channel: "gemini_nano_banana" as const,
+    label: "🍌 Nano Banana (Google Gemini)",
+    placeholder: "AIzaSy... (Google AI Studio API Key)",
+    portalUrl: "https://aistudio.google.com/apikey",
+    portalName: "Google AI Studio",
+    hint: "Activa Nano Banana / Imagen 3 para gráficos Y también Gemini 2.5 Flash para redactar tus posts con IA.",
+  },
+  {
+    channel: "openai_gpt_images" as const,
+    label: "🎨 GPT Images (OpenAI)",
+    placeholder: "sk-proj-... (OpenAI API Key)",
+    portalUrl: "https://platform.openai.com/api-keys",
+    portalName: "OpenAI Platform",
+    hint: "Activa GPT-Image-1 / DALL-E 3 para imágenes Y también GPT-4o-mini para pulir tus borradores.",
+  },
+  {
+    channel: "canva" as const,
+    label: "🧩 Canva Connect",
+    placeholder: "OAuth Access Token de Canva Connect API",
+    portalUrl: "https://www.canva.dev/",
+    portalName: "Canva Developers",
+    hint: "Conecta tu cuenta Canva para verificar acceso y trabajar diseños desde el estudio.",
+  },
+];
+
 export function LinkedInPlatformVisor({
+  projectId = null,
+  contextNotes = null,
   assetCode,
   projectTitle,
   authorName = "Kike Gallego",
@@ -82,6 +118,42 @@ export function LinkedInPlatformVisor({
   const [visualPrompt, setVisualPrompt] = useState("");
   const [generatingVisual, setGeneratingVisual] = useState(false);
   const [visualNote, setVisualNote] = useState<string | null>(null);
+
+  // AI LinkedIn copywriter / polisher state
+  const [polishingAI, setPolishingAI] = useState(false);
+  const [polishFeedback, setPolishFeedback] = useState<{
+    engine: string;
+    usedAi: boolean;
+    note: string;
+  } | null>(null);
+
+  // Inline API key configuration for Nano Banana, GPT Images & Canva
+  const [showApiKeysPanel, setShowApiKeysPanel] = useState(false);
+  const [selectedKeyChannel, setSelectedKeyChannel] = useState<"gemini_nano_banana" | "openai_gpt_images" | "canva">(
+    "gemini_nano_banana"
+  );
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const [testingApiKey, setTestingApiKey] = useState(false);
+  const [apiKeyFeedback, setApiKeyFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+  const [providerCreds, setProviderCreds] = useState<
+    Record<string, { configured: boolean; masked_token: string; source: string }>
+  >({});
+
+  const loadProviderCredentials = async () => {
+    try {
+      const res = await apiClient.getSocialCredentials();
+      if (res?.channels) {
+        setProviderCreds(res.channels);
+      }
+    } catch {
+      // ignore silent fetch failure
+    }
+  };
+
+  useEffect(() => {
+    void loadProviderCredentials();
+  }, []);
 
   // Check for external URLs in body
   const bodyHasExternalUrl = useMemo(() => {
@@ -179,6 +251,92 @@ export function LinkedInPlatformVisor({
     }
   };
 
+  const handlePolishWithAI = async () => {
+    setPolishingAI(true);
+    setPolishFeedback(null);
+    try {
+      const res = await apiClient.polishLinkedInPost({
+        title: linkedInHook || projectTitle,
+        body: linkedInBody,
+        context_notes: contextNotes || "",
+        project_id: projectId,
+      });
+      if (res.hook) onUpdateHook(res.hook);
+      if (res.post_body) onUpdateBody(res.post_body);
+      if (res.first_comment) onUpdateFirstComment(res.first_comment);
+      setPolishFeedback({
+        engine: res.engine,
+        usedAi: res.used_ai_llm,
+        note: res.note,
+      });
+    } catch {
+      setPolishFeedback({
+        engine: "error",
+        usedAi: false,
+        note: "No se pudo conectar con el motor de redacción IA. Inténtalo de nuevo en unos segundos.",
+      });
+    } finally {
+      setPolishingAI(false);
+    }
+  };
+
+  const handleSaveApiKey = async () => {
+    if (!apiKeyInput.trim()) {
+      setApiKeyFeedback({
+        ok: false,
+        message: "Pega primero tu API key o token antes de guardar.",
+      });
+      return;
+    }
+    setSavingApiKey(true);
+    setApiKeyFeedback(null);
+    try {
+      await apiClient.saveSocialCredential({
+        channel: selectedKeyChannel,
+        access_token: apiKeyInput.trim(),
+      });
+      setApiKeyInput("");
+      await loadProviderCredentials();
+      setApiKeyFeedback({
+        ok: true,
+        message: `Clave guardada en PostgreSQL. Pulsa "Probar Conexión" para verificarla en vivo.`,
+      });
+    } catch (err) {
+      setApiKeyFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "No se pudo guardar la clave en el servidor.",
+      });
+    } finally {
+      setSavingApiKey(false);
+    }
+  };
+
+  const handleTestApiKey = async () => {
+    setTestingApiKey(true);
+    setApiKeyFeedback(null);
+    try {
+      const res = await apiClient.testSocialCredential({
+        channel: selectedKeyChannel,
+        access_token: apiKeyInput.trim() || undefined,
+      });
+      await loadProviderCredentials();
+      setApiKeyFeedback({
+        ok: res.ok,
+        message: res.message,
+      });
+    } catch (err) {
+      setApiKeyFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error al verificar la clave contra el proveedor.",
+      });
+    } finally {
+      setTestingApiKey(false);
+    }
+  };
+
+  const activeKeyProviderMeta =
+    VISUAL_API_PROVIDERS.find((p) => p.channel === selectedKeyChannel) ?? VISUAL_API_PROVIDERS[0];
+
   return (
     <div className="space-y-5">
       {/* Header Bar */}
@@ -196,11 +354,22 @@ export function LinkedInPlatformVisor({
             </span>
           </div>
           <p className="text-xs text-slate-400">
-            Edita tu publicación a tu tono natural, guarda los cambios y elige el formato visual (Carrusel PDF, Imagen/Infografía o Solo Texto).
+            Edita tu publicación a tu tono natural, pule el copy con IA y elige el formato visual (Carrusel PDF, Imagen/Infografía o Solo Texto).
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handlePolishWithAI()}
+            disabled={polishingAI}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-500 hover:to-cyan-500 disabled:opacity-60 text-white text-xs font-bold transition shadow"
+            title="Reescribe y mejora tu borrador con ritmo de LinkedIn, negritas Unicode, emojis y CTA"
+          >
+            {polishingAI ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+            {polishingAI ? "Puliendo con IA..." : "✨ Redactar / Pulir con IA"}
+          </button>
+
           <button
             type="button"
             onClick={onSyncFromMaster}
@@ -208,7 +377,7 @@ export function LinkedInPlatformVisor({
             title="Re-sincronizar desde los bloques del Guión Maestro"
           >
             <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-            Regenerar Borrador
+            Sincronizar Guión
           </button>
 
           <button
@@ -222,6 +391,35 @@ export function LinkedInPlatformVisor({
           </button>
         </div>
       </div>
+
+      {polishFeedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-xs flex flex-wrap items-center justify-between gap-3 ${
+            polishFeedback.usedAi
+              ? "border-emerald-500/40 bg-emerald-950/25 text-emerald-200"
+              : polishFeedback.engine === "error"
+              ? "border-rose-500/40 bg-rose-950/25 text-rose-200"
+              : "border-cyan-500/40 bg-cyan-950/25 text-cyan-200"
+          }`}
+        >
+          <span className="leading-relaxed">
+            <strong>Motor usado ({polishFeedback.engine}):</strong> {polishFeedback.note}
+          </span>
+          {!polishFeedback.usedAi && (
+            <button
+              type="button"
+              onClick={() => {
+                onChangeVisualMode("IMAGE_INFOGRAPHIC");
+                setShowApiKeysPanel(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-cyan-500/40 hover:border-cyan-300 text-[11px] font-semibold text-cyan-200 transition shrink-0"
+            >
+              <Key className="w-3 h-3" />
+              Añadir API Key (Gemini / OpenAI)
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main Grid: Post Left, Carousel & First Comment Right */}
       <div className="grid lg:grid-cols-12 gap-5">
@@ -479,6 +677,151 @@ export function LinkedInPlatformVisor({
             {/* MODE 2: IMAGE OR INFOGRAPHIC */}
             {visualMode === "IMAGE_INFOGRAPHIC" && (
               <div className="space-y-3.5">
+                {/* Live Provider Connection Badges + Quick Config Toggle */}
+                <div className="rounded-xl border border-slate-800 bg-[#05070c] p-3 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.gemini_nano_banana?.configured
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        🍌 Nano Banana: {providerCreds.gemini_nano_banana?.configured ? "✓ Conectado" : "Sin API Key"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.openai_gpt_images?.configured
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        🎨 GPT Images: {providerCreds.openai_gpt_images?.configured ? "✓ Conectado" : "Sin API Key"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.canva?.configured
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        🧩 Canva: {providerCreds.canva?.configured ? "✓ Conectado" : "Sin Token"}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowApiKeysPanel((prev) => !prev);
+                        setApiKeyFeedback(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-[11px] font-semibold text-cyan-200 transition"
+                    >
+                      <Key className="w-3.5 h-3.5" />
+                      <span>Configurar API Keys</span>
+                      {showApiKeysPanel ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+
+                  {showApiKeysPanel && (
+                    <div className="pt-2.5 border-t border-slate-800 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {VISUAL_API_PROVIDERS.map((prov) => {
+                            const active = selectedKeyChannel === prov.channel;
+                            const isCfg = Boolean(providerCreds[prov.channel]?.configured);
+                            return (
+                              <button
+                                key={prov.channel}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedKeyChannel(prov.channel);
+                                  setApiKeyInput("");
+                                  setApiKeyFeedback(null);
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                                  active
+                                    ? "bg-violet-600/25 border-violet-400 text-white"
+                                    : "bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500"
+                                }`}
+                              >
+                                {prov.label} {isCfg ? "✓" : ""}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <a
+                          href={activeKeyProviderMeta.portalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200 underline"
+                        >
+                          <span>Obtener clave en {activeKeyProviderMeta.portalName}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {activeKeyProviderMeta.hint}
+                        {providerCreds[selectedKeyChannel]?.configured && (
+                          <span className="ml-1.5 text-emerald-300 font-mono">
+                            (Guardada: {providerCreds[selectedKeyChannel].masked_token})
+                          </span>
+                        )}
+                      </p>
+
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          type="password"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          placeholder={
+                            providerCreds[selectedKeyChannel]?.configured
+                              ? "Pega una nueva clave para sustituir la actual..."
+                              : activeKeyProviderMeta.placeholder
+                          }
+                          className="flex-1 min-w-[200px] rounded-lg bg-[#020306] border border-slate-700 px-3 py-1.5 text-xs text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveApiKey()}
+                          disabled={savingApiKey}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 text-xs font-bold transition"
+                        >
+                          {savingApiKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Guardar Key
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleTestApiKey()}
+                          disabled={testingApiKey}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:border-cyan-400 disabled:opacity-60 text-xs font-semibold text-slate-200 transition"
+                        >
+                          {testingApiKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5 text-amber-400" />}
+                          Probar Conexión
+                        </button>
+                      </div>
+
+                      {apiKeyFeedback && (
+                        <p
+                          className={`text-[11px] rounded-lg border px-2.5 py-1.5 ${
+                            apiKeyFeedback.ok
+                              ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-200"
+                              : "border-rose-500/40 bg-rose-950/30 text-rose-200"
+                          }`}
+                        >
+                          {apiKeyFeedback.message}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid sm:grid-cols-2 gap-2">
                   <label className="block text-[11px] font-semibold text-slate-300">
                     Tipo de Visual
@@ -499,8 +842,12 @@ export function LinkedInPlatformVisor({
                       className="mt-1 w-full rounded-lg bg-[#020306] border border-slate-700 px-2.5 py-1.5 text-xs text-white"
                     >
                       <option value="svg_local">⚡ Infografía Instantánea (Nativa SVG)</option>
-                      <option value="nano_banana">🍌 Nano Banana (Google Gemini Imagen)</option>
-                      <option value="gpt_images">🎨 GPT Images (OpenAI DALL-E / GPT-Image)</option>
+                      <option value="nano_banana">
+                        🍌 Nano Banana (Google Gemini){providerCreds.gemini_nano_banana?.configured ? " · ✓ Conectado" : " · Sin Key"}
+                      </option>
+                      <option value="gpt_images">
+                        🎨 GPT Images (OpenAI){providerCreds.openai_gpt_images?.configured ? " · ✓ Conectado" : " · Sin Key"}
+                      </option>
                     </select>
                   </label>
                 </div>
@@ -542,7 +889,9 @@ export function LinkedInPlatformVisor({
                   {visualAssetUrl && (
                     <a
                       href={visualAssetUrl}
-                      download={`${assetCode}_linkedin_visual.svg`}
+                      download={`${assetCode}_linkedin_visual.${
+                        visualAssetUrl.startsWith("data:image/svg") ? "svg" : "png"
+                      }`}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-300 transition"
                     >
                       <Download className="w-3.5 h-3.5" />
