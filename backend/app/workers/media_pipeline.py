@@ -305,9 +305,10 @@ def transcribe_word_timestamps(
     probe = probe_media_forensics(input_path)
     duration_ms = max(1000, int(probe["duration_sec"] * 1000))
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp_wav:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_wav_path = str(Path(tmp_dir) / "audio_16k.wav")
         subprocess.run(
-            [ffmpeg, "-y", "-i", str(input_path), "-ac", "1", "-ar", "16000", tmp_wav.name],
+            [ffmpeg, "-y", "-i", str(input_path), "-ac", "1", "-ar", "16000", tmp_wav_path],
             check=True,
             capture_output=True,
             text=True,
@@ -320,7 +321,7 @@ def transcribe_word_timestamps(
             model = WhisperModel(settings.whisper_model, device=settings.whisper_device, compute_type=compute_type)
             # Enable Silero VAD filtering to prevent hallucination loops and timing drift (faster-whisper pattern)
             segments, _ = model.transcribe(
-                tmp_wav.name,
+                tmp_wav_path,
                 word_timestamps=True,
                 vad_filter=True,
                 vad_parameters=dict(min_silence_duration_ms=400),
@@ -439,13 +440,14 @@ def render_916_master_and_ab_thumbnails(
 
     vf_chain = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
     if has_ass_filter:
-        escaped_ass = ass_path.as_posix().replace(":", "\\:")
-        vf_chain = f"{vf_chain},ass={escaped_ass}"
+        # Use relative filename with cwd=ass_path.parent to avoid Windows drive-letter colon escaping issues in libass
+        escaped_ass = ass_path.name.replace("'", r"\'")
+        vf_chain = f"{vf_chain},ass='{escaped_ass}'"
 
     cmd = [
         ffmpeg,
         "-y",
-        "-i", str(normalized_video_path),
+        "-i", str(normalized_video_path.resolve()),
         "-vf", vf_chain,
         "-c:v", "libx264",
         "-preset", "fast",
@@ -454,9 +456,9 @@ def render_916_master_and_ab_thumbnails(
         "-bufsize", "16M",
         "-c:a", "copy",
         *build_native_editor_ffmpeg_flags(target_platform_signature),
-        str(master_output_path),
+        str(master_output_path.resolve()),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, cwd=str(ass_path.parent), check=True, capture_output=True, text=True)
 
     # Generate 1280x720 A/B thumbnails with Pillow
     for path, bg, accent, heading, sub in [
