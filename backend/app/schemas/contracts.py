@@ -735,6 +735,9 @@ class LLMConfigResponse(BaseModel):
     ollama_base_url: str
     ollama_model: str
     ollama_embedding_model: str
+    ollama_api_key_configured: bool = False
+    ollama_reachable: bool = False
+    ollama_models_detected: list[str] = Field(default_factory=list)
     anthropic_model: str
     anthropic_prompt_caching_enabled: bool = True
     anthropic_key_configured: bool = False
@@ -750,6 +753,7 @@ class LLMConfigUpdateRequest(BaseModel):
     ollama_base_url: str | None = None
     ollama_model: str | None = None
     ollama_embedding_model: str | None = None
+    ollama_api_key: str | None = None
     anthropic_model: str | None = None
     anthropic_api_key: str | None = None
     openai_compatible_base_url: str | None = None
@@ -761,6 +765,7 @@ class LLMTestConnectionRequest(BaseModel):
     provider: LLMProviderMode | None = None
     ollama_base_url: str | None = None
     ollama_model: str | None = None
+    ollama_api_key: str | None = None
 
 
 class LLMTestConnectionResponse(BaseModel):

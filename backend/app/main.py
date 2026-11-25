@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal, init_db
 from app.services.publishing_scheduler import scheduler_background_loop
 from app.services.seed import seed_initial_data
+from app.services.skill_llm_router import get_llm_router
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(_app: FastAPI):
         await init_db()
         async with AsyncSessionLocal() as db:
             await seed_initial_data(db)
+            await get_llm_router().sync_from_db(db)
     except Exception as exc:
         import logging
         logging.getLogger("uvicorn.error").warning("DB init deferred/failed on cold-start: %s", exc)

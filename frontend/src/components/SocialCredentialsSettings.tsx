@@ -656,6 +656,9 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [ramTier, setRamTier] = useState<"24GB" | "48GB">("24GB");
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://localhost:11434");
   const [ollamaModel, setOllamaModel] = useState("qwen3:14b");
+  const [ollamaApiKey, setOllamaApiKey] = useState("");
+  const [ollamaApiKeyConfigured, setOllamaApiKeyConfigured] = useState(false);
+  const [ollamaDetectedModels, setOllamaDetectedModels] = useState<string[]>([]);
   const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [anthropicKeyConfigured, setAnthropicKeyConfigured] = useState(false);
   const [openAiBaseUrl, setOpenAiBaseUrl] = useState("https://openrouter.ai/api/v1");
@@ -674,21 +677,27 @@ export const SocialCredentialsSettings: React.FC = () => {
   } | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/llm/config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    apiClient
+      .getLLMConfig()
+      .then((data: Record<string, unknown>) => {
         if (!data) return;
-        if (data.active_provider) setLlmProvider(data.active_provider);
-        if (data.ollama_base_url) setOllamaBaseUrl(data.ollama_base_url);
-        if (data.ollama_model) setOllamaModel(data.ollama_model);
+        if (typeof data.active_provider === "string") setLlmProvider(data.active_provider as LLMProviderMode);
+        if (typeof data.ollama_base_url === "string") setOllamaBaseUrl(data.ollama_base_url);
+        if (typeof data.ollama_model === "string") setOllamaModel(data.ollama_model);
+        if (typeof data.ollama_api_key_configured === "boolean") {
+          setOllamaApiKeyConfigured(data.ollama_api_key_configured);
+        }
+        if (Array.isArray(data.ollama_models_detected)) {
+          setOllamaDetectedModels(data.ollama_models_detected as string[]);
+        }
         if (typeof data.anthropic_key_configured === "boolean") {
           setAnthropicKeyConfigured(data.anthropic_key_configured);
         }
-        if (data.openai_compatible_base_url) setOpenAiBaseUrl(data.openai_compatible_base_url);
-        if (data.openai_compatible_model) setOpenAiModel(data.openai_compatible_model);
-        if (Array.isArray(data.loaded_skills)) setLoadedSkills(data.loaded_skills);
+        if (typeof data.openai_compatible_base_url === "string") setOpenAiBaseUrl(data.openai_compatible_base_url);
+        if (typeof data.openai_compatible_model === "string") setOpenAiModel(data.openai_compatible_model);
+        if (Array.isArray(data.loaded_skills)) setLoadedSkills(data.loaded_skills as LoadedSkillSpec[]);
         if (Array.isArray(data.recommended_local_models) && data.recommended_local_models.length > 0) {
-          setLocalModels(data.recommended_local_models);
+          setLocalModels(data.recommended_local_models as RecommendedLocalModel[]);
         }
       })
       .catch(() => {
@@ -699,32 +708,39 @@ export const SocialCredentialsSettings: React.FC = () => {
   const handleSaveLlmConfig = async () => {
     setLlmSaving(true);
     try {
-      const res = await fetch("/api/v1/llm/config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          active_provider: llmProvider,
-          ollama_base_url: ollamaBaseUrl.trim(),
-          ollama_model: ollamaModel.trim(),
-          anthropic_api_key: anthropicApiKey.trim() || undefined,
-          openai_compatible_base_url: openAiBaseUrl.trim(),
-          openai_compatible_model: openAiModel.trim(),
-          openai_compatible_api_key: openAiApiKey.trim() || undefined,
-        }),
+      const updated = await apiClient.updateLLMConfig({
+        active_provider: llmProvider,
+        ollama_base_url: ollamaBaseUrl.trim(),
+        ollama_model: ollamaModel.trim(),
+        ollama_api_key: ollamaApiKey.trim() || undefined,
+        anthropic_api_key: anthropicApiKey.trim() || undefined,
+        openai_compatible_base_url: openAiBaseUrl.trim(),
+        openai_compatible_model: openAiModel.trim(),
+        openai_compatible_api_key: openAiApiKey.trim() || undefined,
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setAnthropicKeyConfigured(Boolean(updated.anthropic_key_configured));
-        setAnthropicApiKey("");
-        setOpenAiApiKey("");
-        setLlmTestResult({
-          reachable: true,
-          provider: updated.effective_provider,
-          message: "Configuración de motor IA y Skills guardada correctamente.",
-          installed_models: [],
-          fallback_used: false,
-        });
-      }
+      setOllamaApiKeyConfigured(Boolean(updated.ollama_api_key_configured));
+      setOllamaDetectedModels(updated.ollama_models_detected ?? []);
+      setOllamaApiKey("");
+      setAnthropicKeyConfigured(Boolean(updated.anthropic_key_configured));
+      setAnthropicApiKey("");
+      setOpenAiApiKey("");
+      setLlmTestResult({
+        reachable: Boolean(updated.ollama_reachable || llmProvider !== "ollama"),
+        provider: updated.effective_provider,
+        message: updated.ollama_reachable
+          ? `Configuración guardada y MiniPC Ollama conectado (${(updated.ollama_models_detected ?? []).length} modelos).`
+          : "Configuración de motor IA y Skills guardada en base de datos.",
+        installed_models: updated.ollama_models_detected ?? [],
+        fallback_used: !updated.ollama_reachable && llmProvider === "ollama",
+      });
+    } catch {
+      setLlmTestResult({
+        reachable: false,
+        provider: llmProvider,
+        message: "Error al guardar la configuración en el backend.",
+        installed_models: [],
+        fallback_used: true,
+      });
     } finally {
       setLlmSaving(false);
     }
@@ -733,24 +749,21 @@ export const SocialCredentialsSettings: React.FC = () => {
   const handleTestLlmConnection = async () => {
     setLlmTesting(true);
     try {
-      const res = await fetch("/api/v1/llm/test-connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: llmProvider,
-          ollama_base_url: ollamaBaseUrl.trim(),
-          ollama_model: ollamaModel.trim(),
-        }),
+      const result = await apiClient.testLLMConnection({
+        provider: llmProvider,
+        ollama_base_url: ollamaBaseUrl.trim(),
+        ollama_model: ollamaModel.trim(),
+        ollama_api_key: ollamaApiKey.trim() || undefined,
       });
-      if (res.ok) {
-        const result = await res.json();
-        setLlmTestResult(result);
+      if (result.installed_models?.length) {
+        setOllamaDetectedModels(result.installed_models);
       }
+      setLlmTestResult(result);
     } catch {
       setLlmTestResult({
         reachable: false,
         provider: llmProvider,
-        message: "Backend local no alcanzable desde el navegador. Se usará el fallback determinista.",
+        message: "Backend no alcanzable desde el navegador. Se usará el fallback determinista.",
         installed_models: [],
         fallback_used: true,
       });
@@ -869,18 +882,54 @@ export const SocialCredentialsSettings: React.FC = () => {
               </span>
             </div>
 
-            <div>
-              <label className="block text-slate-400 mb-1">
-                URL de Ollama (Local o Túnel Cloudflare hacia tu MiniPC)
-              </label>
-              <input
-                type="url"
-                value={ollamaBaseUrl}
-                onChange={(e) => setOllamaBaseUrl(e.target.value)}
-                placeholder="http://localhost:11434 o https://ollama.tudominio.com"
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
-              />
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  URL de Ollama (Local o Túnel Cloudflare hacia tu MiniPC)
+                </label>
+                <input
+                  type="url"
+                  value={ollamaBaseUrl}
+                  onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                  placeholder="http://localhost:11434 o https://ollama.tudominio.com"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Token Túnel Ollama (Opcional · Bearer Auth)
+                </label>
+                <input
+                  type="password"
+                  value={ollamaApiKey}
+                  onChange={(e) => setOllamaApiKey(e.target.value)}
+                  placeholder={ollamaApiKeyConfigured ? "•••••••• (guardado)" : "Token del túnel seguro del MiniPC"}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
+                />
+              </div>
             </div>
+
+            {ollamaDetectedModels.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-emerald-300 font-semibold">
+                  Modelos detectados en tu MiniPC:
+                </span>
+                {ollamaDetectedModels.map((modelName) => (
+                  <button
+                    key={modelName}
+                    type="button"
+                    onClick={() => setOllamaModel(modelName)}
+                    className={`px-2 py-0.5 rounded-md border font-mono text-[11px] transition ${
+                      ollamaModel === modelName
+                        ? "bg-emerald-500/20 border-emerald-400 text-emerald-200 font-bold"
+                        : "bg-slate-900 border-slate-700 text-slate-300 hover:border-cyan-400"
+                    }`}
+                  >
+                    {modelName}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="grid sm:grid-cols-2 gap-2.5">
               <div>

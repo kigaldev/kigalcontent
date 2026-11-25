@@ -39,12 +39,15 @@ import type {
   WatchTimeShareResponse,
 } from "@/types/engine";
 
+export const DEFAULT_PRODUCTION_BACKEND_URL =
+  "https://autonomous-content-engine-backend-production.up.railway.app";
+
 /**
  * Resolves the API base URL depending on execution environment:
- * 1. Server-side runtime (Vercel Server Functions): Uses `process.env.BACKEND_URL`
- * 2. Client-side runtime: `process.env.NEXT_PUBLIC_API_URL` injected at build-time.
- * 3. Client override: `localStorage.getItem("ACE_BACKEND_URL")` for instant debugging/connection.
- * 4. Browser fallback: `window.location.origin` if not on vercel.app.
+ * 1. Build/runtime env: `NEXT_PUBLIC_API_URL` or `BACKEND_URL`.
+ * 2. Client override: `localStorage.getItem("ACE_BACKEND_URL")` for instant debugging/connection.
+ * 3. Vercel deployment fallback: production Railway backend so every browser works out of the box.
+ * 4. Self-hosted browser fallback: `window.location.origin` on non-localhost origins.
  * 5. Local development fallback: `http://localhost:8000`.
  */
 export function getApiBaseUrl(): string {
@@ -66,9 +69,16 @@ export function getApiBaseUrl(): string {
       // localStorage restricted/unavailable
     }
 
-    if (!url && window.location?.origin && !window.location.hostname.includes("vercel.app")) {
-      url = window.location.origin;
+    if (!url && window.location?.hostname) {
+      const host = window.location.hostname;
+      if (host.includes("vercel.app")) {
+        url = DEFAULT_PRODUCTION_BACKEND_URL;
+      } else if (host !== "localhost" && host !== "127.0.0.1") {
+        url = window.location.origin;
+      }
     }
+  } else if (!url && typeof process !== "undefined" && process.env.VERCEL) {
+    url = DEFAULT_PRODUCTION_BACKEND_URL;
   }
 
   if (!url) {
@@ -443,6 +453,7 @@ export const apiClient = {
       effective_provider: string;
       ollama_base_url: string;
       ollama_model: string;
+      ollama_api_key_configured?: boolean;
       ollama_reachable: boolean;
       ollama_models_detected: string[];
       anthropic_model: string;
@@ -452,16 +463,50 @@ export const apiClient = {
       openai_compatible_key_configured: boolean;
     }>("/llm/config"),
 
-  testLLMConnection: (payload: { provider?: string; ollama_base_url?: string; ollama_model?: string }) =>
+  updateLLMConfig: (payload: {
+    active_provider?: string;
+    ollama_base_url?: string;
+    ollama_model?: string;
+    ollama_api_key?: string;
+    anthropic_api_key?: string;
+    openai_compatible_base_url?: string;
+    openai_compatible_model?: string;
+    openai_compatible_api_key?: string;
+  }) =>
+    requestJson<{
+      active_provider: string;
+      effective_provider: string;
+      ollama_base_url: string;
+      ollama_model: string;
+      ollama_api_key_configured?: boolean;
+      ollama_reachable: boolean;
+      ollama_models_detected: string[];
+      anthropic_model: string;
+      anthropic_key_configured: boolean;
+      openai_compatible_base_url: string;
+      openai_compatible_model: string;
+      openai_compatible_key_configured: boolean;
+    }>("/llm/config", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  testLLMConnection: (payload: {
+    provider?: string;
+    ollama_base_url?: string;
+    ollama_model?: string;
+    ollama_api_key?: string;
+  }) =>
     requestJson<{
       reachable: boolean;
       provider: string;
       active_model: string;
+      installed_models: string[];
       latency_ms: number;
       sample_output: string;
       fallback_used: boolean;
       message: string;
-    }>("/llm/test", {
+    }>("/llm/test-connection", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

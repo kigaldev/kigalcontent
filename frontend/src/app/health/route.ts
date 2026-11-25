@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
+const DEFAULT_PRODUCTION_BACKEND_URL =
+  "https://autonomous-content-engine-backend-production.up.railway.app";
+
 const BACKEND_INTERNAL_BASE =
-  process.env.BACKEND_URL || "http://localhost:8000";
+  process.env.BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.VERCEL ? DEFAULT_PRODUCTION_BACKEND_URL : "http://localhost:8000");
 
 export async function GET() {
   const targetUrl = new URL(

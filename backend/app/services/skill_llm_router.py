@@ -228,6 +228,7 @@ class HybridLLMRouter:
             "ollama_base_url": str(ov.get("ollama_base_url") or s.ollama_base_url).rstrip("/"),
             "ollama_model": str(ov.get("ollama_model") or s.ollama_model),
             "ollama_embedding_model": str(ov.get("ollama_embedding_model") or s.ollama_embedding_model),
+            "ollama_api_key": str(ov.get("ollama_api_key") or s.ollama_api_key or ""),
             "anthropic_model": str(ov.get("anthropic_model") or s.anthropic_model),
             "anthropic_api_key": str(ov.get("anthropic_api_key") or s.anthropic_api_key or ""),
             "openai_compatible_base_url": str(ov.get("openai_compatible_base_url") or s.openai_compatible_base_url).rstrip("/"),
@@ -235,13 +236,88 @@ class HybridLLMRouter:
             "openai_compatible_api_key": str(ov.get("openai_compatible_api_key") or s.openai_compatible_api_key or ""),
         }
 
-    def get_config_response(self) -> LLMConfigResponse:
+    @staticmethod
+    def _ollama_headers(api_key: str | None = None) -> dict[str, str]:
+        token = (api_key or "").strip()
+        if token:
+            return {"Authorization": f"Bearer {token}"}
+        return {}
+
+    @staticmethod
+    def _pick_installed_chat_model(preferred: str, available: list[str]) -> str:
+        if not available:
+            return preferred
+        if preferred in available:
+            return preferred
+        base = preferred.split(":")[0]
+        matched = next((m for m in available if m.startswith(base)), None)
+        if matched:
+            return matched
+        chat_candidates = [
+            m for m in available
+            if not any(emb in m.lower() for emb in ("embed", "bge-", "nomic-embed", "mxbai-embed"))
+        ]
+        return chat_candidates[0] if chat_candidates else available[0]
+
+    async def sync_from_db(self, db: Any) -> None:
+        """Hydrate runtime LLM overrides from PostgreSQL/SQLite so Railway retains MiniPC tunnel config across redeploys."""
+        try:
+            from sqlalchemy import select
+            from app.models.entities import SocialCredential
+
+            row = (
+                await db.execute(
+                    select(SocialCredential).where(SocialCredential.channel == "llm_router_config")
+                )
+            ).scalar_one_or_none()
+            if row and row.access_token:
+                data = json.loads(row.access_token)
+                if isinstance(data, dict):
+                    self._runtime_overrides.update(data)
+        except Exception as exc:
+            logger.warning("Could not sync LLM router config from DB: %s", exc)
+
+    async def persist_to_db(self, db: Any) -> None:
+        """Persist runtime LLM overrides into PostgreSQL/SQLite."""
+        try:
+            from sqlalchemy import select
+            from app.models.entities import SocialCredential
+
+            payload = json.dumps(self._runtime_overrides, ensure_ascii=False)
+            row = (
+                await db.execute(
+                    select(SocialCredential).where(SocialCredential.channel == "llm_router_config")
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                db.add(
+                    SocialCredential(
+                        channel="llm_router_config",
+                        access_token=payload,
+                        account_name="Hybrid LLM Router",
+                    )
+                )
+            else:
+                row.access_token = payload
+                row.account_name = "Hybrid LLM Router"
+            await db.commit()
+        except Exception as exc:
+            logger.warning("Could not persist LLM router config to DB: %s", exc)
+
+    def get_config_response(
+        self,
+        *,
+        ollama_reachable: bool = False,
+        ollama_models_detected: list[str] | None = None,
+    ) -> LLMConfigResponse:
         cfg = self._effective_settings()
         mode = LLMProviderMode(cfg["active_provider"]) if cfg["active_provider"] in LLMProviderMode._value2member_map_ else LLMProviderMode.AUTO
 
         effective = mode.value
         if mode == LLMProviderMode.AUTO:
-            if cfg["anthropic_api_key"]:
+            if ollama_reachable:
+                effective = f"ollama ({cfg['ollama_model']}) -> cloud fallback"
+            elif cfg["anthropic_api_key"]:
                 effective = "anthropic (auto-fallback a deterministic)"
             elif cfg["openai_compatible_api_key"]:
                 effective = "openai_compatible (auto-fallback a deterministic)"
@@ -254,6 +330,9 @@ class HybridLLMRouter:
             ollama_base_url=cfg["ollama_base_url"],
             ollama_model=cfg["ollama_model"],
             ollama_embedding_model=cfg["ollama_embedding_model"],
+            ollama_api_key_configured=bool(cfg["ollama_api_key"]),
+            ollama_reachable=ollama_reachable,
+            ollama_models_detected=ollama_models_detected or [],
             anthropic_model=cfg["anthropic_model"],
             anthropic_prompt_caching_enabled=True,
             anthropic_key_configured=bool(cfg["anthropic_api_key"]),
@@ -264,22 +343,40 @@ class HybridLLMRouter:
             recommended_local_models=RECOMMENDED_LOCAL_MODELS,
         )
 
+    async def get_config_response_async(self, probe: bool = True) -> LLMConfigResponse:
+        ollama_reachable = False
+        models_detected: list[str] = []
+        if probe:
+            res = await self.probe_ollama()
+            ollama_reachable = bool(res.get("reachable"))
+            models_detected = list(res.get("models") or [])
+        return self.get_config_response(
+            ollama_reachable=ollama_reachable,
+            ollama_models_detected=models_detected,
+        )
+
     def update_config(self, body: LLMConfigUpdateRequest) -> LLMConfigResponse:
         updates = body.model_dump(exclude_none=True, mode="json")
         # Do not overwrite stored key if masked/empty passed accidentally
-        for key in ("anthropic_api_key", "openai_compatible_api_key"):
+        for key in ("ollama_api_key", "anthropic_api_key", "openai_compatible_api_key"):
             if key in updates and (not updates[key] or "***" in str(updates[key])):
                 updates.pop(key)
         self._runtime_overrides.update(updates)
         self._save_runtime_overrides(self._runtime_overrides)
         return self.get_config_response()
 
-    async def probe_ollama(self, base_url: str | None = None) -> dict[str, Any]:
-        url = (base_url or self._effective_settings()["ollama_base_url"]).rstrip("/")
+    async def probe_ollama(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
+        cfg = self._effective_settings()
+        url = (base_url or cfg["ollama_base_url"]).rstrip("/")
+        eff_key = api_key if (api_key is not None and "***" not in api_key and api_key.strip()) else cfg["ollama_api_key"]
         t0 = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"{url}/api/tags")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{url}/api/tags", headers=self._ollama_headers(eff_key))
                 latency_ms = round((time.perf_counter() - t0) * 1000, 1)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -299,13 +396,17 @@ class HybridLLMRouter:
         provider_override: LLMProviderMode | None = None,
         ollama_base_url: str | None = None,
         ollama_model: str | None = None,
+        ollama_api_key: str | None = None,
     ) -> LLMTestConnectionResponse:
         cfg = self._effective_settings()
         target = provider_override or LLMProviderMode(cfg["active_provider"])
 
         if target in (LLMProviderMode.OLLAMA, LLMProviderMode.AUTO):
-            probe = await self.probe_ollama(ollama_base_url or cfg["ollama_base_url"])
-            model_name = ollama_model or cfg["ollama_model"]
+            probe = await self.probe_ollama(ollama_base_url or cfg["ollama_base_url"], api_key=ollama_api_key)
+            model_name = self._pick_installed_chat_model(
+                ollama_model or cfg["ollama_model"],
+                probe.get("models") or [],
+            )
             if probe["reachable"]:
                 return LLMTestConnectionResponse(
                     reachable=True,
@@ -420,13 +521,19 @@ class HybridLLMRouter:
                 probe = await self.probe_ollama(cfg["ollama_base_url"])
                 if not probe["reachable"]:
                     continue
+                model_name = self._pick_installed_chat_model(
+                    cfg["ollama_model"],
+                    probe.get("models") or [],
+                )
                 try:
-                    async with httpx.AsyncClient(timeout=45.0) as client:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
                         resp = await client.post(
                             f"{cfg['ollama_base_url']}/api/chat",
+                            headers=self._ollama_headers(cfg["ollama_api_key"]),
                             json={
-                                "model": cfg["ollama_model"],
+                                "model": model_name,
                                 "stream": False,
+                                "think": False,
                                 "format": "json",
                                 "messages": [
                                     {"role": "system", "content": system_prompt},
@@ -439,7 +546,7 @@ class HybridLLMRouter:
                             content = resp.json().get("message", {}).get("content", "")
                             parsed = _extract_json_object(content)
                             if parsed:
-                                return parsed, f"ollama:{cfg['ollama_model']}"
+                                return parsed, f"ollama:{model_name}"
                 except Exception as exc:
                     logger.warning("Ollama inference fallback triggered: %s", exc)
 
@@ -951,18 +1058,20 @@ class HybridLLMRouter:
                 if not probe["reachable"]:
                     return None
                 available_models = probe.get("models") or []
-                model_name = cfg.get("ollama_model") or (available_models[0] if available_models else "")
+                model_name = self._pick_installed_chat_model(
+                    cfg.get("ollama_model") or (available_models[0] if available_models else ""),
+                    available_models,
+                )
                 if not model_name:
                     return None
-                if available_models and model_name not in available_models:
-                    matched = next((m for m in available_models if m.startswith(model_name.split(":")[0])), None)
-                    model_name = matched or available_models[0]
-                async with httpx.AsyncClient(timeout=45.0) as client:
+                async with httpx.AsyncClient(timeout=120.0) as client:
                     resp = await client.post(
                         f"{cfg['ollama_base_url'].rstrip('/')}/api/chat",
+                        headers=self._ollama_headers(cfg["ollama_api_key"]),
                         json={
                             "model": model_name,
                             "stream": False,
+                            "think": False,
                             "format": "json",
                             "messages": [
                                 {"role": "system", "content": system_prompt},
@@ -1220,9 +1329,10 @@ class HybridLLMRouter:
         cfg = self._effective_settings()
         if cfg["active_provider"] in ("auto", "ollama"):
             try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
+                async with httpx.AsyncClient(timeout=5.0) as client:
                     resp = await client.post(
                         f"{cfg['ollama_base_url']}/api/embeddings",
+                        headers=self._ollama_headers(cfg["ollama_api_key"]),
                         json={"model": cfg["ollama_embedding_model"], "prompt": text},
                     )
                     if resp.status_code == 200:

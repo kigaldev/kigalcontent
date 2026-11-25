@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_model: str = Field(default="qwen3:14b")
     ollama_embedding_model: str = Field(default="bge-m3")
+    ollama_api_key: str = Field(default="")
     anthropic_model: str = Field(default="claude-3-5-sonnet-latest")
     openai_compatible_base_url: str = Field(default="https://openrouter.ai/api/v1")
     openai_compatible_api_key: str = Field(default="")

@@ -3229,24 +3229,39 @@ async def get_system_connections_status(
 # --- 8. Hybrid Skill-Aware LLM Router (Ollama MiniPC + Claude Prompt Caching) ---
 
 @router.get("/llm/config", response_model=LLMConfigResponse)
-async def get_llm_config() -> LLMConfigResponse:
-    """Return active LLM router configuration, hardware RAM presets, and loaded Skill specs."""
-    return get_llm_router().get_config_response()
+async def get_llm_config(db: AsyncSession = Depends(get_db)) -> LLMConfigResponse:
+    """Return active LLM router configuration, hardware RAM presets, live Ollama probe, and loaded Skill specs."""
+    router_svc = get_llm_router()
+    await router_svc.sync_from_db(db)
+    return await router_svc.get_config_response_async(probe=True)
 
 
 @router.put("/llm/config", response_model=LLMConfigResponse)
-async def update_llm_config(body: LLMConfigUpdateRequest) -> LLMConfigResponse:
-    """Hot-update active LLM provider (Ollama local, Claude with Prompt Caching, OpenRouter, Deterministic)."""
-    return get_llm_router().update_config(body)
+async def update_llm_config(
+    body: LLMConfigUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LLMConfigResponse:
+    """Hot-update active LLM provider (Ollama local/tunnel, Claude, OpenRouter, Deterministic) and persist in DB."""
+    router_svc = get_llm_router()
+    await router_svc.sync_from_db(db)
+    router_svc.update_config(body)
+    await router_svc.persist_to_db(db)
+    return await router_svc.get_config_response_async(probe=True)
 
 
 @router.post("/llm/test-connection", response_model=LLMTestConnectionResponse)
-async def test_llm_connection(body: LLMTestConnectionRequest) -> LLMTestConnectionResponse:
+async def test_llm_connection(
+    body: LLMTestConnectionRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LLMTestConnectionResponse:
     """Probe Ollama (MiniPC/Tunnel), Anthropic Claude API, or deterministic engine."""
-    return await get_llm_router().test_connection(
+    router_svc = get_llm_router()
+    await router_svc.sync_from_db(db)
+    return await router_svc.test_connection(
         provider_override=body.provider,
         ollama_base_url=body.ollama_base_url,
         ollama_model=body.ollama_model,
+        ollama_api_key=body.ollama_api_key,
     )
 
 

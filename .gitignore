@@ -29,3 +29,6 @@ media_workspace/processed/*
 backend/.env
 frontend/.env*
 **/.content_engine/memory/
+.ollama_tunnel_token
+.ollama_tunnel_url
+
