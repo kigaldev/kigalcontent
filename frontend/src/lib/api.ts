@@ -42,6 +42,16 @@ import type {
 export const DEFAULT_PRODUCTION_BACKEND_URL =
   "https://autonomous-content-engine-backend-production.up.railway.app";
 
+export function normalizeBackendUrl(raw: string): string {
+  let url = raw.trim();
+  if (!url) return "";
+  if (!/^https?:\/\//i.test(url)) {
+    const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url);
+    url = `${isLocal ? "http" : "https"}://${url.replace(/^\/+/, "")}`;
+  }
+  return url.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/api$/, "");
+}
+
 /**
  * Resolves the API base URL depending on execution environment:
  * 1. Build/runtime env: `NEXT_PUBLIC_API_URL` or `BACKEND_URL`.
@@ -85,15 +95,14 @@ export function getApiBaseUrl(): string {
     url = "http://localhost:8000";
   }
 
-  // Remove trailing slashes and redundant /api or /api/v1 paths
-  return url.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/api$/, "");
+  return normalizeBackendUrl(url);
 }
 
 export function setCustomBackendUrl(url: string | null): void {
   if (typeof window === "undefined") return;
   try {
     if (url && url.trim()) {
-      window.localStorage.setItem("ACE_BACKEND_URL", url.trim());
+      window.localStorage.setItem("ACE_BACKEND_URL", normalizeBackendUrl(url));
     } else {
       window.localStorage.removeItem("ACE_BACKEND_URL");
     }
@@ -144,7 +153,7 @@ export const apiClient = {
 
   health: async (customUrl?: string): Promise<{ status: string }> => {
     const rawBase = customUrl || getApiBaseUrl();
-    const cleanBase = rawBase.replace(/\/+$/, "").replace(/\/api\/v1$/, "").replace(/\/api$/, "");
+    const cleanBase = normalizeBackendUrl(rawBase);
 
     const candidateEndpoints = [
       `${cleanBase}/health`,
