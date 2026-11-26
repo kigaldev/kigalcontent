@@ -1,0 +1,22 @@
+{
+  "proyecto": "kikegallego",
+  "pieza": "03-lo-que-no-automatizaria",
+  "tipo": "reel",
+  "formato": "9:16",
+  "duracion": "35-45 s",
+  "acento": "implementacion",
+  "pilar": "P2 · Automatiza lo que toca (y no lo que no)",
+  "dia": "jueves 03/12/2026, 20:00 (Madrid)",
+  "programado": "2026-12-03T20:00:00+01:00",
+  "gancho": "Hay tres cosas que yo no automatizaría en tu empresa. Aunque se pueda.",
+  "gancho_prueba": "No automatices estas tres cosas, aunque te lo vendan.",
+  "cta": "Escríbeme CHECKLIST por privado y te lo paso.",
+  "respuesta_privado": { "palabra": "CHECKLIST", "a_mano": true, "entrega": "enlace al checklist de automatización" },
+  "destino": "https://www.kigaldev.com/recursos/checklist-automatizacion?utm_source=instagram&utm_medium=social&utm_campaign=lo-que-no-automatizaria-w49&origen=instagram-lo-que-no-automatizaria-w49",
+  "necesita_de_kike": "Grabar T1-T6 de guion.md y dejarlas en proyectos/kikegallego/brutos/ antes del domingo 29/11",
+  "archivos": [],
+  "guion": "guion.md",
+  "pie": "pie.md",
+  "prueba": false,
+  "estado": "borrador"
+}

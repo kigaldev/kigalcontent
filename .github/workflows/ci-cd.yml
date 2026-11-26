@@ -41,6 +41,23 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  bot-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Bot Dependencies
+        working-directory: bot
+        run: npm ci
+      - name: TypeScript Check
+        working-directory: bot
+        run: npm run typecheck
+      - name: Unit Tests
+        working-directory: bot
+        run: npm test
+
   docker-build:
     needs: [skill-and-backend-tests, frontend-checks]
     if: github.ref == 'refs/heads/main'

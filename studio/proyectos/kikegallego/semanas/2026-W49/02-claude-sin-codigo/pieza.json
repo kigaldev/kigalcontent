@@ -1,0 +1,43 @@
+{
+  "proyecto": "kikegallego",
+  "pieza": "02-claude-sin-codigo",
+  "tipo": "carrusel",
+  "formato": "4:5",
+  "diapositivas": 7,
+  "acento": "implementacion",
+  "pilar": "P2 · Automatiza lo que toca (y no lo que no)",
+  "dia": "miércoles 02/12/2026, 14:00 (Madrid)",
+  "programado": "2026-12-02T14:00:00+01:00",
+  "gancho": "Tres cosas que pedirle a Claude mañana. En la oficina y sin tocar una línea de código.",
+  "cta": "Escríbeme GUIA por privado y te la paso.",
+  "respuesta_privado": {
+    "palabra": "GUIA",
+    "a_mano": true,
+    "entrega": "enlace a la guía de Claude para negocios"
+  },
+  "destino": "https://www.kigaldev.com/recursos/guia-claude-para-negocios?utm_source=instagram&utm_medium=social&utm_campaign=claude-sin-codigo-w49&origen=instagram-claude-sin-codigo-w49",
+  "archivos": [
+    "slides/01.png",
+    "slides/02.png",
+    "slides/03.png",
+    "slides/04.png",
+    "slides/05.png",
+    "slides/06.png",
+    "slides/07.png"
+  ],
+  "alt_text": [
+    "Portada sobre fondo claro: «Tres cosas que pedirle a Claude mañana». Debajo: «En la oficina y sin tocar una línea de código».",
+    "1, Gmail: «Lo que sigue sin contestar». Frase de ejemplo: «Resúmeme los correos de clientes de esta semana que siguen sin respuesta».",
+    "2, Google Calendar: «Un hueco sin ir y venir». Frase de ejemplo: «Búscame una hora libre el jueves por la mañana para ver al gestor».",
+    "3, Google Drive: «El dato dentro del contrato». Frase de ejemplo: «Busca el último contrato con este cliente y dime cuándo vence y con cuánto preaviso».",
+    "Cómo se activa: Ajustes, Conectores, Conectar, en claude.ai. Acepta solo los permisos que vayas a usar. Los tres, sin coste extra sobre Claude.",
+    "El límite: «Lo mandas tú, después de leerlo». Claude te deja las respuestas preparadas para que las revises antes de mandarlas.",
+    "Cierre: «48 fichas como estas, en 9 categorías». La guía de Claude para negocios. Escríbeme GUIA por privado."
+  ],
+  "copy": "copy.md",
+  "pie": "pie.md",
+  "prueba": false,
+  "estado": "aprobado",
+  "aprobado_por": "Kike",
+  "aprobado_en": "2026-11-26T09:43:49+01:00"
+}

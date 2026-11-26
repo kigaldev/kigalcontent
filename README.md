@@ -24,6 +24,17 @@ El frontend está desarrollado con **Next.js 15 (App Router, React 19)**, **Tail
 
 ---
 
+## 📸 Instagram: estudio de contenido y bot de comentarios
+
+- **`studio/`**: estudio de contenido de Instagram con Claude Code (equipo de agentes, skills `/semana`, `/publicar`,
+  `/nuevo-proyecto`, un proyecto por cuenta en `studio/proyectos/`). Se trabaja abriendo Claude Code en `studio\`.
+  Publica solo lo que Kike aprueba y solo por la API oficial (`studio/meta/ig.mjs`). Ver `studio/CLAUDE.md`.
+- **`bot/`**: bot «comenta PALABRA y te lo mando» (Next.js en Vercel, proyecto propio con Root Directory `bot`). Usa la
+  misma base de datos Supabase que el backend, en tablas `bot_*`, y su actividad se ve en el panel KigalChat. Ver
+  `bot/README.md`.
+
+---
+
 ## 🏗️ Topología del Repositorio
 
 ```

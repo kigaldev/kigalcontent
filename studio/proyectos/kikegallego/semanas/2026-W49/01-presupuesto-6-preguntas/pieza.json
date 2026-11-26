@@ -1,0 +1,45 @@
+{
+  "proyecto": "kikegallego",
+  "pieza": "01-presupuesto-6-preguntas",
+  "tipo": "carrusel",
+  "formato": "4:5",
+  "diapositivas": 8,
+  "acento": "criterio",
+  "pilar": "P1 · Criterio antes del código",
+  "dia": "lunes 30/11/2026, 20:00 (Madrid)",
+  "programado": "2026-11-30T20:00:00+01:00",
+  "gancho": "Antes de firmar el presupuesto de tu web, hazte estas seis preguntas. La última va sobre el peor día.",
+  "cta": "Escríbeme PRESUPUESTO por privado y te lo paso.",
+  "respuesta_privado": {
+    "palabra": "PRESUPUESTO",
+    "a_mano": true,
+    "entrega": "enlace al revisor de presupuesto"
+  },
+  "destino": "https://www.kikegallego.com/revisor-de-presupuesto?utm_source=instagram&utm_medium=social&utm_campaign=presupuesto-6-preguntas-w49",
+  "archivos": [
+    "slides/01.png",
+    "slides/02.png",
+    "slides/03.png",
+    "slides/04.png",
+    "slides/05.png",
+    "slides/06.png",
+    "slides/07.png",
+    "slides/08.png"
+  ],
+  "alt_text": [
+    "Portada sobre fondo oscuro: «Antes de firmar el presupuesto de tu web». Debajo: «Hazte estas seis preguntas. La última va sobre el peor día».",
+    "Bloque 1, Alcance: «¿Sabes qué estás comprando?». Que el presupuesto diga, función por función o página por página, qué entra en el precio y qué queda fuera.",
+    "Bloque 2, Propiedad del código y de las cuentas: «¿Es tuyo de verdad?». El dominio y las cuentas, a nombre de tu empresa y con un correo tuyo.",
+    "Bloque 3, Mantenimiento: «¿Y después de entregarlo?». Lo que cuesta construirlo, separado de lo que costará mantenerlo cada mes.",
+    "Bloque 4, Plazos: «¿Cuándo, y qué pasa si no?». Una fecha de entrega o, al menos, un plazo por escrito.",
+    "Bloque 5, Dependencias: «¿Te ata a él?». Si lo que te entregan podría mantenerlo otro proveedor o solo quien te lo hace.",
+    "Bloque 6, Qué pasa si el proveedor desaparece: «El peor día». Si mañana cierra, ¿te quedas con una copia de todo lo pagado y con los accesos de administrador?",
+    "Cierre: «12 preguntas, 6 bloques, sin jerga». El revisor da un semáforo y qué preguntarle a tu proveedor. Escríbeme PRESUPUESTO por privado."
+  ],
+  "copy": "copy.md",
+  "pie": "pie.md",
+  "prueba": false,
+  "estado": "aprobado",
+  "aprobado_por": "Kike",
+  "aprobado_en": "2026-11-26T09:43:49+01:00"
+}

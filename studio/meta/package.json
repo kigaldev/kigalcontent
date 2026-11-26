@@ -1,0 +1,16 @@
+﻿{
+  "name": "instagram-studio-meta",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Publica en Instagram por la API oficial (Instagram API with Instagram Login) piezas ya aprobadas, y lee sus métricas.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "ig": "node ig.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "2.9.0"
+  }
+}

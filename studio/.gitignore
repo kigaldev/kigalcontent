@@ -1,0 +1,26 @@
+# Secretos: nunca a git
+.env
+.env.*
+!.env.example
+proyectos/*/.env
+
+# Herramientas de terceros con su propio repositorio git
+HookLab/
+open-carrusel/
+motion-architect/
+
+# Dependencias y registros
+node_modules/
+.venv/
+meta/ig.log
+
+# Medios pesados (viven en la carpeta, no en git)
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.zip
+proyectos/*/brutos/
+
+# estado local de plugins
+.omc/
