@@ -162,7 +162,7 @@ export function LinkedInB2BAdsPanel({
                 </p>
               </div>
               <AstryxBadge
-                label={tl.estimated_ctr_benchmark || "1.5% – 2.8% CTR"}
+                label={tl.estimated_ctr_benchmark || "CTR sin estimar"}
                 variant="cyan"
               />
             </div>

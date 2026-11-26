@@ -514,7 +514,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
         keyword: testComment.trim().split(/\s+/)[0],
         comment_text: testComment.trim(),
         platform: testPlatform,
-        username: "@test_creator",
+        dry_run: true,
       });
       setTestOutput({
         matched: res.matched,
@@ -530,7 +530,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
               : t
           )
         );
-        showToast("success", `Disparador "${res.keyword}" ejecutado correctamente`);
+        showToast("info", `Coincidencia con "${res.keyword}". Es una prueba: no se ha enviado ningún DM.`);
       } else {
         showToast("info", "Ninguna palabra clave activa coincidió con ese comentario.");
       }
@@ -1421,7 +1421,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
 
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] font-mono text-slate-400">
-                            {trig.triggers_count} envíos
+                            {trig.triggers_count} coincidencias
                           </span>
                           <button
                             type="button"
@@ -1458,7 +1458,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                       <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
-                      Probar Disparador ManyChat en Vivo
+                      Probar regla (solo coincidencia, no envía nada)
                     </span>
                     <span className="text-[10px] font-mono text-slate-400">
                       Webhook: POST {apiClient.apiBase}/api/v1/manychat/webhook
@@ -1502,7 +1502,7 @@ export const CreatorProfileModal: React.FC<CreatorProfileModalProps> = ({
                       {testOutput.matched ? (
                         <div>
                           <p className="font-bold">
-                            ✅ Lead Magnet enviado ({testOutput.lead_magnet_title || "Recurso"}):
+                            Coincidencia{testOutput.lead_magnet_title ? ` · ${testOutput.lead_magnet_title}` : ""}. DM que se enviaría:
                           </p>
                           <p className="mt-1 font-mono text-[11px]">{testOutput.dm_reply_text}</p>
                         </div>

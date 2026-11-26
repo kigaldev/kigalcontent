@@ -499,7 +499,7 @@ export default function KigalContentStudioPage() {
                 title={
                   backendOnline
                     ? `Servidor conectado (${apiClient.apiBase}). Clic para ver detalles.`
-                    : "Modo local: Clic aquí para conectar con tu servidor de Railway o MiniPC."
+                    : "Backend sin conexión: no se muestran datos. Haz clic para conectar con tu servidor de Railway o el miniPC."
                 }
               >
                 {backendOnline ? (
@@ -507,7 +507,7 @@ export default function KigalContentStudioPage() {
                 ) : (
                   <WifiOff className="h-3.5 w-3.5" />
                 )}
-                <span>{backendOnline ? "Servidor Online" : "Modo Local"}</span>
+                <span>{backendOnline ? "Servidor Online" : "Backend sin conexión"}</span>
               </button>
 
               {/* Top-Right Profile Bubble (Paso 0) */}

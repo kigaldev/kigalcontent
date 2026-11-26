@@ -33,7 +33,6 @@ import { useEngineStore } from "@/store/useEngineStore";
 import type {
   AdCampaignGenerateRequest,
   AdCampaignResponse,
-  AdCreativeVariant,
   LinkedInAdsSpec,
 } from "@/types/engine";
 
@@ -111,14 +110,6 @@ const RESULT_TABS: Array<{ id: AdsResultTabId; label: string; shortLabel: string
   },
 ];
 
-function truncateAtLimit(text: string, limit: number): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= limit) return clean;
-  const cut = clean.slice(0, limit);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > limit * 0.55 ? cut.slice(0, lastSpace) : cut).trim();
-}
-
 function slugifyUtm(input: string): string {
   return (
     input
@@ -144,7 +135,7 @@ function buildUtmUrl(
   const safeBase =
     baseUrl.trim() && /^https?:\/\//i.test(baseUrl.trim())
       ? baseUrl.trim()
-      : `https://${(baseUrl.trim() || "contentengine.local/recurso").replace(/^\/+/, "")}`;
+      : `https://${(baseUrl.trim() || "tu-dominio.com/recurso").replace(/^\/+/, "")}`;
 
   try {
     const parsed = new URL(safeBase);
@@ -166,145 +157,63 @@ function buildUtmUrl(
   }
 }
 
-function buildLocalLinkedInAdsSpec(
-  req: AdCampaignGenerateRequest,
-  context: {
-    niche?: string;
-    icp?: string;
-    creatorName?: string;
-    hookHint?: string;
-  }
-): LinkedInAdsSpec {
-  const topic = req.topic.trim() || "Sistema de Automatización con IA";
-  const keyword = (req.trigger_keyword || "BLUEPRINT").trim().toUpperCase();
-  const targetUrl =
-    req.target_url?.trim() || "https://contentengine.local/blueprint";
-  const icp = context.icp || "fundadores, directivos y equipos B2B";
-  const niche = context.niche || "automatización con IA y sistemas B2B";
-  const creatorName = context.creatorName || "Nuestro equipo";
-  const shortTopic = truncateAtLimit(topic, 48);
-  const shortIcp = truncateAtLimit(icp, 48);
-  const shortNiche = truncateAtLimit(niche, 48);
+const EMPTY_LINKEDIN_ADS_SPEC: LinkedInAdsSpec = {
+  thought_leader_ad: {
+    intro_hook: "",
+    full_post_body: "",
+    cta_soft: "",
+    target_audience_note: "",
+    estimated_ctr_benchmark: "",
+  },
+  single_image_ad: {
+    intro_text: "",
+    headline: "",
+    description: "",
+    cta_label: "",
+    visual_brief: "",
+  },
+  document_carousel_ad: {
+    intro_text: "",
+    headline: "",
+    slides_outline: [],
+    lead_gen_form_fields: [],
+    thank_you_message: "",
+  },
+  conversation_ad: {
+    subject: "",
+    opening_message: "",
+    cta_buttons: [],
+  },
+  targeting_blueprint: {
+    job_titles: [],
+    seniorities: [],
+    company_sizes: [],
+    industries: [],
+    geographies: [],
+    recommended_daily_budget_eur: "",
+  },
+};
 
-  const tlCtaSoft =
-    req.objective === "Demos B2B"
-      ? `Si quieres revisar cómo encajaría en tu equipo, escríbeme "${keyword}" por DM y coordinamos 15 min.`
-      : req.objective === "Tráfico a Landing"
-      ? `Dejo el acceso directo al recurso completo en el primer comentario (o comenta "${keyword}").`
-      : `Si quieres la guía paso a paso + plantilla, comenta "${keyword}" abajo y te la envío por DM.`;
-
-  const singleCtaLabel =
-    req.objective === "Demos B2B"
-      ? "Solicitar demo"
-      : req.objective === "Leads / ManyChat DM"
-      ? "Descargar"
-      : "Más información";
-
-  const tlHook = truncateAtLimit(
-    context.hookHint?.trim() ||
-      `Dejamos de improvisar en ${shortTopic} y multiplicamos x3.4 los leads B2B sin ampliar equipo.`,
-    148
-  );
-
+function buildEmptyCampaign(topic: string, objective: string, platforms: string[]): AdCampaignResponse {
   return {
-    thought_leader_ad: {
-      intro_hook: tlHook,
-      full_post_body: [
-        `Durante meses vimos al mismo patrón repetirse en ${shortIcp}: muchas horas creando piezas sueltas y cero trazabilidad real en pipeline.`,
-        `Al estructurar "${shortTopic}" dentro de ${shortNiche}, cambiamos 3 piezas clave:`,
-        `1. Empaque y gancho validado antes de producir.\n2. Distribución multicanal sin enlaces dentro del cuerpo.\n3. Captura directa con palabra clave ${keyword} y seguimiento medible.`,
-        `Resultado: conversaciones B2B cualificadas cada semana con menos de la mitad de esfuerzo manual.`,
-      ].join("\n\n"),
-      cta_soft: tlCtaSoft,
-      target_audience_note: `Patrocinar publicación orgánica desde perfil personal de ${creatorName} hacia ${shortIcp} (excluyendo juniors y estudiantes).`,
-      estimated_ctr_benchmark: "1.6% – 2.9% CTR (Thought Leader)",
+    topic,
+    objective,
+    platforms,
+    variants: [],
+    google_rsa: {
+      headlines: [],
+      descriptions: [],
+      search_keywords_exact: [],
+      search_keywords_phrase: [],
+      search_keywords_negative: [],
+      youtube_5s_hook: "",
     },
-    single_image_ad: {
-      intro_text: truncateAtLimit(
-        `¿Tu equipo en ${shortNiche} sigue invirtiendo horas manuales sin retorno predecible?\n\nCon "${shortTopic}" diseñas un sistema B2B medible para ${shortIcp}: de idea validada a leads cualificados con ${keyword}.`,
-        595
-      ),
-      headline: truncateAtLimit(`Sistema B2B: ${shortTopic}`, 68),
-      description: truncateAtLimit(
-        `Arquitectura lista para ${shortIcp}. Activa con ${keyword}.`,
-        96
-      ),
-      cta_label: singleCtaLabel,
-      visual_brief: `Diagrama oscuro NLE (fondo #07090e, acentos cyan #22d3ee) en 1200×627 comparando "Flujo Manual Disperso" vs "Arquitectura ${shortTopic}" con 3 nodos y métrica destacada "+3.4x Watch Time / CPL -38%".`,
-    },
-    document_carousel_ad: {
-      intro_text: truncateAtLimit(
-        `Desliza este documento de 5 páginas con la hoja de ruta exacta de "${shortTopic}" aplicada a ${shortNiche}. Descárgalo gratis al final.`,
-        595
-      ),
-      headline: truncateAtLimit(`Blueprint PDF: ${shortTopic}`, 68),
-      slides_outline: [
-        `Portada: Cómo dominar ${shortTopic} sin añadir horas operativas`,
-        `El cuello de botella oculto que frena a ${shortIcp}`,
-        `Arquitectura en 3 fases: Hook · Producción -14 LUFS · Captura ${keyword}`,
-        `Métricas de control B2B (Hold Rate 3s, Watch Time Share y CPL)`,
-        `Checklist de implementación + Acceso completo (${keyword})`,
-      ],
-      lead_gen_form_fields: [
-        "Nombre",
-        "Email corporativo",
-        "Empresa",
-        "Cargo",
-      ],
-      thank_you_message: `¡Perfecto! Tu recurso de "${shortTopic}" está listo. Ábrelo ahora aquí: ${targetUrl}`,
-    },
-    conversation_ad: {
-      subject: truncateAtLimit(`Sobre ${shortTopic} en tu equipo`, 58),
-      opening_message: `Hola %FIRSTNAME%,\n\nViendo tu rol en %COMPANYNAME%, te comparto el esquema con el que ${shortIcp} está reduciendo a la mitad el tiempo operativo en ${shortTopic} sin perder control de marca.\n\n¿Te paso el documento técnico o prefieres ver un diagnóstico rápido de 15 minutos?`,
-      cta_buttons: [
-        `Enviar blueprint (${keyword})`,
-        "Agendar diagnóstico 15 min",
-        "Solo explorar métricas",
-      ],
-    },
-    targeting_blueprint: {
-      job_titles: [
-        "Founder & CEO",
-        "Head of Growth",
-        "Marketing Director",
-        "VP of Revenue",
-        "COO / Operations Lead",
-      ],
-      seniorities: ["Owner", "CXO", "VP", "Director", "Partner"],
-      company_sizes: [
-        "11-50 empleados",
-        "51-200 empleados",
-        "201-500 empleados",
-      ],
-      industries: [
-        truncateAtLimit(niche, 38),
-        "Software y Tecnología (SaaS)",
-        "Consultoría y Servicios B2B",
-        "Marketing y Publicidad",
-      ],
-      geographies: [
-        "España (ES)",
-        "México (MX)",
-        "Colombia (CO)",
-        "Argentina (AR)",
-        "Estados Unidos (ES/EN)",
-      ],
-      recommended_daily_budget_eur:
-        "30 € – 50 €/día (70% Thought Leader + 30% Document Ad)",
-    },
+    linkedin_ads: null,
+    ga4_utm_links: [],
   };
 }
 
-function normalizeCampaignResponse(
-  res: AdCampaignResponse,
-  req: AdCampaignGenerateRequest,
-  context: {
-    niche?: string;
-    icp?: string;
-    creatorName?: string;
-    hookHint?: string;
-  }
-): AdCampaignResponse {
+function normalizeCampaignResponse(res: AdCampaignResponse): AdCampaignResponse {
   const normalizedVariants = res.variants.map((variant) => ({
     ...variant,
     remotion_916_storyboard: (variant.remotion_916_storyboard || []).map(
@@ -323,266 +232,7 @@ function normalizeCampaignResponse(
   return {
     ...res,
     variants: normalizedVariants,
-    linkedin_ads:
-      res.linkedin_ads ?? buildLocalLinkedInAdsSpec(req, context),
-  };
-}
-
-function buildLocalAdCampaign(
-  req: AdCampaignGenerateRequest,
-  context: {
-    niche?: string;
-    icp?: string;
-    creatorName?: string;
-    hookHint?: string;
-  }
-): AdCampaignResponse {
-  const topic = req.topic.trim() || "Sistema de Automatización con IA";
-  const keyword = (req.trigger_keyword || "BLUEPRINT").trim().toUpperCase();
-  const targetUrl =
-    req.target_url?.trim() || "https://contentengine.local/blueprint";
-  const icp = context.icp || "fundadores, consultores y equipos B2B";
-  const niche = context.niche || "automatización y sistemas de contenido";
-  const campaignSlug = slugifyUtm(topic);
-
-  const ctaByObjective: Record<string, string> = {
-    "Leads / ManyChat DM": "Enviar mensaje",
-    "Tráfico a Landing": "Más información",
-    "Demos B2B": "Solicitar demo",
-    Retargeting: "Ver caso ahora",
-  };
-  const ctaButton = ctaByObjective[req.objective] ?? "Más información";
-
-  const actionLine =
-    req.objective === "Leads / ManyChat DM"
-      ? `Comenta "${keyword}" o pulsa en "${ctaButton}" y te enviamos el blueprint paso a paso por DM.`
-      : req.objective === "Demos B2B"
-      ? `Agenda tu diagnóstico técnico en ${targetUrl} (cupos limitados esta semana).`
-      : req.objective === "Retargeting"
-      ? `Viste nuestra arquitectura de ${truncateAtLimit(niche, 38)}: da el siguiente paso hoy en ${targetUrl}.`
-      : `Accede al recurso completo y plantillas en ${targetUrl}.`;
-
-  const variants: AdCreativeVariant[] = [
-    {
-      variant_id: "VAR-A-PAS",
-      angle_name: "Dolor PAS (Problema · Agitación · Solución)",
-      framework: "PAS",
-      primary_text: `¿Sigues publicando todos los días sin retorno predecible?\n\nPara ${truncateAtLimit(
-        icp,
-        68
-      )}, improvisar cada pieza quema horas operativas y hunde la retención en los primeros 3 segundos.\n\nCon "${truncateAtLimit(
-        topic,
-        64
-      )}" reemplazas esfuerzo manual por un flujo medible (-14 LUFS, guión en 2 columnas y captura automatizada).\n\n👉 ${actionLine}`,
-      headline: truncateAtLimit(`Deja de improvisar: ${topic}`, 40),
-      description: truncateAtLimit(
-        `Sistema probado para ${icp}. Activa con ${keyword}.`,
-        78
-      ),
-      cta_button: ctaButton,
-      remotion_916_storyboard: [
-        {
-          timecode: "0-3s Hook Visual",
-          visual:
-            "Plano cerrado a cámara con zoom 115% + fondo rojo alerta en zona segura superior.",
-          copy_overlay: "PIERDES 80% DE ALCANCE ASÍ",
-          audio:
-            context.hookHint ||
-            "Si grabas sin validar tu empaque y gancho de 3 segundos, estás quemando tu presupuesto.",
-        },
-        {
-          timecode: "3-10s Prueba",
-          visual:
-            "Split-screen Remotion: timeline manual caótico vs pipeline automatizado 3.4x Watch Time.",
-          copy_overlay: "3.4x WATCH TIME · -14 LUFS",
-          audio:
-            "Al estructurar el guión por bloques y podar silencios mayores a 400ms, la retención sube sin aumentar horas.",
-        },
-        {
-          timecode: "10-15s CTA",
-          visual:
-            "Mockup del recurso en mano + flecha animada sobre zona segura inferior.",
-          copy_overlay: `COMENTA "${keyword}" ↓`,
-          audio: actionLine,
-        },
-      ],
-    },
-    {
-      variant_id: "VAR-B-AUTH",
-      angle_name: "Autoridad / Métrica Comprobada",
-      framework: "Autoridad",
-      primary_text: `3.4x más tiempo de retención y menos de la mitad de horas de producción.\n\nEsta es la arquitectura exacta detrás de "${truncateAtLimit(
-        topic,
-        64
-      )}" que aplicamos en ${truncateAtLimit(
-        niche,
-        55
-      )}:\n• Empaque A/B validado antes de encender cámara\n• Poda automática >400ms + normalización -14 LUFS\n• Captura directa con palabra clave ${keyword}\n\n👉 ${actionLine}`,
-      headline: truncateAtLimit(`Arquitectura 3.4x: ${topic}`, 40),
-      description: truncateAtLimit(
-        `Métricas reales 24h/7d y plantilla lista para implementar hoy.`,
-        78
-      ),
-      cta_button: ctaButton,
-      remotion_916_storyboard: [
-        {
-          timecode: "0-3s Hook Visual",
-          visual:
-            "Gráfica animada subiendo a 74% Hold Rate 3s sobre estudio oscuro #0b0e14.",
-          copy_overlay: "74% HOLD RATE EN 3 SEGUNDOS",
-          audio:
-            "No es suerte ni algoritmo: estas tres métricas explican por qué una pieza escala 3.4 veces más.",
-        },
-        {
-          timecode: "3-10s Prueba",
-          visual:
-            "Screen recording rápido de dashboard RMT-A + subtítulos karaoke en zona 55%.",
-          copy_overlay: "GUIÓN 2 COL. + RMT-A",
-          audio:
-            "Medimos retención al segundo 3, densidad de envío por DM y Watch Time Share antes de invertir en pauta.",
-        },
-        {
-          timecode: "10-15s CTA",
-          visual:
-            "Tarjeta limpia con portada del Blueprint + badge de descarga inmediata.",
-          copy_overlay: `ESCRIBE ${keyword} AHORA`,
-          audio: actionLine,
-        },
-      ],
-    },
-    {
-      variant_id: "VAR-C-DEMO",
-      angle_name: "Demo Contraintuitiva (Anti-Volumen)",
-      framework: "Demo Contraintuitiva",
-      primary_text: `Publicar más veces a la semana NO arregla una mala retención; solo multiplica trabajo manual.\n\nMira en esta demo rápida cómo "${truncateAtLimit(
-        topic,
-        60
-      )}" convierte 1 idea validada en video 9:16, post sin enlaces en LinkedIn, hilo en X y leads cualificados.\n\n👉 ${actionLine}`,
-      headline: truncateAtLimit(`Menos volumen, más sistema (${keyword})`, 40),
-      description: truncateAtLimit(
-        `Demo técnica en 60s. Sin relleno ni agencias lentas.`,
-        78
-      ),
-      cta_button: ctaButton,
-      remotion_916_storyboard: [
-        {
-          timecode: "0-3s Hook Visual",
-          visual:
-            "Tachado animado sobre calendario de 30 posts/mes + corte seco de audio.",
-          copy_overlay: "PUBLICAR DIARIO NO SIRVE",
-          audio:
-            "Publicar más videos sin sistema solo acelera tu desgaste. Mira esta alternativa en 15 segundos.",
-        },
-        {
-          timecode: "3-10s Prueba",
-          visual:
-            "Secuencia B-roll 1.8s por plano mostrando exportación multiplataforma y ManyChat.",
-          copy_overlay: "1 IDEA → 5 CANALES + DM",
-          audio:
-            "De un guión en dos columnas salen Reels, YouTube, LinkedIn, X y la automatización de respuesta directa.",
-        },
-        {
-          timecode: "10-15s CTA",
-          visual:
-            "Cierre directo a cámara con botón visual apuntando al enlace o comentario.",
-          copy_overlay: `PIDE EL RECURSO: ${keyword}`,
-          audio: actionLine,
-        },
-      ],
-    },
-  ];
-
-  const shortTopic = truncateAtLimit(topic, 22);
-  const headlines = [
-    truncateAtLimit(`Sistema ${shortTopic}`, 30),
-    truncateAtLimit(`Automatiza ${shortTopic}`, 30),
-    truncateAtLimit(`Guía ${keyword} en 15 Min`, 30),
-    truncateAtLimit(`Escala Sin Horas Manuales`, 30),
-    truncateAtLimit(`Arquitectura IA B2B 2026`, 30),
-  ];
-
-  const descriptions = [
-    truncateAtLimit(
-      `Implementa ${truncateAtLimit(topic, 36)} con métricas reales y plantilla lista.`,
-      90
-    ),
-    truncateAtLimit(
-      `Ideal para ${truncateAtLimit(icp, 44)}. Acceso directo con ${keyword}.`,
-      90
-    ),
-  ];
-
-  const coreKw = topic
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 4)
-    .slice(0, 3)
-    .join(" ");
-
-  const exactBase = coreKw || "sistema automatizacion ia";
-
-  const ga4_utm_links = req.platforms.map((plat) => {
-    const low = plat.toLowerCase();
-    const src = low.includes("linkedin")
-      ? "linkedin_ads"
-      : low.includes("meta")
-      ? "meta_ads"
-      : low.includes("google")
-      ? "google_search"
-      : low.includes("youtube")
-      ? "youtube_ads"
-      : "tiktok_spark";
-    const med = low.includes("search") ? "cpc" : "paid_social";
-    const content = low.includes("linkedin")
-      ? `li_thought_leader_${keyword.toLowerCase()}`
-      : `var_a_pas_${keyword.toLowerCase()}`;
-    return {
-      platform: plat,
-      utm_url: buildUtmUrl(targetUrl, {
-        source: src,
-        medium: med,
-        campaign: `${campaignSlug}_${slugifyUtm(req.objective)}`,
-        content,
-      }),
-    };
-  });
-
-  return {
-    topic,
-    objective: req.objective,
-    platforms: req.platforms,
-    variants,
-    google_rsa: {
-      headlines,
-      descriptions,
-      search_keywords_exact: [
-        `[${exactBase}]`,
-        `[automatizacion contenido ia]`,
-        `[sistema leads b2b]`,
-      ],
-      search_keywords_phrase: [
-        `"${exactBase}"`,
-        `"como escalar contenido con ia"`,
-        `"embudo manychat y video corto"`,
-      ],
-      search_keywords_negative: [
-        "-gratis",
-        "-curso pirata",
-        "-plantilla word",
-        "-empleo",
-        "-tutorial basico",
-      ],
-      youtube_5s_hook: `Si eres parte de ${truncateAtLimit(
-        icp,
-        42
-      )} y sigues perdiendo horas editando sin leads: NO saltes este anuncio—mira en 15s cómo ${truncateAtLimit(
-        topic,
-        46
-      )} lo resuelve con ${keyword}.`,
-    },
-    linkedin_ads: buildLocalLinkedInAdsSpec(req, context),
-    ga4_utm_links,
+    linkedin_ads: res.linkedin_ads ?? null,
   };
 }
 
@@ -614,37 +264,23 @@ export function AdsCampaignStudioView({
   );
   const [objective, setObjective] = useState<string>("Leads / ManyChat DM");
   const [triggerKeyword, setTriggerKeyword] = useState("BLUEPRINT");
-  const [targetUrl, setTargetUrl] = useState(
-    "https://contentengine.local/blueprint"
-  );
+  const [targetUrl, setTargetUrl] = useState("");
 
   const [generating, setGenerating] = useState(false);
   const [generationSource, setGenerationSource] = useState<"backend" | "local">(
     "local"
   );
   const [campaign, setCampaign] = useState<AdCampaignResponse>(() =>
-    buildLocalAdCampaign(
-      {
-        project_id: selectedProjectId ?? null,
-        topic:
-          selectedDetail?.project?.working_title ?? "Campaña de Contenido",
-        platforms: [
-          "LinkedIn Ads (B2B & Thought Leader)",
-          "Meta Ads (IG/FB)",
-          "Google Search Ads",
-          "YouTube In-Stream Ads",
-          "TikTok Spark Ads",
-        ],
-        objective: "Leads / ManyChat DM",
-        target_url: "https://contentengine.local/blueprint",
-        trigger_keyword: "BLUEPRINT",
-      },
-      {
-        niche: creatorProfile?.niche,
-        icp: creatorProfile?.ideal_customer_profile,
-        creatorName: creatorProfile?.name,
-        hookHint: selectedDetail?.script?.hook_variants?.[0]?.hook_text,
-      }
+    buildEmptyCampaign(
+      selectedDetail?.project?.working_title ?? "",
+      "Leads / ManyChat DM",
+      [
+        "LinkedIn Ads (B2B & Thought Leader)",
+        "Meta Ads (IG/FB)",
+        "Google Search Ads",
+        "YouTube In-Stream Ads",
+        "TikTok Spark Ads",
+      ]
     )
   );
 
@@ -754,16 +390,6 @@ export function AdsCampaignStudioView({
     }
   };
 
-  const campaignContext = useMemo(
-    () => ({
-      niche: creatorProfile?.niche,
-      icp: creatorProfile?.ideal_customer_profile,
-      creatorName: creatorProfile?.name,
-      hookHint: selectedDetail?.script?.hook_variants?.[0]?.hook_text,
-    }),
-    [creatorProfile, selectedDetail]
-  );
-
   const executeCampaignGeneration = useCallback(
     async (
       topicOverride?: string,
@@ -786,49 +412,34 @@ export function AdsCampaignStudioView({
         trigger_keyword: triggerKeyword.trim() || undefined,
       };
 
+      if (!backendOnline) {
+        showToast(
+          "error",
+          "Backend sin conexión: conecta el backend para generar la campaña."
+        );
+        return;
+      }
+
       setGenerating(true);
       try {
-        if (backendOnline) {
-          const rawRes = await apiClient.generateAdCampaign(payload);
-          const normalized = normalizeCampaignResponse(
-            rawRes,
-            payload,
-            campaignContext
-          );
-          setCampaign(normalized);
-          setGenerationSource("backend");
-          setSelectedStoryboardIdx(0);
-          setSelectedFrameBlockIdx(0);
-          setUtmCampaignName(slugifyUtm(normalized.topic));
-          showToast(
-            "success",
-            customBannerMessage ||
-              `Campaña generada (${normalized.variants.length} creatividades + LinkedIn B2B + RSA + Remotion 9:16 + UTMs).`
-          );
-        } else {
-          const local = buildLocalAdCampaign(payload, campaignContext);
-          setCampaign(local);
-          setGenerationSource("local");
-          setSelectedStoryboardIdx(0);
-          setSelectedFrameBlockIdx(0);
-          setUtmCampaignName(slugifyUtm(local.topic));
-          showToast(
-            customBannerMessage ? "success" : "info",
-            customBannerMessage ||
-              "Campaña generada con motor local rico (LinkedIn B2B + Meta + Google RSA + Remotion 9:16)."
-          );
-        }
-      } catch {
-        const fallback = buildLocalAdCampaign(payload, campaignContext);
-        setCampaign(fallback);
-        setGenerationSource("local");
+        const rawRes = await apiClient.generateAdCampaign(payload);
+        const normalized = normalizeCampaignResponse(rawRes);
+        setCampaign(normalized);
+        setGenerationSource("backend");
         setSelectedStoryboardIdx(0);
         setSelectedFrameBlockIdx(0);
-        setUtmCampaignName(slugifyUtm(fallback.topic));
+        setUtmCampaignName(slugifyUtm(normalized.topic));
         showToast(
-          "info",
+          "success",
           customBannerMessage ||
-            "Backend sin respuesta para /ads/generate-campaign: campaña generada con fallback local."
+            `Campaña generada (${normalized.variants.length} creatividades + LinkedIn B2B + RSA + Remotion 9:16 + UTMs).`
+        );
+      } catch (err) {
+        showToast(
+          "error",
+          err instanceof Error
+            ? `No se ha generado la campaña: ${err.message}`
+            : "No se ha generado la campaña."
         );
       } finally {
         setGenerating(false);
@@ -842,7 +453,6 @@ export function AdsCampaignStudioView({
       targetUrl,
       triggerKeyword,
       backendOnline,
-      campaignContext,
       showToast,
     ]
   );
@@ -985,31 +595,8 @@ export function AdsCampaignStudioView({
   const previewBlock =
     activeStoryboard[selectedFrameBlockIdx] ?? activeStoryboard[0];
 
-  const resolvedLinkedInSpec = useMemo<LinkedInAdsSpec>(() => {
-    if (campaign.linkedin_ads) return campaign.linkedin_ads;
-    return buildLocalLinkedInAdsSpec(
-      {
-        project_id: selectedProjectId ?? null,
-        topic: campaign.topic || topic || "Campaña B2B",
-        platforms: campaign.platforms,
-        objective: campaign.objective || objective,
-        target_url: targetUrl,
-        trigger_keyword: triggerKeyword,
-      },
-      campaignContext
-    );
-  }, [
-    campaign.linkedin_ads,
-    campaign.topic,
-    campaign.platforms,
-    campaign.objective,
-    selectedProjectId,
-    topic,
-    objective,
-    targetUrl,
-    triggerKeyword,
-    campaignContext,
-  ]);
+  const resolvedLinkedInSpec: LinkedInAdsSpec =
+    campaign.linkedin_ads ?? EMPTY_LINKEDIN_ADS_SPEC;
 
   return (
     <div className="space-y-5">
@@ -1042,7 +629,7 @@ export function AdsCampaignStudioView({
             label={
               generationSource === "backend"
                 ? "Sincronizado con Backend IA"
-                : "Motor Studio Local Listo"
+                : "Sin campaña generada"
             }
             variant={generationSource === "backend" ? "success" : "info"}
           />
@@ -1272,6 +859,17 @@ export function AdsCampaignStudioView({
           />
         </div>
       </form>
+
+      {campaign.variants.length === 0 && (
+        <p
+          role="status"
+          className="rounded-xl border border-dashed border-slate-700 bg-slate-950/60 p-4 text-xs text-slate-400"
+        >
+          {backendOnline
+            ? "Aún no has generado ninguna campaña. Rellena el formulario y pulsa generar: el resultado aparecerá aquí."
+            : "Backend sin conexión: conecta el backend para generar campañas. Aquí no se muestra ningún ejemplo."}
+        </p>
+      )}
 
       {/* Results Area with Clean Accessible Tablist */}
       <div className="bg-[#0b0e14] border border-slate-800/90 rounded-xl overflow-hidden shadow-xl shadow-black/25">

@@ -94,7 +94,7 @@ export function buildEmptyProjectDetail(proj: ContentProject): ProjectDetail {
           category: "Contrarian",
           hook_text: `La mayoría se equivoca con "${proj.working_title}": esto es lo que funciona.`,
           pattern_interrupt: "Zoom punch 115%",
-          estimated_hold_rate: 73.5,
+          estimated_hold_rate: 0,
         },
       ],
       selected_hook_index: 0,

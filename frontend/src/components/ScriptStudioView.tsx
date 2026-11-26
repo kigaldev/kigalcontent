@@ -231,7 +231,7 @@ function buildLinkedInDraft(params: {
     const wantsDm = /(dm|mensaje|escrib|registr)/i.test(rawNotes);
     const firstComment = wantsDm
       ? "Si quieres que lo comentemos para tu caso concreto, escríbeme por mensaje directo o deja un comentario aquí abajo y te respondo personalmente."
-      : `👇 Acceso o más detalles sobre esta publicación: ${deliveryUrl || "https://contentengine.local/recurso"}`;
+      : `👇 Acceso o más detalles sobre esta publicación: ${deliveryUrl || "[enlace a tu recurso]"}`;
 
     return {
       hook,
@@ -266,7 +266,7 @@ function buildLinkedInDraft(params: {
 
   const body = stripUrls(bodyLines.join("\n"));
   const firstComment = `👇 Recurso completo del sistema (o comenta ${keyword} para recibirlo por DM): ${
-    deliveryUrl || "https://contentengine.local/recurso"
+    deliveryUrl || "[enlace a tu recurso]"
   }`;
 
   return { hook, body, firstComment };
@@ -482,33 +482,12 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
       const lm = leadMagnets.find((item) => item.id === matchedTrigger.lead_magnet_id);
       if (lm?.delivery_url) return lm.delivery_url;
     }
-    return leadMagnets[0]?.delivery_url || "https://contentengine.local/blueprint";
+    return leadMagnets[0]?.delivery_url || "[enlace a tu recurso]";
   }, [manychatTriggers, leadMagnets, leadMagnetKeyword]);
 
   const hookVariants: HookCandidate[] = useMemo(() => {
-    const existing = selectedDetail?.script?.hook_variants ?? [];
-    if (existing.length > 0) return existing;
-    const title = selectedDetail?.project?.working_title || "tu sistema de contenido";
-    return [
-      {
-        category: "Contrarian",
-        hook_text: `Deja de publicar más en "${clampText(title, 42)}": corrige los primeros 3 segundos.`,
-        pattern_interrupt: "Zoom punch 115% + texto grande en zona segura",
-        estimated_hold_rate: 74.2,
-      },
-      {
-        category: "Dolor / Pérdida",
-        hook_text: `El fallo invisible de 400ms que hunde tu retención antes del segundo 5.`,
-        pattern_interrupt: "Corte seco + overlay métrica",
-        estimated_hold_rate: 71.4,
-      },
-      {
-        category: "Dato Verificable",
-        hook_text: `3.4x más Watch Time Share aplicando guión en 2 columnas y -14 LUFS.`,
-        pattern_interrupt: "Captura antes/después en pantalla",
-        estimated_hold_rate: 72.9,
-      },
-    ];
+    // Only real hooks from the generated script: no invented hooks or hold rates.
+    return selectedDetail?.script?.hook_variants ?? [];
   }, [selectedDetail]);
 
   const activeHook = hookVariants[selectedHookIndex] ?? hookVariants[0] ?? null;
@@ -874,7 +853,7 @@ export function ScriptStudioView({ onRefresh }: ScriptStudioViewProps) {
             : p
         );
         setSelectedDetail({ ...selectedDetail, social_posts: localPosts });
-        showToast("info", "✅ Borrador de LinkedIn guardado localmente.");
+        showToast("info", "Backend sin conexión: el borrador de LinkedIn solo se ha guardado en esta pestaña.");
       }
     } catch (err) {
       showToast(

@@ -20,7 +20,7 @@
         "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/hitl/issue-token",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"project_id\": \"{{ $json.body.project_id }}\",\n  \"tier\": 3,\n  \"action\": \"publish_all_channels\",\n  \"actor\": \"n8n-automation\",\n  \"two_factor_code\": \"{{ $json.body.two_factor_code || '884210' }}\"\n}",
+        "jsonBody": "={\n  \"project_id\": \"{{ $json.body.project_id }}\",\n  \"tier\": 3,\n  \"action\": \"publish_all_channels\",\n  \"actor\": \"n8n-automation\"\n}",
         "options": {}
       },
       "id": "http-issue-token",

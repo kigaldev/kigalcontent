@@ -202,12 +202,7 @@ export function MobileSafeZoneSimulator({
         setS3Info(res);
         showToast("success", `Preparación de subida lista (${res.upload_id}).`);
       } else {
-        setS3Info({
-          upload_id: "mpu_offline_demo_01",
-          object_key: `projects/${selectedProjectId}/raw/A_ROLL.mp4`,
-          download_url: "s3://ace-media-vault/demo.mp4",
-        });
-        showToast("info", "Enlace de subida simulado localmente.");
+        showToast("error", "Backend sin conexión: no se puede preparar la subida.");
       }
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error preparando subida");
@@ -216,13 +211,21 @@ export function MobileSafeZoneSimulator({
 
   const handleRunMediaPipeline = async () => {
     if (!selectedProjectId) return;
+    if (!backendOnline) {
+      showToast("error", "Backend sin conexión: el vídeo no se ha procesado.");
+      return;
+    }
+    if (!s3Info?.download_url) {
+      showToast("info", "Sube primero el vídeo en bruto para poder procesarlo.");
+      return;
+    }
     setProcessing(true);
     const activePreset = NATIVE_SIGNATURE_PRESETS[platformOverlay];
     try {
       if (backendOnline) {
         const qc = await apiClient.processMedia({
           project_id: selectedProjectId,
-          raw_media_url: s3Info?.download_url || "s3://ace-media-vault/demo.mp4",
+          raw_media_url: s3Info.download_url,
           silence_noise_db: silenceDb,
           min_silence_duration_sec: minSilenceSec,
           target_lufs: -14.0,
@@ -234,11 +237,6 @@ export function MobileSafeZoneSimulator({
         showToast(
           "success",
           `Video procesado: ${qc.silences_trimmed} pausas eliminadas · ${qc.measured_lufs} LUFS · Huella: ${activePreset.editorLabel}.`
-        );
-      } else {
-        showToast(
-          "info",
-          `Simulación completada: -14.0 LUFS, 9:16 y huella nativa ${activePreset.editorLabel}.`
         );
       }
     } catch (err) {
@@ -753,21 +751,21 @@ export function MobileSafeZoneSimulator({
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                 <span className="text-[11px] text-slate-400">Volumen Normalizado</span>
                 <div className="text-lg font-bold text-emerald-300 mt-0.5">
-                  {videoQc?.measured_lufs?.toFixed(1) ?? "-14.0"} LUFS
+                  {videoQc?.measured_lufs != null ? `${videoQc.measured_lufs.toFixed(1)} LUFS` : "—"}
                 </div>
                 <span className="text-[10px] text-slate-500">Estándar oficial</span>
               </div>
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                 <span className="text-[11px] text-slate-400">Pico Máximo</span>
                 <div className="text-lg font-bold text-cyan-300 mt-0.5">
-                  {videoQc?.true_peak_dbfs?.toFixed(1) ?? "-1.0"} dB
+                  {videoQc?.true_peak_dbfs != null ? `${videoQc.true_peak_dbfs.toFixed(1)} dB` : "—"}
                 </div>
                 <span className="text-[10px] text-slate-500">Sin distorsión</span>
               </div>
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                 <span className="text-[11px] text-slate-400">Pausas Recortadas</span>
                 <div className="text-lg font-bold text-white mt-0.5">
-                  {videoQc?.silences_trimmed ?? 0} cortes
+                  {videoQc?.silences_trimmed != null ? `${videoQc.silences_trimmed} cortes` : "—"}
                 </div>
                 <span className="text-[10px] text-slate-500">Silencios eliminados</span>
               </div>

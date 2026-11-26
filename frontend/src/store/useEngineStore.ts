@@ -40,7 +40,6 @@ interface EngineState {
   liveEvents: Array<{ event: string; timestamp: string; summary: string }>;
   hitlModal: PendingHITLModal | null;
   toastMessage: { type: "success" | "error" | "info"; text: string } | null;
-  creatorSecurityPin: string;
   activeHitlToken: string;
 
   setActiveTab: (tab: ActiveStudioTab) => void;
@@ -56,7 +55,6 @@ interface EngineState {
   closeHitlModal: () => void;
   showToast: (type: "success" | "error" | "info", text: string) => void;
   clearToast: () => void;
-  setCreatorSecurityPin: (pin: string) => void;
   setActiveHitlToken: (token: string) => void;
 }
 
@@ -72,7 +70,6 @@ export const useEngineStore = create<EngineState>((set) => ({
   liveEvents: [],
   hitlModal: null,
   toastMessage: null,
-  creatorSecurityPin: "884210",
   activeHitlToken: "",
 
   setActiveTab: (activeTab) => set({ activeTab }),
@@ -98,6 +95,5 @@ export const useEngineStore = create<EngineState>((set) => ({
   closeHitlModal: () => set({ hitlModal: null }),
   showToast: (type, text) => set({ toastMessage: { type, text } }),
   clearToast: () => set({ toastMessage: null }),
-  setCreatorSecurityPin: (creatorSecurityPin) => set({ creatorSecurityPin }),
   setActiveHitlToken: (activeHitlToken) => set({ activeHitlToken }),
 }));

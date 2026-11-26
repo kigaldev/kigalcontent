@@ -56,32 +56,26 @@ export function ClosedLoopAnalyticsView({
   const [windowType, setWindowType] = useState<"24h" | "7d" | "30d">("7d");
 
   // Watch Time Share A/B state
-  const [impA, setImpA] = useState(10000);
-  const [ctrA, setCtrA] = useState(8.0);
-  const [avdA, setAvdA] = useState(40);
-  const [impB, setImpB] = useState(10000);
-  const [ctrB, setCtrB] = useState(5.0);
-  const [avdB, setAvdB] = useState(180);
+  const [impA, setImpA] = useState(0);
+  const [ctrA, setCtrA] = useState(0);
+  const [avdA, setAvdA] = useState(0);
+  const [impB, setImpB] = useState(0);
+  const [ctrB, setCtrB] = useState(0);
+  const [avdB, setAvdB] = useState(0);
   const [wtsResult, setWtsResult] = useState<WatchTimeShareResponse | null>(null);
 
   // RMT-A Diagnostic Simulator state
-  const [views, setViews] = useState(46800);
-  const [baselineViews, setBaselineViews] = useState(14000);
-  const [hold3s, setHold3s] = useState(74);
-  const [completion, setCompletion] = useState(56.5);
-  const [sendsReach, setSendsReach] = useState(3.1);
+  const [views, setViews] = useState(0);
+  const [baselineViews, setBaselineViews] = useState(0);
+  const [hold3s, setHold3s] = useState(0);
+  const [completion, setCompletion] = useState(0);
+  const [sendsReach, setSendsReach] = useState(0);
   const [rmtaDiag, setRmtaDiag] = useState<RMTADiagnosisResponse | null>(null);
 
   const activeSnap =
     analytics?.snapshots.find((s) => s.window_type === windowType) ??
     analytics?.snapshots[0];
-  const retentionPoints = activeSnap?.retention_curve ?? [
-    { sec: 0, pct: 100 },
-    { sec: 3, pct: 74 },
-    { sec: 15, pct: 65 },
-    { sec: 30, pct: 61 },
-    { sec: 60, pct: 54 },
-  ];
+  const retentionPoints = activeSnap?.retention_curve ?? [];
 
   // Build SVG polyline coordinates
   const maxSec = Math.max(...retentionPoints.map((p) => p.sec), 60);
@@ -123,6 +117,14 @@ export function ClosedLoopAnalyticsView({
   };
 
   const handleRunRmtaDiagnosis = async () => {
+    if (!backendOnline) {
+      showToast("info", "Backend sin conexión: conecta el backend para generar el diagnóstico.");
+      return;
+    }
+    if (views <= 0 || baselineViews <= 0) {
+      showToast("info", "Introduce tus métricas reales (visualizaciones y media de referencia) para evaluar.");
+      return;
+    }
     try {
       if (backendOnline) {
         const res = await apiClient.diagnoseRmta({
@@ -133,8 +135,8 @@ export function ClosedLoopAnalyticsView({
           hold_rate_3s: hold3s,
           completion_rate: completion,
           sends_per_reach: sendsReach,
-          dwell_time_seconds: 44.5,
-          watch_time_share: wtsResult?.share_b_pct ?? 71.8,
+          dwell_time_seconds: 0,
+          watch_time_share: wtsResult?.share_b_pct ?? 0,
           consecutive_bottom_quartile_iterations: 0,
           persist_rule: true,
         });
@@ -144,27 +146,6 @@ export function ClosedLoopAnalyticsView({
           "success",
           `Decisión generada: ${res.rmta_classification} — ${res.recommended_action}`
         );
-      } else {
-        const isRepeat = views > baselineViews * 1.5 && hold3s > 70;
-        setRmtaDiag({
-          views_factor_vs_baseline: Math.round((views / baselineViews) * 10) / 10,
-          is_outlier_positive: isRepeat,
-          is_outlier_negative: false,
-          diagnosis_layer: isRepeat ? "Ejecución" : "Empaque",
-          rmta_classification: isRepeat ? "REPETIR_FRANQUICIAR" : "MEJORAR",
-          recommended_action: isRepeat
-            ? "¡Gran rendimiento! Convierte este tema en una serie recurrente de videos."
-            : "Ajusta la miniatura y los primeros 3 segundos para subir la retención inicial.",
-          sends_social_value_sufficient: sendsReach >= 2.0,
-          four_layer_breakdown: {
-            Idea: { status: "Excelente", metric: `${views} visitas`, note: "Tema de alto interés" },
-            Empaque: { status: "Aceptable", metric: `${hold3s}% a los 3s`, note: "Gancho inicial correcto" },
-            Ejecución: { status: "Óptima", metric: `${completion}% completado`, note: "Buen ritmo" },
-            Distribución: { status: "Alta", metric: `${sendsReach}% compartido`, note: "Viral en mensajes" },
-          },
-          learned_rule_statement: "Los videos con demostración práctica retienen 40% más que los explicativos teóricos.",
-        });
-        showToast("info", "Evaluación simulada localmente.");
       }
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error en diagnóstico");
@@ -250,7 +231,7 @@ export function ClosedLoopAnalyticsView({
             {activeSnap ? activeSnap.view_count.toLocaleString() : "0"}
           </div>
           <span className="text-[11px] text-slate-400 font-semibold mt-1 inline-block">
-            {activeSnap ? `+${(activeSnap.view_count / (baselineViews || 1)).toFixed(1)}x sobre la media` : "Sin publicaciones aún"}
+            {activeSnap ? `Ventana: ${activeSnap.window_type}` : "Aún no hay publicaciones medidas"}
           </span>
         </div>
 
@@ -300,7 +281,9 @@ export function ClosedLoopAnalyticsView({
               </p>
             </div>
             <span className="text-xs font-bold text-cyan-300">
-              {retentionPoints[retentionPoints.length - 1]?.pct ?? 54}% al final
+              {retentionPoints.length > 0
+                ? `${retentionPoints[retentionPoints.length - 1].pct}% al final`
+                : "Sin datos todavía"}
             </span>
           </div>
 

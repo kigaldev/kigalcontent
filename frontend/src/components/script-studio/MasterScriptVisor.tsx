@@ -236,7 +236,7 @@ export function MasterScriptVisor({
                       {hook.category}
                     </span>
                     <span className="text-[10px] font-mono text-emerald-400 font-bold">
-                      ~{hook.estimated_hold_rate}% Hold
+                      {hook.estimated_hold_rate ? `~${hook.estimated_hold_rate}% (estimado)` : "Sin estimación"}
                     </span>
                   </div>
                   <p className="text-xs text-white leading-relaxed font-medium">

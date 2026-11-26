@@ -417,7 +417,31 @@ export interface KigalChatInteraction {
   dm_reply_text: string;
   lead_magnet_title: string;
   delivery_url: string;
-  status: "DELIVERED" | "PENDING" | "UNMATCHED";
+  /** SENT = message sent by the Instagram bot (see kind); MATCHED = keyword match only, nothing delivered. */
+  status: "SENT" | "DELIVERED" | "MATCHED" | "PENDING" | "UNMATCHED" | (string & {});
+  kind?: "prompt" | "not_following" | "reward" | "public" | (string & {}) | null;
+  account_username?: string | null;
+  rule_id?: number | null;
+}
+
+export interface KigalChatFunnelRow {
+  rule_id?: number | string | null;
+  account_id?: string;
+  name?: string;
+  keyword?: string | null;
+  keywords?: string[];
+  enabled?: boolean | null;
+  prompts_sent?: number;
+  rewards_sent?: number;
+  conversion_pct?: number | null;
+}
+
+export interface KigalChatStatus {
+  bot_connected?: boolean;
+  accounts?: number;
+  active_rules?: number;
+  funnel_7d?: KigalChatFunnelRow[];
+  detail?: string;
 }
 
 export interface AdCampaignGenerateRequest {
@@ -633,7 +657,6 @@ export interface ComposerPostCreateRequest {
   scheduled_at?: string | null;
   timezone?: string;
   auto_publish?: boolean;
-  hitl_pin?: string;
   hitl_token?: string | null;
 }
 

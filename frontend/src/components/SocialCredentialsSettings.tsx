@@ -1137,7 +1137,7 @@ export const SocialCredentialsSettings: React.FC = () => {
           <div className="mt-4 p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30 text-xs text-cyan-200 flex items-center gap-2.5">
             <span className="text-sm">🛡️</span>
             <p>
-              <strong>Estás en Modo Sandbox / Pruebas:</strong> Puedes generar videos, guiones, textos y aprobar publicaciones de forma 100% segura. El sistema simulará la publicación real y verificará todas las reglas de formato sin publicar nada en tus cuentas reales hasta que decidas activar el modo producción.
+              <strong>Modo pruebas:</strong> puedes generar vídeos, guiones y textos y aprobarlos con seguridad. Un canal sin token guardado no publica nada: el servidor responde «Sin conectar» y no se inventa ningún resultado.
             </p>
           </div>
         )}
@@ -1183,7 +1183,7 @@ export const SocialCredentialsSettings: React.FC = () => {
               <span className="text-[10px] text-slate-400 truncate">
                 {serverInfo?.configured
                   ? serverInfo.account_name || `Conectado (${serverInfo.source})`
-                  : "Simulación Sandbox"}
+                  : "Sin conectar"}
               </span>
             </button>
           );

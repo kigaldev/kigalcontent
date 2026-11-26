@@ -199,8 +199,10 @@ class GitHubBatchImportResponse(BaseModel):
 class ManyChatTriggerRequest(BaseModel):
     keyword: str = Field(..., min_length=1, max_length=100)
     platform: str = Field(default="instagram")
-    username: str = Field(default="@usuario")
+    username: str = Field(default="")
     comment_text: str | None = None
+    # True from the panel rule tester: returns the match without counting, auditing or broadcasting.
+    dry_run: bool = False
 
 
 class ManyChatTriggerResponse(BaseModel):
@@ -226,12 +228,31 @@ class KigalChatInteraction(BaseModel):
     dm_reply_text: str
     lead_magnet_title: str
     delivery_url: str = ""
-    status: str = "DELIVERED"
+    status: str = "SENT"
+    # Fields read from the Instagram bot tables (bot_sent); None for other sources.
+    kind: str | None = None  # prompt | not_following | reward | public
+    account_username: str | None = None
+    rule_id: int | None = None
 
 
-class KigalChatAutoSweepResponse(BaseModel):
-    processed_count: int
-    interactions: list[KigalChatInteraction] = Field(default_factory=list)
+class KigalChatFunnelRow(BaseModel):
+    rule_id: int | None = None
+    account_id: str
+    name: str
+    keyword: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+    enabled: bool | None = None
+    prompts_sent: int = 0
+    rewards_sent: int = 0
+    conversion_pct: float | None = None
+
+
+class KigalChatStatus(BaseModel):
+    bot_connected: bool
+    accounts: int = 0
+    active_rules: int = 0
+    funnel_7d: list[KigalChatFunnelRow] = Field(default_factory=list)
+    detail: str = ""
 
 
 
@@ -462,7 +483,6 @@ class HITLTokenIssueRequest(BaseModel):
     tier: int = Field(..., ge=2, le=3)
     action: str
     actor: str = Field(default="creator")
-    two_factor_code: str | None = None
 
 
 class HITLTokenIssueResponse(BaseModel):
@@ -513,7 +533,7 @@ class MediaProcessRequest(BaseModel):
     min_silence_duration_sec: float = Field(default=0.4, ge=0.2, le=2.0)
     target_lufs: float = Field(default=-14.0, ge=-24.0, le=-8.0)
     subtitle_y_percent: int = Field(default=55, ge=25, le=70)
-    generate_demo_source_if_missing: bool = True
+    generate_demo_source_if_missing: bool = False
     target_platform_signature: str = Field(default="Instagram")
 
 
@@ -952,7 +972,7 @@ class BestTimeSlot(BaseModel):
 class BestTimeHeatmapResponse(BaseModel):
     channel: str
     timezone: str = "Europe/Madrid"
-    source: str = "benchmark"
+    source: str = "empty"
     peak_slot: dict[str, Any]
     grid: list[BestTimeSlot]
 
@@ -971,7 +991,6 @@ class ComposerPostCreateRequest(BaseModel):
     scheduled_at: datetime | None = None
     timezone: str = "Europe/Madrid"
     auto_publish: bool = True
-    hitl_pin: str | None = None
     hitl_token: str | None = None
 
 
@@ -980,7 +999,6 @@ class ScheduleUpdateRequest(BaseModel):
     timezone: str | None = None
     auto_publish: bool | None = None
     publish_status: str | None = None
-    hitl_pin: str | None = None
     hitl_token: str | None = None
 
 

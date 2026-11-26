@@ -374,10 +374,7 @@ export function CreatorProfileView({ onRefresh, onProceedToNextStep }: CreatorPr
         const saved = await apiClient.updateCreatorProfile(payload);
         setCreatorProfile(saved);
       } else {
-        setCreatorProfile({
-          ...(creatorProfile || ({} as CreatorProfile)),
-          ...payload,
-        } as CreatorProfile);
+        throw new Error("Backend sin conexión: el perfil no se ha guardado.");
       }
 
       setSaveSuccess(true);

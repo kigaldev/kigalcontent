@@ -47,15 +47,16 @@ class GoogleDriveService:
         folder_id = self.extract_resource_id(folder_url_or_id)
 
         if not self.api_key:
-            # Fallback simulated / single-file detection if no API key is set yet
+            # Without an API key the folder cannot be listed: return only the id the user pasted
+            # (no invented name or size) so a shared file can still be imported directly.
             return [
                 {
                     "file_id": folder_id,
-                    "name": f"clip_gdrive_{folder_id[:8]}.mp4",
+                    "name": folder_id,
                     "mime_type": "video/mp4",
-                    "size_bytes": 45_200_000,
+                    "size_bytes": 0,
                     "web_view_link": f"https://drive.google.com/file/d/{folder_id}/view",
-                    "source": "google_drive_shared",
+                    "source": "google_drive_unverified",
                 }
             ]
 
@@ -75,7 +76,7 @@ class GoogleDriveService:
                 return [
                     {
                         "file_id": folder_id,
-                        "name": f"video_drive_{folder_id[:8]}.mp4",
+                        "name": folder_id,
                         "mime_type": "video/mp4",
                         "size_bytes": 0,
                         "web_view_link": f"https://drive.google.com/file/d/{folder_id}/view",
@@ -121,10 +122,9 @@ class GoogleDriveService:
                 dest_path.write_bytes(resp.content)
                 return dest_path
 
-        # If direct download was blocked by Google virus scan warning or auth,
-        # write a valid placeholder demo video if in development
-        if not dest_path.exists() or dest_path.stat().st_size == 0:
-            from app.workers.media_pipeline import synthesize_demo_video_with_silences
-            synthesize_demo_video_with_silences(dest_path, duration_sec=6.0)
-
-        return dest_path
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                return dest_path
+            raise FileNotFoundError(
+                f"Google Drive no ha entregado el archivo (HTTP {resp.status_code}). "
+                "Comprueba que está compartido como «Cualquiera con el enlace» o configura GOOGLE_DRIVE_API_KEY."
+            )

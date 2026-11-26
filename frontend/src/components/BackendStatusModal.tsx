@@ -133,7 +133,7 @@ export function BackendStatusModal({
                 }`}
               />
               <span className="text-sm font-medium text-slate-200">
-                {backendOnline ? "Servidor Online y Operativo" : "Modo Local / Desconectado"}
+                {backendOnline ? "Servidor Online y Operativo" : "Backend sin conexión"}
               </span>
             </div>
             <span className="text-xs text-slate-500 font-mono">
@@ -208,7 +208,7 @@ export function BackendStatusModal({
         {/* Informative Help Box */}
         <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-3 text-xs text-cyan-200/90 leading-relaxed">
           <p className="font-semibold text-cyan-300 mb-1 flex items-center gap-1.5">
-            💡 ¿Por qué aparece &quot;Modo Local&quot; en Vercel?
+            💡 ¿Por qué aparece &quot;Backend sin conexión&quot; en Vercel?
           </p>
           <p className="text-[11px] text-slate-300">
             En Next.js, la variable <code className="text-cyan-300 font-mono">NEXT_PUBLIC_API_URL</code> se incrusta en el código durante la compilación (<code className="text-cyan-300 font-mono">next build</code>). Si añadiste la variable en los Ajustes de Vercel después del último despliegue:

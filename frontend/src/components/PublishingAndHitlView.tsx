@@ -16,7 +16,6 @@ import {
   Copy,
   Fingerprint,
   HelpCircle,
-  KeyRound,
   Lock,
   MessageCircle,
   Plus,
@@ -150,9 +149,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     backendOnline,
     showToast,
     setSelectedDetail,
-    creatorSecurityPin,
     activeHitlToken,
-    setCreatorSecurityPin,
     setActiveHitlToken,
   } = useEngineStore();
 
@@ -170,6 +167,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     "LinkedIn",
   ]);
   const [publishing, setPublishing] = useState(false);
+  const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const bodyTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
@@ -307,7 +305,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         setCalendarRefreshTick((t) => t + 1);
         showToast("success", `Texto para ${post.channel} guardado y validado.`);
       } else {
-        showToast("info", `Texto para ${post.channel} validado localmente.`);
+        showToast("error", "Backend sin conexión: el texto no se ha guardado.");
       }
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error guardando texto");
@@ -331,110 +329,95 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         setCalendarRefreshTick((t) => t + 1);
         showToast("success", "Textos adaptados a cada red social con éxito.");
       } else {
-        showToast("info", "Textos regenerados localmente.");
+        showToast("error", "Backend sin conexión: conecta el backend para regenerar los textos.");
       }
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error regenerando textos");
     }
   };
 
-  const handleIssueTier3Token = async () => {
+  const publishNoticeChannels = selectedChannels
+    .map((ch) => {
+      const account = calendarContext.connectedChannels?.[ch]?.account_name;
+      return account ? `${ch} (${account})` : ch;
+    })
+    .join(", ");
+
+  const handlePublishLive = async () => {
     if (!selectedProjectId) return;
-    const pinToUse = creatorSecurityPin.trim() || "884210";
-    if (!creatorSecurityPin.trim()) {
-      setCreatorSecurityPin(pinToUse);
-    }
+    setConfirmingPublish(false);
+    setPublishing(true);
     try {
-      if (backendOnline) {
-        const res = await apiClient.issueHitlToken({
+      if (!backendOnline) {
+        showToast(
+          "error",
+          "Backend sin conexión: no se ha publicado nada. Conecta el backend para publicar."
+        );
+        return;
+      }
+
+      let token = activeHitlToken;
+      if (!token || !token.includes("_T3_") || token.includes("_LOCAL_")) {
+        const issued = await apiClient.issueHitlToken({
           project_id: selectedProjectId,
           tier: 3,
           action: "publish_all_channels",
           actor: "creator",
-          two_factor_code: pinToUse,
         });
-        setActiveHitlToken(res.token);
-        showToast(
-          "success",
-          `Clave de autorización generada (${res.token.slice(0, 24)}...).`
-        );
-      } else {
-        const mockToken = `AUTH_CREATOR_OK_${selectedProjectId.slice(0, 8)}_LISTO`;
-        setActiveHitlToken(mockToken);
-        showToast("info", `Clave simulada lista: ${mockToken}`);
-      }
-    } catch (err) {
-      showToast("error", err instanceof Error ? err.message : "Error generando clave");
-    }
-  };
-
-  const handlePublishLive = async () => {
-    if (!selectedProjectId) return;
-    setPublishing(true);
-    const pinToUse = creatorSecurityPin.trim() || "884210";
-    if (!creatorSecurityPin.trim()) {
-      setCreatorSecurityPin(pinToUse);
-    }
-    try {
-      let token = activeHitlToken;
-      if (!token || !token.includes("_T3_") || token.includes("_LOCAL_")) {
-        if (backendOnline) {
-          const res = await apiClient.issueHitlToken({
-            project_id: selectedProjectId,
-            tier: 3,
-            action: "publish_all_channels",
-            actor: "creator",
-            two_factor_code: pinToUse,
-          });
-          token = res.token;
-          setActiveHitlToken(token);
-        } else {
-          token = `AUTH_CREATOR_OK_${selectedProjectId.slice(0, 8)}_LISTO`;
-          setActiveHitlToken(token);
-        }
+        token = issued.token;
+        setActiveHitlToken(token);
       }
 
-      if (backendOnline) {
-        const res = await apiClient.publishSocial({
-          project_id: selectedProjectId,
-          channels: selectedChannels,
-          hitl_token: token,
-          actor: "creator",
-        });
-        await onRefresh();
-        setCalendarRefreshTick((t) => t + 1);
-        const pubs = res.publications ?? [];
-        const liveChannels = pubs
-          .filter((p) => p.mode === "live_oauth2")
+      const res = await apiClient.publishSocial({
+        project_id: selectedProjectId,
+        channels: selectedChannels,
+        hitl_token: token,
+        actor: "creator",
+      });
+      await onRefresh();
+      setCalendarRefreshTick((t) => t + 1);
+      const pubs = res.publications ?? [];
+      const channelsWhere = (pred: (p: (typeof pubs)[number]) => boolean) =>
+        pubs
+          .filter(pred)
           .map((p) => p.channel)
           .filter(Boolean);
-        const sandboxChannels = pubs
-          .filter((p) => p.mode !== "live_oauth2")
-          .map((p) => p.channel)
-          .filter(Boolean);
+      const isFailed = (p: (typeof pubs)[number]) =>
+        (p.status ?? "").toUpperCase() === "FAILED";
+      const isNotConfigured = (p: (typeof pubs)[number]) =>
+        (p.status ?? "").toUpperCase() === "NOT_CONFIGURED" ||
+        p.mode === "not_configured";
+      const liveChannels = channelsWhere(
+        (p) => p.mode === "live_oauth2" && !isFailed(p) && !isNotConfigured(p)
+      );
+      const notConnectedChannels = channelsWhere(
+        (p) => !isFailed(p) && (isNotConfigured(p) || p.mode !== "live_oauth2")
+      );
+      const failedChannels = channelsWhere(isFailed);
 
-        if (liveChannels.length > 0 && sandboxChannels.length === 0) {
-          showToast(
-            "success",
-            `🚀 ¡Publicado EN VIVO en: ${liveChannels.join(", ")}!`
-          );
-        } else if (liveChannels.length > 0 && sandboxChannels.length > 0) {
-          showToast(
-            "info",
-            `🚀 Publicado en vivo: ${liveChannels.join(", ")}. ⚠️ En modo simulación (sin token guardado): ${sandboxChannels.join(", ")}.`
-          );
-        } else {
-          showToast(
-            "error",
-            `⚠️ Solo se simuló en Sandbox (${selectedChannels.join(", ")}). No hay un Access Token guardado en el servidor: ve a 'Automatizaciones y APIs → Conexiones Oficiales', guarda tu token y pulsa 'Probar Conexión'.`
-          );
-        }
-      } else {
-        showToast(
-          "success",
-          `¡Simulación completada! Video publicado en ${selectedChannels.join(", ")}.`
+      const parts: string[] = [];
+      if (liveChannels.length > 0) {
+        parts.push(`Publicado en: ${liveChannels.join(", ")}.`);
+      }
+      if (notConnectedChannels.length > 0) {
+        parts.push(
+          `Sin conectar (no se ha publicado): ${notConnectedChannels.join(", ")}. Guarda el token en 'Automatizaciones y APIs → Conexiones Oficiales'.`
         );
       }
+      if (failedChannels.length > 0) {
+        parts.push(`Error al publicar en: ${failedChannels.join(", ")}.`);
+      }
+      if (parts.length === 0) {
+        parts.push("El servidor no ha devuelto ninguna publicación.");
+      }
+      const allLive =
+        liveChannels.length > 0 &&
+        notConnectedChannels.length === 0 &&
+        failedChannels.length === 0;
+      showToast(
+        allLive ? "success" : liveChannels.length > 0 ? "info" : "error",
+        parts.join(" ")
+      );
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Error en publicación");
     } finally {
@@ -484,17 +467,11 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
             </h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Programa en el calendario visual con mapa de mejores horas, adapta el copy con huella nativa, activa Autolistas evergreen y autoriza salidas en vivo con tu PIN HITL.
+            Programa en el calendario visual con mapa de mejores horas, adapta el copy con huella nativa, activa Autolistas evergreen y publica en vivo con un aviso de confirmación final.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {activeHitlToken && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Clave HITL lista
-            </span>
-          )}
           <button
             type="button"
             onClick={() => setShowTips((v) => !v)}
@@ -1074,7 +1051,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                     Autorización Final de Publicación (Control Humano Exclusivo)
                   </h3>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    Ninguna publicación saldrá en vivo en tus redes sin tu PIN de seguridad y clave HITL. Cualquier clave generada desde el Globo de Perfil o el Planificador se sincroniza aquí al instante.
+                    Ninguna publicación saldrá en vivo en tus redes sin que pulses el botón final y confirmes el aviso previo.
                   </p>
                 </div>
               </div>
@@ -1101,73 +1078,59 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
             {!selectedDetail?.project ? (
               <div className="rounded-lg border border-slate-700 bg-[var(--kc-canvas)]/70 p-4 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
                 <span>
-                  Selecciona un proyecto en el Paso 1 para publicar sus canales en lote, o gestiona tu PIN HITL directamente al programar en el Planificador.
+                  Selecciona un proyecto en el Paso 1 para publicar sus canales en lote, o programa directamente desde el Planificador.
                 </span>
-                <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-                  <span>PIN HITL activo:</span>
-                  <input
-                    type="text"
-                    value={creatorSecurityPin}
-                    onChange={(e) => setCreatorSecurityPin(e.target.value)}
-                    className="w-28 rounded-lg bg-[var(--kc-panel)] border border-slate-700 px-2.5 py-1 text-xs font-mono text-white"
-                  />
-                </label>
               </div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-3 items-end">
-                <label className="text-xs text-slate-300">
-                  Código de Seguridad del Creador (PIN)
-                  <div className="relative mt-1">
-                    <KeyRound className="w-4 h-4 text-rose-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={creatorSecurityPin}
-                      onChange={(e) => setCreatorSecurityPin(e.target.value)}
-                      placeholder="Ej. 884210 (sincronizado con Perfil)"
-                      className="w-full rounded-lg bg-[var(--kc-canvas)] border border-slate-700 pl-9 pr-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-rose-400"
-                    />
+              <div className="space-y-3">
+                {confirmingPublish && (
+                  <div
+                    role="alertdialog"
+                    aria-label="Confirmar publicación"
+                    className="rounded-lg border border-rose-500/60 bg-rose-950/60 px-4 py-3 text-xs text-rose-100 space-y-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-300" />
+                      <p className="leading-relaxed">
+                        Vas a publicar en {publishNoticeChannels} ahora mismo. Se verá en tu perfil y no se puede deshacer desde aquí.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingPublish(false)}
+                        className="px-3 py-2 rounded-lg border border-slate-700 bg-[var(--kc-surface)] hover:border-slate-500 text-xs font-semibold text-slate-200 transition"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handlePublishLive}
+                        disabled={publishing || selectedChannels.length === 0}
+                        className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 transition shadow-sm"
+                      >
+                        <Send className="w-4 h-4" />
+                        {publishing ? "Publicando en vivo..." : "Sí, publicar ahora"}
+                      </button>
+                    </div>
                   </div>
-                </label>
+                )}
 
-                <label className="text-xs text-slate-300">
-                  <span className="flex items-center justify-between gap-2">
-                    <span>Clave de Autorización Emitida (HITL)</span>
-                    {activeHitlToken && (
-                      <span className="text-[10px] font-semibold text-emerald-300">
-                        ✓ Sincronizada
-                      </span>
-                    )}
-                  </span>
-                  <input
-                    type="text"
-                    readOnly
-                    value={activeHitlToken}
-                    placeholder="Auto-rellenada desde Perfil o pulsa 'Validar Clave'"
-                    className="mt-1 w-full rounded-lg bg-[var(--kc-canvas)] border border-[var(--kc-border)] px-3 py-2 text-xs font-mono text-emerald-300"
-                  />
-                </label>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleIssueTier3Token}
-                    className="px-3 py-2 rounded-lg border border-slate-700 bg-[var(--kc-surface)] hover:border-amber-400 text-xs font-semibold text-amber-200 inline-flex items-center gap-1.5 transition"
-                  >
-                    <ShieldCheck className="w-4 h-4" />
-                    Validar Clave
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePublishLive}
-                    disabled={publishing || selectedChannels.length === 0}
-                    className="flex-1 px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition shadow-sm"
-                  >
-                    <Send className="w-4 h-4" />
-                    {publishing
-                      ? "Publicando en vivo..."
-                      : `Autorizar y Publicar (${selectedChannels.length} redes)`}
-                  </button>
-                </div>
+                {!confirmingPublish && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingPublish(true)}
+                      disabled={publishing || selectedChannels.length === 0}
+                      className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition shadow-sm"
+                    >
+                      <Send className="w-4 h-4" />
+                      {publishing
+                        ? "Publicando en vivo..."
+                        : `Publicar ahora (${selectedChannels.length} redes)`}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

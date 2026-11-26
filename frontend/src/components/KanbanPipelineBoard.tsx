@@ -163,7 +163,6 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
   // AI Evaluation State
   const [evaluatingAI, setEvaluatingAI] = useState(false);
   const [aiEvaluation, setAiEvaluation] = useState<IdeaAIEvaluationResponse | null>(null);
-  const [ingestingRadar, setIngestingRadar] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -270,36 +269,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
         ]);
         setLatestRefinedIdea(res);
       } else {
-        // Fallback local copilot
-        const mockReply: IdeaChatRefineResponse = {
-          reply: `Excelente propuesta. Para "${textToSend}", la clave está en evitar clichés ("en este mundo cambiante...") y abrir con un gancho directo y vulnerable. He configurado una estrategia de alto engagement con formato adecuado y ganchos contrastados.`,
-          suggested_title: textToSend.length > 55 ? `${textToSend.slice(0, 52)}...` : textToSend,
-          suggested_context_notes: `Contexto afinado por Copiloto Estratega:\n- Objetivo: Publicación honesta y humana sin clichés de IA.\n- Tesis: Cambio de etapa profesional, aprendizaje de engagement real y foco en valor tangible para empresas de servicios.\n- Llamada a la acción: Conversación constructiva o contacto directo sin enlaces en el cuerpo.`,
-          suggested_format: "TEXT_ONLY",
-          suggested_platforms: ["LinkedIn", "X"],
-          suggested_hooks: [
-            {
-              category: "Vulnerable",
-              hook_text: "Hace meses que no publicaba por aquí, y la razón es simple: me cansé de las publicaciones artificiales.",
-              pattern_interrupt: "Pausa y tono sincero",
-              estimated_hold_rate: 82.0,
-            },
-            {
-              category: "Contrarian",
-              hook_text: "Nuestras últimas publicaciones con IA tuvieron buenas visitas, pero CERO engagement real. Esto es lo que aprendí.",
-              pattern_interrupt: "Confesión directa",
-              estimated_hold_rate: 79.5,
-            },
-          ],
-          calculated_ice: 8.8,
-          tam_recommendation: "CORE_80",
-          ready_to_create: true,
-        };
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: mockReply.reply },
-        ]);
-        setLatestRefinedIdea(mockReply);
+        throw new Error("Backend sin conexión: conecta el backend para usar el Copiloto.");
       }
     } catch (err) {
       showToast(
@@ -357,29 +327,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
             setShowChatCopilot(false);
             showToast("success", `🚀 Proyecto "${created.working_title}" creado con éxito desde el Copiloto.`);
           } else {
-            const mock: ContentProject = {
-              id: crypto.randomUUID(),
-              asset_code: `KC-${Math.floor(100 + Math.random() * 900)}`,
-              working_title: sTitle,
-              target_duration: duration,
-              conversion_goal: goal,
-              current_state: "SCRIPTED_PACKAGED",
-              ice_score: sIce,
-              tam_classification: strat.tam_recommendation,
-              context_notes: sNotes,
-              source_origin: "copiloto_chat",
-              target_platforms: strat.suggested_platforms,
-              content_format: strat.suggested_format,
-              ab_variants: [],
-              state_history: [],
-              temporal_workflow_id: null,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-            setProjects([mock, ...projects]);
-            setSelectedProjectId(mock.id);
-            setShowChatCopilot(false);
-            showToast("info", `🚀 Proyecto creado localmente desde el Copiloto.`);
+            throw new Error("Backend sin conexión: conecta el backend para crear el proyecto.");
           }
         } catch (e) {
           showToast("error", e instanceof Error ? e.message : "Error creando proyecto");
@@ -423,31 +371,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           `✨ Idea valorada con IA: Prioridad ${res.ice_score}/10 (${res.tam_classification === "CORE_80" ? "Comunidad 80%" : "Expansión 20%"}).`
         );
       } else {
-        // Local heuristic fallback
-        const mockScore = 8.4;
-        setImpact(8.7);
-        setConfidence(8.2);
-        setEase(8.3);
-        setTam("CORE_80");
-        setAiEvaluation({
-          impact: 8.7,
-          confidence: 8.2,
-          ease: 8.3,
-          ice_score: mockScore,
-          tam_classification: "CORE_80",
-          rationale: `Análisis local IA: Idea de alto potencial para tu nicho con ${contextNotes.split(" ").length} palabras de contexto. Tasa de retención proyectada del 78%.`,
-          suggested_platforms: selectedPlatforms,
-          hook_candidates: [
-            {
-              category: "Contraintuitivo",
-              hook_text: `La mayoría de creadores hacen ${title} completamente al revés.`,
-              pattern_interrupt: "Zoom 115% + SFX pop",
-              estimated_hold_rate: 78.5,
-            },
-          ],
-          estimated_hold_rate: 78.5,
-        });
-        showToast("info", `✨ Idea valorada localmente con Prioridad ${mockScore}/10.`);
+        throw new Error("Backend sin conexión: conecta el backend para valorar la idea con IA.");
       }
     } catch (err) {
       showToast(
@@ -456,75 +380,6 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
       );
     } finally {
       setEvaluatingAI(false);
-    }
-  };
-
-  const handleSimulateRadarIngest = async () => {
-    setIngestingRadar(true);
-    try {
-      const sampleTitles = [
-        "Cómo desplegar un Content Engine con IA local sin pagar cuotas SaaS",
-        "3 Errores de audio y pausas muertas que hunden tu retención en YouTube y TikTok",
-        "Estrategia Zero-Link en LinkedIn: Por qué poner enlaces en el post destruye tu alcance",
-        "Por qué los creadores que no usan Lead Magnets automáticos pierden el 80% de sus clientes",
-      ];
-      const randomTitle = sampleTitles[Math.floor(Math.random() * sampleTitles.length)];
-      const sampleNotes =
-        "Radar Matutino n8n: Tendencia detectada en newsletters y GitHub trending. La audiencia busca sistemas que operen de forma autónoma sin depender de suscripciones recurrentes. Conexión directa con Lead Magnet de automatización.";
-
-      if (backendOnline) {
-        const res = await apiClient.ingestRadarMatutino({
-          concept_title: randomTitle,
-          context_notes: sampleNotes,
-          source_origin: "radar_matutino",
-          source_url: "https://news.ycombinator.com",
-          target_platforms: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
-          target_duration: "STANDARD_SHORT",
-          conversion_goal: "EMAIL_LEAD_CAPTURE",
-          auto_evaluate_ai: true,
-          auto_create_project: true,
-        });
-        await onRefresh();
-        if (res.project_id) {
-          setSelectedProjectId(res.project_id);
-        }
-        showToast(
-          "success",
-          `📡 Radar Matutino: Ingestada idea "${res.concept_title}" con Prioridad IA ${res.ice_score}/10.`
-        );
-      } else {
-        const mock: ContentProject = {
-          id: crypto.randomUUID(),
-          asset_code: `KC-${Math.floor(100 + Math.random() * 900)}`,
-          working_title: randomTitle,
-          target_duration: "STANDARD_SHORT",
-          conversion_goal: "EMAIL_LEAD_CAPTURE",
-          current_state: "SCRIPTED_PACKAGED",
-          ice_score: 8.6,
-          tam_classification: "CORE_80",
-          context_notes: sampleNotes,
-          source_origin: "radar_matutino",
-          target_platforms: ["YouTube", "Instagram", "TikTok", "LinkedIn", "X"],
-          ab_variants: [],
-          state_history: [],
-          temporal_workflow_id: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setProjects([mock, ...projects]);
-        setSelectedProjectId(mock.id);
-        showToast(
-          "success",
-          `📡 Radar Matutino: Idea simulada guardada con Prioridad 8.6/10.`
-        );
-      }
-    } catch (err) {
-      showToast(
-        "error",
-        err instanceof Error ? err.message : "Error ingrestando desde Radar Matutino"
-      );
-    } finally {
-      setIngestingRadar(false);
     }
   };
 
@@ -554,28 +409,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           `Idea "${created.working_title}" guardada con prioridad ${created.ice_score}/10.`
         );
       } else {
-        const mock: ContentProject = {
-          id: crypto.randomUUID(),
-          asset_code: `KC-${Math.floor(100 + Math.random() * 900)}`,
-          working_title: title.trim(),
-          target_duration: duration,
-          conversion_goal: goal,
-          current_state: liveIce >= 7.0 ? "SCRIPTED_PACKAGED" : "ARCHIVED",
-          ice_score: liveIce,
-          tam_classification: tam,
-          context_notes: contextNotes.trim() || undefined,
-          source_origin: "manual",
-          target_platforms: selectedPlatforms,
-          content_format: contentFormat,
-          ab_variants: [],
-          state_history: [],
-          temporal_workflow_id: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setProjects([mock, ...projects]);
-        setSelectedProjectId(mock.id);
-        showToast("info", `Idea guardada localmente con prioridad ${liveIce}/10.`);
+        throw new Error("Backend sin conexión: conecta el backend para guardar la idea (no se ha guardado).");
       }
       setTitle("");
       setContextNotes("");
@@ -703,22 +537,6 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
               Manuales ({manualCount})
             </button>
           </div>
-
-          {/* Simulate Radar Ingestion */}
-          <button
-            type="button"
-            onClick={handleSimulateRadarIngest}
-            disabled={ingestingRadar}
-            title="Simula la recepción de una idea enriquecida desde la automatización n8n Radar Matutino"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-500/40 bg-amber-950/20 text-amber-300 hover:bg-amber-950/40 text-xs font-medium transition"
-          >
-            {ingestingRadar ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Radio className="w-3.5 h-3.5" />
-            )}
-            <span>{ingestingRadar ? "Ingestando..." : "Ingesta Radar Matutino"}</span>
-          </button>
 
           <button
             type="button"

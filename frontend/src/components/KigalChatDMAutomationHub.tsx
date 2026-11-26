@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import {
   AlertCircle,
-  ArrowRight,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Clock,
@@ -11,15 +11,13 @@ import {
   FolderOpen,
   Inbox,
   Link2,
-  MessageCircle,
-  MessageSquareReply,
   Play,
   RefreshCw,
   Search,
-  Send,
   Settings2,
   Sparkles,
-  Zap,
+  Terminal,
+  WifiOff,
 } from "lucide-react";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
 import type { CreatorModalTab } from "@/components/ProfileBubbleMenu";
@@ -28,6 +26,7 @@ import { useEngineStore } from "@/store/useEngineStore";
 import type {
   CreatorProfile,
   KigalChatInteraction,
+  KigalChatStatus,
   LeadMagnetItem,
   ManyChatTriggerRule,
 } from "@/types/engine";
@@ -36,7 +35,7 @@ interface KigalChatDMAutomationHubProps {
   onOpenPaso0?: (tab?: CreatorModalTab) => void;
 }
 
-interface SimulationPreview {
+interface RuleTestPreview {
   matched: boolean;
   platform: string;
   username: string;
@@ -46,37 +45,22 @@ interface SimulationPreview {
   dm_reply_text: string;
   lead_magnet_title: string;
   delivery_url: string;
-  triggers_count: number;
 }
 
 interface EffectiveRule {
   keyword: string;
   platform: string;
-  dm_reply_template: string;
-  lead_magnet: LeadMagnetItem | null;
 }
 
-const PUBLIC_REPLY_TEMPLATES = [
-  "¡Enviado por privado, {username}! Revisa tu bandeja de mensajes 📩",
-  "¡Listo, {username}! Te acabo de dejar el acceso por DM para no saturar los comentarios 🚀",
-  "¡Hecho, {username}! Revisa tus mensajes directos, ahí tienes el recurso por comentar {keyword} ✨",
-];
-
-function buildAntiPenalizationPublicReply(
-  username: string,
-  keyword: string,
-  seedIndex = 0
-): string {
-  const safeUser = username.startsWith("@") ? username : `@${username}`;
-  const template = PUBLIC_REPLY_TEMPLATES[seedIndex % PUBLIC_REPLY_TEMPLATES.length];
-  return template.replace("{username}", safeUser).replace("{keyword}", keyword);
-}
+type StatusFilter = "ALL" | "SENT" | "DELIVERED" | "MATCHED" | "PENDING" | "UNMATCHED";
 
 function formatInteractionTime(iso: string): string {
   try {
     const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return iso;
-    return dt.toLocaleTimeString("es-ES", {
+    return dt.toLocaleString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -85,148 +69,63 @@ function formatInteractionTime(iso: string): string {
   }
 }
 
-function resolveEffectiveRules(profile: CreatorProfile | null): EffectiveRule[] {
-  const magnets = profile?.lead_magnets ?? [];
-  const activeTriggers = (profile?.manychat_triggers ?? []).filter((t) => t.active);
+function toCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
 
-  if (activeTriggers.length > 0) {
-    return activeTriggers.map((rule) => ({
+/** Only the rules Kike configured: no filler keywords or invented delivery links. */
+function resolveEffectiveRules(profile: CreatorProfile | null): EffectiveRule[] {
+  return (profile?.manychat_triggers ?? [])
+    .filter((t) => t.active && t.keyword.trim())
+    .map((rule) => ({
       keyword: rule.keyword.trim().toUpperCase(),
       platform: rule.platform.toLowerCase(),
-      dm_reply_template: rule.dm_reply_template,
-      lead_magnet:
-        magnets.find((lm) => lm.id === rule.lead_magnet_id) ?? magnets[0] ?? null,
     }));
-  }
-
-  const catalogRules: EffectiveRule[] = [];
-  if (profile?.conversion_goals_catalog) {
-    for (const spec of Object.values(profile.conversion_goals_catalog)) {
-      if (spec.trigger_word) {
-        const kw = spec.trigger_word.trim().toUpperCase();
-        catalogRules.push({
-          keyword: kw,
-          platform: "all",
-          dm_reply_template: `¡Hola! Aquí tienes acceso directo a ${
-            spec.lead_magnet_name || "tu recurso"
-          }:`,
-          lead_magnet: magnets[0] ?? {
-            id: `lm-cat-${kw}`,
-            title: spec.lead_magnet_name || `Recurso ${kw}`,
-            description: spec.objective,
-            format: "Guía PDF",
-            delivery_url: "https://kigalcontent.app/recursos/blueprint",
-            source: "manual",
-          },
-        });
-      }
-    }
-  }
-
-  if (catalogRules.length > 0) {
-    return catalogRules;
-  }
-
-  return [
-    {
-      keyword: "GUIA",
-      platform: "all",
-      dm_reply_template: "¡Hola! Aquí tienes acceso directo a tu recurso:",
-      lead_magnet: magnets[0] ?? {
-        id: "lm-default-guia",
-        title: "Guía Práctica de Automatización y Contenido",
-        description: "Recurso listo para entregar por DM desde la carpeta de Paso 0.",
-        format: "Guía PDF",
-        delivery_url: "https://kigalcontent.app/recursos/guia",
-        source: "manual",
-      },
-    },
-  ];
 }
 
-function buildSeedInteractions(profile: CreatorProfile | null): KigalChatInteraction[] {
-  const rules = resolveEffectiveRules(profile);
-  const firstRule = rules[0];
-  const secondRule = rules[1] ?? rules[0];
-  const now = Date.now();
+const STATUS_BADGES: Record<
+  string,
+  { label: string; className: string; icon: "check" | "clock" | "alert" }
+> = {
+  SENT: {
+    label: "Enviado",
+    className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
+    icon: "check",
+  },
+  DELIVERED: {
+    label: "Entregado",
+    className: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+    icon: "check",
+  },
+  MATCHED: {
+    label: "Coincidencia",
+    className: "border-cyan-500/40 bg-cyan-500/10 text-cyan-300",
+    icon: "alert",
+  },
+  PENDING: {
+    label: "Pendiente",
+    className: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+    icon: "clock",
+  },
+  UNMATCHED: {
+    label: "Sin coincidencia",
+    className: "border-slate-700 bg-slate-800 text-slate-300",
+    icon: "alert",
+  },
+};
 
-  return [
-    {
-      id: "kc-seed-1",
-      timestamp: new Date(now - 1000 * 60 * 14).toISOString(),
-      platform: "Instagram",
-      username: "@laura_sistemas",
-      comment_text: `¡Me interesa muchísimo! Quiero ${firstRule.keyword}`,
-      matched_keyword: firstRule.keyword,
-      public_comment_reply: buildAntiPenalizationPublicReply(
-        "@laura_sistemas",
-        firstRule.keyword,
-        0
-      ),
-      dm_reply_text: `${firstRule.dm_reply_template} ${
-        firstRule.lead_magnet?.delivery_url ?? ""
-      }`.trim(),
-      lead_magnet_title: firstRule.lead_magnet?.title ?? "Lead Magnet Principal",
-      delivery_url: firstRule.lead_magnet?.delivery_url ?? "",
-      status: "DELIVERED",
-    },
-    {
-      id: "kc-seed-2",
-      timestamp: new Date(now - 1000 * 60 * 32).toISOString(),
-      platform: "TikTok",
-      username: "@carlos_growth",
-      comment_text: `Envíame ${secondRule.keyword} por favor 🙌`,
-      matched_keyword: secondRule.keyword,
-      public_comment_reply: buildAntiPenalizationPublicReply(
-        "@carlos_growth",
-        secondRule.keyword,
-        1
-      ),
-      dm_reply_text: `${secondRule.dm_reply_template} ${
-        secondRule.lead_magnet?.delivery_url ?? ""
-      }`.trim(),
-      lead_magnet_title: secondRule.lead_magnet?.title ?? "Lead Magnet",
-      delivery_url: secondRule.lead_magnet?.delivery_url ?? "",
-      status: "DELIVERED",
-    },
-    {
-      id: "kc-seed-3",
-      timestamp: new Date(now - 1000 * 60 * 55).toISOString(),
-      platform: "YouTube",
-      username: "@dev_andres",
-      comment_text: "¿Qué micrófono usas para grabar estos shorts?",
-      matched_keyword: "-",
-      public_comment_reply: "Sin respuesta automática (sin palabra clave configurada)",
-      dm_reply_text: "",
-      lead_magnet_title: "-",
-      delivery_url: "",
-      status: "UNMATCHED",
-    },
-  ];
-}
-
-function mergeInteractions(
-  incoming: KigalChatInteraction[],
-  existing: KigalChatInteraction[]
-): KigalChatInteraction[] {
-  const seen = new Map<string, KigalChatInteraction>();
-  for (const item of [...incoming, ...existing]) {
-    if (!seen.has(item.id)) {
-      seen.set(item.id, item);
-    }
-  }
-  return Array.from(seen.values());
-}
+const KIND_LABELS: Record<string, string> = {
+  prompt: "Botón enviado",
+  not_following: "No sigue la cuenta",
+  reward: "Enlace entregado",
+  public: "Respuesta pública",
+};
 
 export function KigalChatDMAutomationHub({
   onOpenPaso0,
 }: KigalChatDMAutomationHubProps) {
   const { creatorProfile, setCreatorProfile, backendOnline, showToast } =
     useEngineStore();
-  const creatorProfileRef = useRef(creatorProfile);
-  useEffect(() => {
-    creatorProfileRef.current = creatorProfile;
-  }, [creatorProfile]);
 
   const simPlatformId = useId();
   const simUsernameId = useId();
@@ -240,22 +139,22 @@ export function KigalChatDMAutomationHub({
 
   const [interactions, setInteractions] = useState<KigalChatInteraction[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
-  const [sweeping, setSweeping] = useState(false);
-  const [lastSweepInfo, setLastSweepInfo] = useState<string | null>(null);
+  const [inboxError, setInboxError] = useState<string | null>(null);
 
-  // Simulator state
+  const [botStatus, setBotStatus] = useState<KigalChatStatus | null>(null);
+  const [botStatusError, setBotStatusError] = useState<string | null>(null);
+
+  // Rule tester (backend only): checks keyword matching, never delivers anything
   const [simPlatform, setSimPlatform] = useState("instagram");
-  const [simUsername, setSimUsername] = useState("@elena_founder");
+  const [simUsername, setSimUsername] = useState("");
   const [simComment, setSimComment] = useState("");
   const [simError, setSimError] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
-  const [simPreview, setSimPreview] = useState<SimulationPreview | null>(null);
+  const [simPreview, setSimPreview] = useState<RuleTestPreview | null>(null);
 
   // Inbox filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<
-    "ALL" | "DELIVERED" | "PENDING" | "UNMATCHED"
-  >("ALL");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
   const configuredTriggers: ManyChatTriggerRule[] =
     creatorProfile?.manychat_triggers ?? [];
@@ -265,41 +164,47 @@ export function KigalChatDMAutomationHub({
     [creatorProfile]
   );
 
-  useEffect(() => {
-    if (!simComment && effectiveRules[0]) {
-      setSimComment(`¡Hola! Quiero ${effectiveRules[0].keyword} por favor`);
-    }
-  }, [effectiveRules, simComment]);
-
   const loadInteractions = useCallback(async () => {
-    setLoadingInbox(true);
-    try {
-      if (backendOnline) {
-        const list = await apiClient.listKigalChatInteractions();
-        setInteractions(list);
-      } else {
-        setInteractions((prev) =>
-          prev.length > 0 ? prev : buildSeedInteractions(creatorProfileRef.current)
-        );
-      }
-    } catch {
-      setInteractions((prev) =>
-        prev.length > 0 ? prev : buildSeedInteractions(creatorProfileRef.current)
-      );
-    } finally {
-      setLoadingInbox(false);
+    if (!backendOnline) {
+      setInteractions([]);
+      setBotStatus(null);
+      setInboxError(null);
+      setBotStatusError(null);
+      return;
     }
+    setLoadingInbox(true);
+    const [listResult, statusResult] = await Promise.allSettled([
+      apiClient.listKigalChatInteractions(),
+      apiClient.getKigalChatStatus(),
+    ]);
+    if (listResult.status === "fulfilled") {
+      setInteractions(Array.isArray(listResult.value) ? listResult.value : []);
+      setInboxError(null);
+    } else {
+      setInteractions([]);
+      setInboxError(
+        listResult.reason instanceof Error
+          ? listResult.reason.message
+          : "No se pudieron cargar las interacciones."
+      );
+    }
+    if (statusResult.status === "fulfilled") {
+      setBotStatus(statusResult.value ?? null);
+      setBotStatusError(null);
+    } else {
+      setBotStatus(null);
+      setBotStatusError(
+        statusResult.reason instanceof Error
+          ? statusResult.reason.message
+          : "No se pudo leer el estado del bot."
+      );
+    }
+    setLoadingInbox(false);
   }, [backendOnline]);
 
   useEffect(() => {
     void loadInteractions();
   }, [loadInteractions]);
-
-  useEffect(() => {
-    if (!backendOnline && interactions.length === 0) {
-      setInteractions(buildSeedInteractions(creatorProfile));
-    }
-  }, [backendOnline, creatorProfile, interactions.length]);
 
   const handleOpenPaso0Click = () => {
     if (onOpenPaso0) {
@@ -309,115 +214,25 @@ export function KigalChatDMAutomationHub({
     }
   };
 
-  const handleRunAutoSweep = async () => {
-    setSweeping(true);
-    try {
-      if (backendOnline) {
-        const res = await apiClient.runKigalChatAutoSweep();
-        setInteractions((prev) => mergeInteractions(res.interactions, prev));
-        setLastSweepInfo(
-          `Último barrido: ${res.processed_count} comentario(s) procesado(s)`
-        );
-        void apiClient
-          .getCreatorProfile()
-          .then(setCreatorProfile)
-          .catch(() => {});
-        showToast(
-          "success",
-          `Barrido KigalChat completado: ${res.processed_count} comentario(s) procesado(s).`
-        );
-      } else {
-        const ruleA = effectiveRules[0];
-        const ruleB = effectiveRules[1] ?? effectiveRules[0];
-        const ts = Date.now();
-        const simulatedBatch: KigalChatInteraction[] = [
-          {
-            id: `kc-sweep-${ts}-1`,
-            timestamp: new Date(ts).toISOString(),
-            platform: "Instagram",
-            username: "@sofia_ops",
-            comment_text: `Necesito esto ya, envía ${ruleA.keyword} 🔥`,
-            matched_keyword: ruleA.keyword,
-            public_comment_reply: buildAntiPenalizationPublicReply(
-              "@sofia_ops",
-              ruleA.keyword,
-              0
-            ),
-            dm_reply_text: `${ruleA.dm_reply_template} ${
-              ruleA.lead_magnet?.delivery_url ?? ""
-            }`.trim(),
-            lead_magnet_title: ruleA.lead_magnet?.title ?? "Lead Magnet",
-            delivery_url: ruleA.lead_magnet?.delivery_url ?? "",
-            status: "DELIVERED",
-          },
-          {
-            id: `kc-sweep-${ts}-2`,
-            timestamp: new Date(ts - 15000).toISOString(),
-            platform: "LinkedIn",
-            username: "@javier_b2b",
-            comment_text: `Gran enfoque. Me apunto con ${ruleB.keyword}`,
-            matched_keyword: ruleB.keyword,
-            public_comment_reply: buildAntiPenalizationPublicReply(
-              "@javier_b2b",
-              ruleB.keyword,
-              1
-            ),
-            dm_reply_text: `${ruleB.dm_reply_template} ${
-              ruleB.lead_magnet?.delivery_url ?? ""
-            }`.trim(),
-            lead_magnet_title: ruleB.lead_magnet?.title ?? "Lead Magnet",
-            delivery_url: ruleB.lead_magnet?.delivery_url ?? "",
-            status: "DELIVERED",
-          },
-          {
-            id: `kc-sweep-${ts}-3`,
-            timestamp: new Date(ts - 45000).toISOString(),
-            platform: "TikTok",
-            username: "@lucia_indie",
-            comment_text: "Brutal el formato 9:16, ¿cómo editas los subtítulos?",
-            matched_keyword: "-",
-            public_comment_reply:
-              "En cola de revisión manual (sin palabra clave disparadora)",
-            dm_reply_text: "",
-            lead_magnet_title: "-",
-            delivery_url: "",
-            status: "PENDING",
-          },
-        ];
-
-        setInteractions((prev) => mergeInteractions(simulatedBatch, prev));
-        setLastSweepInfo(
-          `Último barrido local: ${simulatedBatch.length} comentarios analizados`
-        );
-        showToast(
-          "info",
-          `Barrido local completado: ${simulatedBatch.length} comentarios procesados (2 DMs entregados).`
-        );
-      }
-    } catch (err) {
-      showToast(
-        "error",
-        err instanceof Error
-          ? err.message
-          : "Error ejecutando barrido automático de comentarios"
-      );
-    } finally {
-      setSweeping(false);
-    }
-  };
-
   const handleSimulateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!backendOnline) {
+      setSimError("Conecta el backend para probar tus reglas.");
+      return;
+    }
     const cleanedComment = simComment.trim();
     if (!cleanedComment) {
-      setSimError("Escribe un comentario simulado para ejecutar el flujo.");
+      setSimError("Escribe el texto de un comentario para probar la regla.");
       return;
     }
     setSimError(null);
 
-    const normalizedUser = (simUsername.trim() || "@usuario").startsWith("@")
-      ? simUsername.trim() || "@usuario"
-      : `@${simUsername.trim()}`;
+    const rawUser = simUsername.trim();
+    const normalizedUser = rawUser
+      ? rawUser.startsWith("@")
+        ? rawUser
+        : `@${rawUser}`
+      : "";
     const commentUpper = cleanedComment.toUpperCase();
     const matchedRule = effectiveRules.find(
       (r) =>
@@ -427,124 +242,48 @@ export function KigalChatDMAutomationHub({
     const extractedKeyword =
       matchedRule?.keyword ??
       cleanedComment.split(/\s+/).find((t) => t.length >= 3)?.toUpperCase() ??
-      cleanedComment.toUpperCase();
+      commentUpper;
 
     setSimulating(true);
     try {
-      if (backendOnline) {
-        const res = await apiClient.triggerManyChatKeyword({
-          keyword: extractedKeyword,
-          platform: simPlatform,
-          username: normalizedUser,
-          comment_text: cleanedComment,
-        });
+      const res = await apiClient.triggerManyChatKeyword({
+        keyword: extractedKeyword,
+        platform: simPlatform,
+        username: normalizedUser || undefined,
+        comment_text: cleanedComment,
+        dry_run: true,
+      });
 
-        const publicReply =
-          res.public_comment_reply ||
-          (res.matched
-            ? buildAntiPenalizationPublicReply(normalizedUser, res.keyword, 0)
-            : "Sin respuesta automática: el comentario no contiene una palabra clave activa.");
+      setSimPreview({
+        matched: res.matched,
+        platform: res.platform,
+        username: normalizedUser,
+        comment_text: cleanedComment,
+        keyword: res.keyword,
+        public_comment_reply: res.public_comment_reply ?? "",
+        dm_reply_text: res.dm_reply_text,
+        lead_magnet_title: res.lead_magnet?.title ?? "",
+        delivery_url: res.delivery_url,
+      });
 
-        const preview: SimulationPreview = {
-          matched: res.matched,
-          platform: res.platform,
-          username: normalizedUser,
-          comment_text: cleanedComment,
-          keyword: res.keyword,
-          public_comment_reply: publicReply,
-          dm_reply_text: res.dm_reply_text,
-          lead_magnet_title: res.lead_magnet?.title ?? (res.matched ? "Recurso" : "-"),
-          delivery_url: res.delivery_url,
-          triggers_count: res.triggers_count,
-        };
-        setSimPreview(preview);
-
-        try {
-          const fresh = await apiClient.listKigalChatInteractions();
-          setInteractions(fresh);
-        } catch {
-          const fallbackEntry: KigalChatInteraction = {
-            id: `kc-live-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            platform: res.platform,
-            username: normalizedUser,
-            comment_text: cleanedComment,
-            matched_keyword: res.matched ? res.keyword : "-",
-            public_comment_reply: publicReply,
-            dm_reply_text: res.dm_reply_text,
-            lead_magnet_title: res.lead_magnet?.title ?? "-",
-            delivery_url: res.delivery_url,
-            status: res.matched ? "DELIVERED" : "UNMATCHED",
-          };
-          setInteractions((prev) => mergeInteractions([fallbackEntry], prev));
-        }
-
-        if (res.matched) {
-          void apiClient
-            .getCreatorProfile()
-            .then(setCreatorProfile)
-            .catch(() => {});
-        }
-
-        showToast(
-          res.matched ? "success" : "info",
-          res.matched
-            ? `KigalChat respondió públicamente y envió el DM con ${res.keyword}.`
-            : "Simulación ejecutada: no coincidió ninguna palabra clave activa."
-        );
-      } else {
-        const isMatched = Boolean(matchedRule);
-        const kw = matchedRule?.keyword ?? "-";
-        const publicReply = isMatched
-          ? buildAntiPenalizationPublicReply(normalizedUser, kw, 2)
-          : "Sin respuesta automática: ninguna palabra clave activa coincidió.";
-        const lmTitle = matchedRule?.lead_magnet?.title ?? "-";
-        const deliveryUrl = matchedRule?.lead_magnet?.delivery_url ?? "";
-        const dmText = isMatched
-          ? `${
-              matchedRule?.dm_reply_template.trim() ||
-              `¡Hola ${normalizedUser}! Aquí tienes acceso directo a ${lmTitle}:`
-            } ${deliveryUrl}`.trim()
-          : "";
-
-        setSimPreview({
-          matched: isMatched,
-          platform: simPlatform,
-          username: normalizedUser,
-          comment_text: cleanedComment,
-          keyword: kw,
-          public_comment_reply: publicReply,
-          dm_reply_text: dmText,
-          lead_magnet_title: lmTitle,
-          delivery_url: deliveryUrl,
-          triggers_count: isMatched ? 1 : 0,
-        });
-
-        const simulatedEntry: KigalChatInteraction = {
-          id: `kc-sim-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          platform: simPlatform,
-          username: normalizedUser,
-          comment_text: cleanedComment,
-          matched_keyword: kw,
-          public_comment_reply: publicReply,
-          dm_reply_text: dmText,
-          lead_magnet_title: lmTitle,
-          delivery_url: deliveryUrl,
-          status: isMatched ? "DELIVERED" : "UNMATCHED",
-        };
-        setInteractions((prev) => mergeInteractions([simulatedEntry], prev));
-        showToast(
-          isMatched ? "success" : "info",
-          isMatched
-            ? `Simulación local: DM enviado con "${lmTitle}".`
-            : "Simulación local: el comentario no activó ninguna palabra clave."
-        );
+      void loadInteractions();
+      if (res.matched) {
+        void apiClient
+          .getCreatorProfile()
+          .then(setCreatorProfile)
+          .catch(() => {});
       }
+
+      showToast(
+        "info",
+        res.matched
+          ? `Coincidencia con ${res.keyword}. Es solo una prueba: no se ha enviado ningún DM.`
+          : "Ninguna palabra clave activa coincide con ese comentario."
+      );
     } catch (err) {
       showToast(
         "error",
-        err instanceof Error ? err.message : "Error simulando flujo KigalChat"
+        err instanceof Error ? err.message : "Error al probar la regla"
       );
     } finally {
       setSimulating(false);
@@ -554,24 +293,37 @@ export function KigalChatDMAutomationHub({
   const filteredInteractions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return interactions.filter((item) => {
-      if (statusFilter !== "ALL" && item.status !== statusFilter) {
+      // Los envíos reales del bot llegan como SENT: el enlace entregado es kind=reward.
+      const isDelivered = item.kind === "reward" || item.status === "DELIVERED";
+      if (statusFilter === "DELIVERED" ? !isDelivered : statusFilter !== "ALL" && item.status !== statusFilter) {
         return false;
       }
       if (!q) return true;
-      return (
-        item.username.toLowerCase().includes(q) ||
-        item.platform.toLowerCase().includes(q) ||
-        item.comment_text.toLowerCase().includes(q) ||
-        item.matched_keyword.toLowerCase().includes(q) ||
-        item.lead_magnet_title.toLowerCase().includes(q)
-      );
+      return [
+        item.username,
+        item.platform,
+        item.comment_text,
+        item.matched_keyword,
+        item.lead_magnet_title,
+      ].some((field) => (field ?? "").toLowerCase().includes(q));
     });
   }, [interactions, searchQuery, statusFilter]);
 
   const deliveredCount = useMemo(
-    () => interactions.filter((i) => i.status === "DELIVERED").length,
+    () =>
+      interactions.filter((i) => i.kind === "reward" || i.status === "DELIVERED").length,
     [interactions]
   );
+
+  const funnelRows = Array.isArray(botStatus?.funnel_7d) ? botStatus.funnel_7d : [];
+  const funnelTotals = funnelRows.reduce(
+    (acc, row) => ({
+      prompts: acc.prompts + toCount(row.prompts_sent),
+      rewards: acc.rewards + toCount(row.rewards_sent),
+    }),
+    { prompts: 0, rewards: 0 }
+  );
+  const botConnected = botStatus?.bot_connected === true;
 
   return (
     <div className="rounded-2xl border border-emerald-500/35 bg-slate-900/85 p-5 sm:p-6 space-y-6 shadow-xl shadow-emerald-950/20">
@@ -587,14 +339,14 @@ export function KigalChatDMAutomationHub({
                 KigalChat Auto-DM
               </h2>
               <span className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-                Motor Nativo · ManyChat / Chatwoot / Typebot
+                Bot de Instagram · comenta PALABRA → DM
               </span>
               <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-mono text-slate-300">
                 {deliveredCount} entregados
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              Convierte comentarios con palabra clave en respuestas públicas seguras (sin enlaces que penalicen el alcance) y entrega automática por DM desde tu carpeta de Lead Magnets.
+              Interacciones reales del bot de Instagram: quien comenta una palabra clave recibe un botón por DM y, si sigue la cuenta, el enlace al recurso.
             </p>
           </div>
         </div>
@@ -611,100 +363,157 @@ export function KigalChatDMAutomationHub({
 
           <button
             type="button"
-            onClick={handleRunAutoSweep}
-            disabled={sweeping}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 px-4 py-2 text-xs font-bold text-slate-950 shadow-md shadow-emerald-500/20 hover:opacity-95 transition disabled:opacity-60"
+            onClick={() => void loadInteractions()}
+            disabled={loadingInbox || !backendOnline}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20 transition disabled:opacity-60"
           >
-            <Zap className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>
-              {sweeping
-                ? "Ejecutando barrido..."
-                : "⚡ Ejecutar Barrido Automático de Comentarios"}
-            </span>
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${loadingInbox ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
+            <span>Actualizar estado</span>
           </button>
         </div>
       </div>
 
-      {/* Visual 3-Step Flow */}
-      <div className="space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-            Arquitectura de Conversión en 3 Pasos
-          </h3>
-          {lastSweepInfo && (
-            <span className="text-[11px] font-medium text-emerald-300">
-              {lastSweepInfo}
-            </span>
+      {/* Bot status */}
+      {!backendOnline ? (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-950/25 p-4 text-xs text-amber-100"
+        >
+          <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-semibold text-amber-200">Backend sin conexión</p>
+            <p className="text-amber-100/80">
+              Conecta el backend para ver el estado del bot, el embudo y las interacciones reales.
+            </p>
+          </div>
+        </div>
+      ) : botStatusError ? (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/70 p-4 text-xs text-slate-300"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-semibold text-white">Estado del bot no disponible</p>
+            <p className="text-slate-400">
+              El backend no ha devuelto el estado del bot ({botStatusError}). Sin datos todavía.
+            </p>
+          </div>
+        </div>
+      ) : botStatus && !botConnected ? (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-950/25 p-4 text-xs text-amber-100"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-semibold text-amber-200">
+              El bot de Instagram aún no está conectado
+            </p>
+            <p className="text-amber-100/80">
+              Despliega <code className="font-mono text-amber-200">bot/</code> en Vercel y aplica sus migraciones en Supabase (pasos en{" "}
+              <code className="font-mono text-amber-200">bot/README.md</code>).
+            </p>
+            {botStatus.detail && (
+              <p className="text-[11px] text-amber-100/60">{botStatus.detail}</p>
+            )}
+          </div>
+        </div>
+      ) : botStatus ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-500/35 bg-emerald-950/20 p-4 text-xs text-emerald-100"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden="true" />
+          <span className="font-semibold text-emerald-200">Bot de Instagram conectado</span>
+          <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+            {toCount(botStatus.accounts)} cuenta(s)
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+            {toCount(botStatus.active_rules)} regla(s) activa(s)
+          </span>
+        </div>
+      ) : null}
+
+      {/* Real 7-day funnel per bot rule */}
+      {backendOnline && botStatus && (
+        <div className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              Embudo de los últimos 7 días
+            </h3>
+            {funnelRows.length > 0 && (
+              <span className="text-[11px] font-mono text-slate-400">
+                {funnelTotals.prompts} botones enviados → {funnelTotals.rewards} enlaces entregados
+              </span>
+            )}
+          </div>
+
+          {funnelRows.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-400">
+              Sin datos todavía: el bot no ha enviado nada en los últimos 7 días.
+            </p>
+          ) : (
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {funnelRows.map((row, idx) => {
+                const prompts = toCount(row.prompts_sent);
+                const rewards = toCount(row.rewards_sent);
+                const pct = prompts > 0 ? Math.round((rewards / prompts) * 100) : null;
+                const keywordLabel =
+                  row.keyword ||
+                  (Array.isArray(row.keywords) ? row.keywords.join(", ") : "");
+                return (
+                  <div
+                    key={String(row.rule_id ?? idx)}
+                    className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-xs font-semibold text-white">
+                        {row.name || "Regla sin nombre"}
+                      </span>
+                      {keywordLabel && (
+                        <span className="rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-300">
+                          {keywordLabel}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-300">
+                      <span className="font-mono">{prompts}</span>
+                      <span className="text-slate-500">botones enviados</span>
+                      <span className="text-slate-600">→</span>
+                      <span className="font-mono">{rewards}</span>
+                      <span className="text-slate-500">enlaces entregados</span>
+                    </div>
+                    {pct !== null && (
+                      <div
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800"
+                        aria-label={`${pct}% de botones convertidos en entregas`}
+                      >
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${Math.min(100, pct)}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
+
+          <p className="flex items-start gap-1.5 text-[11px] text-slate-500">
+            <Terminal className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+            <span>
+              Las reglas «comenta PALABRA» del bot se gestionan desde la terminal:{" "}
+              <code className="font-mono text-slate-300">node bot\scripts\regla.mjs</code>{" "}
+              (vista previa) y <code className="font-mono text-slate-300">--si</code> para aplicar.
+            </span>
+          </p>
         </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
-          {/* Step 1 */}
-          <div className="relative rounded-xl border border-cyan-500/30 bg-slate-950/75 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 px-2.5 py-0.5 text-[11px] font-bold text-cyan-300">
-                <MessageCircle className="h-3 w-3" aria-hidden="true" />
-                Paso 1
-              </span>
-              <ArrowRight
-                className="hidden md:block h-4 w-4 text-slate-600"
-                aria-hidden="true"
-              />
-            </div>
-            <h4 className="text-xs font-bold text-white">
-              1. Comentario entrante con Palabra Clave
-            </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Escucha comentarios en Instagram, TikTok, YouTube y LinkedIn buscando disparadores activos (ej.{" "}
-              <code className="text-cyan-300 font-mono">
-                {effectiveRules[0]?.keyword || "GUIA"}
-              </code>
-              ).
-            </p>
-          </div>
-
-          {/* Step 2 */}
-          <div className="relative rounded-xl border border-violet-500/30 bg-slate-950/75 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 border border-violet-500/30 px-2.5 py-0.5 text-[11px] font-bold text-violet-300">
-                <MessageSquareReply className="h-3 w-3" aria-hidden="true" />
-                Paso 2
-              </span>
-              <ArrowRight
-                className="hidden md:block h-4 w-4 text-slate-600"
-                aria-hidden="true"
-              />
-            </div>
-            <h4 className="text-xs font-bold text-white">
-              2. Respuesta Pública Anti-Penalización
-            </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Contesta en el hilo público con copy rotativo natural y sin URLs externas, evitando castigos algorítmicos y duplicando la interacción.
-            </p>
-          </div>
-
-          {/* Step 3 */}
-          <div className="rounded-xl border border-emerald-500/30 bg-slate-950/75 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-0.5 text-[11px] font-bold text-emerald-300">
-                <Send className="h-3 w-3" aria-hidden="true" />
-                Paso 3
-              </span>
-              <FolderOpen className="h-4 w-4 text-amber-400" aria-hidden="true" />
-            </div>
-            <h4 className="text-xs font-bold text-white">
-              3. Envío Automático por DM con Lead Magnet de la Carpeta
-            </h4>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Envía por mensaje privado el enlace exacto de{" "}
-              <span className="text-amber-300 font-semibold">
-                Carpeta Lead Magnets
-              </span>{" "}
-              y registra la entrega en tu bandeja en vivo.
-            </p>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Active Keywords Linked to Lead Magnets */}
       <div className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 space-y-3">
@@ -712,7 +521,7 @@ export function KigalChatDMAutomationHub({
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-400" aria-hidden="true" />
             <h3 className="text-xs font-bold text-white">
-              Palabras Clave Activas enlazadas a Lead Magnets ({configuredTriggers.length})
+              Reglas del perfil de creador (ManyChat) ({configuredTriggers.length})
             </h3>
           </div>
           <button
@@ -732,11 +541,7 @@ export function KigalChatDMAutomationHub({
                 Sin disparadores personalizados guardados en Paso 0 todavía.
               </p>
               <p className="text-[11px] text-slate-400">
-                El motor usará de respaldo la palabra clave del objetivo activo (
-                <code className="font-mono text-cyan-300">
-                  {effectiveRules[0]?.keyword}
-                </code>
-                ). Crea tus reglas en Paso 0 para personalizar mensajes y enlaces.
+                Crea tus reglas en Paso 0 para enlazar cada palabra clave con su recurso.
               </p>
             </div>
             <button
@@ -766,10 +571,10 @@ export function KigalChatDMAutomationHub({
                     <button
                       type="button"
                       onClick={() =>
-                        setSimComment(`¡Hola! Quiero ${rule.keyword} por favor`)
+                        setSimComment(rule.keyword)
                       }
                       className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-0.5 text-xs font-extrabold tracking-wider text-emerald-300 hover:bg-emerald-500/25 transition"
-                      title="Usar esta palabra clave en el simulador"
+                      title="Usar esta palabra clave en el probador"
                     >
                       <span>{rule.keyword}</span>
                     </button>
@@ -811,7 +616,7 @@ export function KigalChatDMAutomationHub({
                       <span>Sin URL de entrega</span>
                     )}
                     <span className="font-mono shrink-0">
-                      {rule.triggers_count} envíos
+                      {rule.triggers_count} coincidencias
                     </span>
                   </div>
                 </div>
@@ -821,7 +626,7 @@ export function KigalChatDMAutomationHub({
         )}
       </div>
 
-      {/* Interactive Simulator: Comment -> Public Reply + Private DM */}
+      {/* Rule tester: only checks keyword matching via backend, never delivers */}
       <form
         onSubmit={handleSimulateSubmit}
         className="rounded-xl border border-cyan-500/30 bg-slate-950/75 p-4 space-y-4"
@@ -830,10 +635,10 @@ export function KigalChatDMAutomationHub({
           <div>
             <h3 className="flex items-center gap-1.5 text-xs font-bold text-white">
               <Play className="h-3.5 w-3.5 text-cyan-400" aria-hidden="true" />
-              <span>Simulador Interactivo: Comentario → Respuesta Pública + DM Privado</span>
+              <span>Probar una regla (solo coincidencia)</span>
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Prueba cómo reacciona KigalChat ante un comentario real antes de publicar tus campañas.
+              Escribe un comentario y comprueba qué regla coincidiría. No se envía ningún DM ni respuesta real.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -842,7 +647,7 @@ export function KigalChatDMAutomationHub({
                 key={rule.keyword}
                 type="button"
                 onClick={() => {
-                  setSimComment(`¡Quiero ${rule.keyword}! Envía info`);
+                  setSimComment(rule.keyword);
                   setSimError(null);
                 }}
                 className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-bold text-cyan-300 hover:border-cyan-400 transition"
@@ -891,7 +696,7 @@ export function KigalChatDMAutomationHub({
               spellCheck={false}
               value={simUsername}
               onChange={(e) => setSimUsername(e.target.value)}
-              placeholder="@elena_founder"
+              placeholder="@usuario (opcional)"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
             />
           </div>
@@ -914,7 +719,7 @@ export function KigalChatDMAutomationHub({
               }}
               aria-invalid={simError ? "true" : undefined}
               aria-describedby={simError ? simErrorId : undefined}
-              placeholder="Ej: ¡Me encanta! Quiero BLUEPRINT"
+              placeholder="Ej.: Quiero PALABRA"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-400 focus:outline-none"
             />
           </div>
@@ -922,14 +727,20 @@ export function KigalChatDMAutomationHub({
           <div className="md:col-span-2">
             <button
               type="submit"
-              disabled={simulating}
+              disabled={simulating || !backendOnline}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 px-3 py-2 text-xs font-bold text-slate-950 transition disabled:opacity-60"
             >
               <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{simulating ? "Procesando..." : "Simular"}</span>
+              <span>{simulating ? "Comprobando..." : "Probar"}</span>
             </button>
           </div>
         </div>
+
+        {!backendOnline && (
+          <p className="text-[11px] text-slate-500">
+            Conecta el backend para probar tus reglas.
+          </p>
+        )}
 
         {simError && (
           <p
@@ -958,7 +769,7 @@ export function KigalChatDMAutomationHub({
                       aria-hidden="true"
                     />
                     <span>
-                      Coincidencia detectada: {simPreview.keyword} ({simPreview.platform})
+                      Coincidencia: {simPreview.keyword} ({simPreview.platform})
                     </span>
                   </>
                 ) : (
@@ -971,7 +782,7 @@ export function KigalChatDMAutomationHub({
                   </>
                 )}
               </span>
-              {simPreview.matched && (
+              {simPreview.matched && simPreview.lead_magnet_title && (
                 <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
                   Lead Magnet: {simPreview.lead_magnet_title}
                 </span>
@@ -981,17 +792,17 @@ export function KigalChatDMAutomationHub({
             <div className="grid gap-3 md:grid-cols-2 text-xs">
               <div className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-violet-300">
-                  Respuesta Pública Anti-Penalización
+                  Respuesta pública que se usaría
                 </span>
-                <p className="text-slate-200">{simPreview.public_comment_reply}</p>
+                <p className="text-slate-200">{simPreview.public_comment_reply || "—"}</p>
               </div>
 
               <div className="rounded-lg border border-slate-800 bg-slate-900/90 p-3 space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-                  DM Privado Entregado ({simPreview.username})
+                  DM que se enviaría{simPreview.username ? ` (${simPreview.username})` : ""}
                 </span>
                 <p className="text-slate-200 font-mono text-[11px]">
-                  {simPreview.dm_reply_text || "No se envió DM privado."}
+                  {simPreview.dm_reply_text || "—"}
                 </p>
                 {simPreview.delivery_url && (
                   <a
@@ -1016,7 +827,7 @@ export function KigalChatDMAutomationHub({
           <div className="flex items-center gap-2">
             <Inbox className="h-4 w-4 text-emerald-400" aria-hidden="true" />
             <h3 id={inboxCaptionId} className="text-sm font-bold text-white">
-              Bandeja de Interacciones en Vivo ({filteredInteractions.length})
+              Interacciones reales ({filteredInteractions.length})
             </h3>
           </div>
 
@@ -1048,15 +859,13 @@ export function KigalChatDMAutomationHub({
             <select
               id={inboxStatusId}
               value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(
-                  e.target.value as "ALL" | "DELIVERED" | "PENDING" | "UNMATCHED"
-                )
-              }
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-white focus:border-emerald-400 focus:outline-none"
             >
               <option value="ALL">Todos los estados</option>
+              <option value="SENT">Enviados por el bot</option>
               <option value="DELIVERED">Entregados (DM)</option>
+              <option value="MATCHED">Coincidencia (sin entrega)</option>
               <option value="PENDING">Pendientes</option>
               <option value="UNMATCHED">Sin coincidencia</option>
             </select>
@@ -1064,7 +873,7 @@ export function KigalChatDMAutomationHub({
             <button
               type="button"
               onClick={() => void loadInteractions()}
-              disabled={loadingInbox}
+              disabled={loadingInbox || !backendOnline}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-white transition disabled:opacity-60"
             >
               <RefreshCw
@@ -1084,7 +893,7 @@ export function KigalChatDMAutomationHub({
         >
           <table>
             <caption className="sr-only">
-              Historial en vivo de comentarios detectados, respuestas públicas y entregas por DM de KigalChat Auto-DM
+              Interacciones reales registradas por el bot de Instagram y las reglas de KigalChat
             </caption>
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-400">
@@ -1109,7 +918,13 @@ export function KigalChatDMAutomationHub({
               {filteredInteractions.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-6 text-center text-slate-400">
-                    No hay interacciones que coincidan con el filtro actual. Ejecuta un barrido automático o prueba el simulador.
+                    {!backendOnline
+                      ? "Conecta el backend para ver las interacciones."
+                      : inboxError
+                        ? `No se pudieron cargar las interacciones (${inboxError}).`
+                        : interactions.length === 0
+                          ? "Aún no hay interacciones registradas."
+                          : "No hay interacciones que coincidan con el filtro actual."}
                   </td>
                 </tr>
               ) : (
@@ -1121,7 +936,7 @@ export function KigalChatDMAutomationHub({
                     >
                       <div className="space-y-1">
                         <span className="block font-mono text-cyan-300">
-                          {item.username}
+                          {item.username || "—"}
                         </span>
                         <div className="flex items-center gap-1.5 text-[10px]">
                           <span className="rounded bg-slate-800 px-1.5 py-0.5 uppercase text-slate-300">
@@ -1137,7 +952,7 @@ export function KigalChatDMAutomationHub({
                       data-label="Comentario"
                       className="p-3 text-slate-200 max-w-[240px]"
                     >
-                      {item.comment_text}
+                      {item.comment_text || "—"}
                     </td>
                     <td data-label="Palabra Clave" className="p-3 whitespace-nowrap">
                       {item.matched_keyword && item.matched_keyword !== "-" ? (
@@ -1159,20 +974,30 @@ export function KigalChatDMAutomationHub({
                       className="p-3 space-y-1.5 max-w-[280px]"
                     >
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {item.status === "DELIVERED" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
-                            <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                            <span>DELIVERED</span>
-                          </span>
-                        ) : item.status === "PENDING" ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                            <Clock className="h-3 w-3" aria-hidden="true" />
-                            <span>PENDING</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
-                            <AlertCircle className="h-3 w-3" aria-hidden="true" />
-                            <span>UNMATCHED</span>
+                        {(() => {
+                          const badge = STATUS_BADGES[item.status] ?? {
+                            label: item.status,
+                            className: "border-slate-700 bg-slate-800 text-slate-300",
+                            icon: "alert" as const,
+                          };
+                          const Icon =
+                            badge.icon === "check"
+                              ? CheckCircle2
+                              : badge.icon === "clock"
+                                ? Clock
+                                : AlertCircle;
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${badge.className}`}
+                            >
+                              <Icon className="h-3 w-3" aria-hidden="true" />
+                              <span>{badge.label}</span>
+                            </span>
+                          );
+                        })()}
+                        {item.kind && (
+                          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
+                            {KIND_LABELS[item.kind] ?? item.kind}
                           </span>
                         )}
                         {item.lead_magnet_title && item.lead_magnet_title !== "-" && (

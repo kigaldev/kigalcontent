@@ -31,12 +31,79 @@ from app.schemas.contracts import (
     BestTimeSlot,
     SocialChannel,
 )
-from app.services.social_connectors import get_connector_for_channel
+from app.services.social_connectors import (
+    NOT_CONFIGURED_STATUS,
+    SocialRateLimitError,
+    get_connector_for_channel,
+)
 
 
 logger = logging.getLogger("uvicorn.error")
 
 DAY_LABELS: tuple[str, ...] = ("Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom")
+
+# Channel -> UTC instant until which the platform asked us to stop publishing (Meta rate limits).
+# In-memory cache; the durable record is the RATE_LIMITED AuditLog row (payload.channel/paused_until).
+_CHANNEL_PAUSED_UNTIL: dict[str, datetime] = {}
+RATE_LIMITED_STATUS = "RATE_LIMITED"
+
+
+def register_channel_pause(channel: str, retry_after: int) -> datetime:
+    """Remember that `channel` must not publish for retry_after seconds; returns the resume instant."""
+    until = datetime.now(timezone.utc) + timedelta(seconds=int(retry_after))
+    previous = _CHANNEL_PAUSED_UNTIL.get(channel)
+    if previous is None or until > previous:
+        _CHANNEL_PAUSED_UNTIL[channel] = until
+    return _CHANNEL_PAUSED_UNTIL[channel]
+
+
+def rate_limit_audit_payload(channel: str, error: str, retry_after: int, paused_until: datetime) -> dict[str, Any]:
+    """AuditLog payload that makes the pause durable across restarts (read by get_channel_pause_until)."""
+    return {
+        "channel": channel,
+        "error": error,
+        "retry_after": int(retry_after),
+        "paused_until": paused_until.isoformat(),
+    }
+
+
+def channel_pause_message(channel: str, until: datetime) -> str:
+    return (
+        f"{channel} está en pausa por un límite de la plataforma hasta {until.isoformat()}. "
+        "No se ha intentado publicar."
+    )
+
+
+async def get_channel_pause_until(db: AsyncSession, channel: str) -> datetime | None:
+    """Active pause for `channel` (memory or persisted RATE_LIMITED audit rows), or None."""
+    now = datetime.now(timezone.utc)
+    candidates: list[datetime] = []
+    cached = _CHANNEL_PAUSED_UNTIL.get(channel)
+    if cached is not None:
+        candidates.append(cached)
+    rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.operation_status == RATE_LIMITED_STATUS)
+            .order_by(AuditLog.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    for row in rows:
+        payload = row.payload or {}
+        if payload.get("channel") != channel or not payload.get("paused_until"):
+            continue
+        try:
+            candidates.append(_ensure_utc(datetime.fromisoformat(str(payload["paused_until"]))))
+        except ValueError:
+            continue
+    active = [c for c in candidates if c > now]
+    if not active:
+        _CHANNEL_PAUSED_UNTIL.pop(channel, None)
+        return None
+    until = max(active)
+    _CHANNEL_PAUSED_UNTIL[channel] = until
+    return until
 
 
 def _safe_zoneinfo(tz_name: str | None) -> tuple[str, ZoneInfo]:
@@ -63,104 +130,18 @@ def _score_label(score: int) -> str:
     return "Baja Actividad"
 
 
-def _benchmark_score(channel: str, day_of_week: int, hour: int) -> int:
-    """Calibrated audience engagement curves (0-100) per social channel."""
-    ch = channel.strip().lower()
-    is_weekend = day_of_week in (5, 6)
-    is_midweek = day_of_week in (1, 2, 3)
-
-    if ch == "linkedin":
-        if is_weekend:
-            base = 24 if 9 <= hour <= 19 else 12
-        elif is_midweek:
-            if hour == 9:
-                base = 96 if day_of_week == 1 else (94 if day_of_week == 2 else 92)
-            elif hour in (8, 10):
-                base = 88
-            elif hour in (12, 13):
-                base = 86
-            elif hour in (11, 14, 17):
-                base = 76
-            elif 7 <= hour <= 19:
-                base = 60
-            else:
-                base = 18
-        else:
-            # Monday / Friday
-            if hour in (8, 9, 10):
-                base = 81 if day_of_week == 0 else 75
-            elif hour in (12, 13):
-                base = 78 if day_of_week == 0 else 70
-            elif 7 <= hour <= 18:
-                base = 56
-            else:
-                base = 18
-        return max(5, min(100, base))
-
-    if ch == "instagram":
-        if hour in (19, 20, 21):
-            base = 96 if (day_of_week in (2, 3, 6) and hour == 20) else 89
-        elif hour in (12, 13, 14):
-            base = 85 if not is_weekend else 81
-        elif hour in (18, 22):
-            base = 77
-        elif 9 <= hour <= 17:
-            base = 63
-        else:
-            base = 20
-        return max(5, min(100, base))
-
-    if ch == "tiktok":
-        if hour in (19, 20, 21):
-            base = 97 if (day_of_week in (3, 4, 5, 6) and hour == 20) else 91
-        elif hour in (18, 22):
-            base = 86
-        elif hour in (12, 13, 14):
-            base = 74
-        elif hour in (23, 0):
-            base = 55
-        elif 9 <= hour <= 17:
-            base = 48
-        else:
-            base = 22
-        return max(5, min(100, base))
-
-    # YouTube default curve
-    if day_of_week in (3, 4, 5, 6):
-        if hour in (18, 19, 20):
-            base = 96 if (day_of_week in (4, 5, 6) and hour == 19) else 90
-        elif hour in (17, 21):
-            base = 84
-        elif 14 <= hour <= 16:
-            base = 72
-        elif 10 <= hour <= 13:
-            base = 58
-        else:
-            base = 22
-    else:
-        if hour in (18, 19, 20):
-            base = 82
-        elif hour in (17, 21):
-            base = 75
-        elif 12 <= hour <= 16:
-            base = 62
-        else:
-            base = 20
-    return max(5, min(100, base))
-
-
-def _snapshot_engagement_score(snap: PerformanceSnapshot) -> float:
+def _snapshot_engagement_score(snap: PerformanceSnapshot) -> float | None:
+    """Score (0-100) derived only from metrics really measured; None when the snapshot has none."""
     if snap.outlier_multiplier is not None:
         raw = 50.0 + (float(snap.outlier_multiplier) - 1.0) * 24.0
     else:
-        hold = float(snap.hold_rate_3s if snap.hold_rate_3s is not None else 58.0)
-        comp = float(snap.completion_rate if snap.completion_rate is not None else 48.0)
-        raw = hold * 0.55 + comp * 0.45
-    if snap.sends_per_reach is not None and snap.sends_per_reach >= 2.0:
-        raw += 8.0
-    if snap.view_count and snap.view_count > 10000:
-        raw += 5.0
-    return max(15.0, min(100.0, raw))
+        measured = [
+            float(v) for v in (snap.hold_rate_3s, snap.completion_rate) if v is not None
+        ]
+        if not measured:
+            return None
+        raw = sum(measured) / len(measured)
+    return max(0.0, min(100.0, raw))
 
 
 def compute_best_time_heatmap(
@@ -168,7 +149,10 @@ def compute_best_time_heatmap(
     snapshots: list[PerformanceSnapshot],
     tz: str = "Europe/Madrid",
 ) -> BestTimeHeatmapResponse:
-    """Compute a 7x24 Best Time to Post heatmap blending DB analytics with channel benchmarks."""
+    """7x24 Best Time heatmap from real PerformanceSnapshot data only.
+
+    Without real analytics the grid is empty (all scores 0, source "empty"): no hand-calibrated curves.
+    """
     tz_name, zone = _safe_zoneinfo(tz)
 
     buckets: dict[tuple[int, int], list[float]] = defaultdict(list)
@@ -176,8 +160,11 @@ def compute_best_time_heatmap(
         recorded_at = getattr(snap, "recorded_at", None)
         if recorded_at is None:
             continue
+        score = _snapshot_engagement_score(snap)
+        if score is None:
+            continue
         local_dt = _ensure_utc(recorded_at).astimezone(zone)
-        buckets[(local_dt.weekday(), local_dt.hour)].append(_snapshot_engagement_score(snap))
+        buckets[(local_dt.weekday(), local_dt.hour)].append(score)
 
     has_analytics = len(buckets) > 0
     grid: list[BestTimeSlot] = []
@@ -186,20 +173,14 @@ def compute_best_time_heatmap(
     for day in range(7):
         day_label = DAY_LABELS[day]
         for hour in range(24):
-            bench = _benchmark_score(channel, day, hour)
             observed = buckets.get((day, hour))
-            if observed:
-                real_avg = sum(observed) / len(observed)
-                final_score = int(round(max(0.0, min(100.0, 0.65 * real_avg + 0.35 * bench))))
-            else:
-                final_score = bench
-
+            final_score = int(round(sum(observed) / len(observed))) if observed else 0
             slot = BestTimeSlot(
                 day_of_week=day,
                 day_label=day_label,
                 hour=hour,
                 score=final_score,
-                label=_score_label(final_score),
+                label=_score_label(final_score) if observed else "Sin datos",
             )
             grid.append(slot)
             if best_slot is None or slot.score > best_slot.score:
@@ -209,11 +190,11 @@ def compute_best_time_heatmap(
     return BestTimeHeatmapResponse(
         channel=channel,
         timezone=tz_name,
-        source="analytics" if has_analytics else "benchmark",
+        source="analytics" if has_analytics else "empty",
         peak_slot={
-            "day_label": best_slot.day_label,
-            "hour": best_slot.hour,
-            "score": best_slot.score,
+            "day_label": best_slot.day_label if has_analytics else "",
+            "hour": best_slot.hour if has_analytics else None,
+            "score": best_slot.score if has_analytics else 0,
         },
         grid=grid,
     )
@@ -416,6 +397,12 @@ async def run_due_scheduled_posts(db: AsyncSession) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     for sp in due_posts:
+        paused_until = await get_channel_pause_until(db, sp.channel)
+        if paused_until is not None:
+            # Platform rate limit still active: keep it scheduled for after the pause, no API call.
+            sp.scheduled_at = paused_until
+            continue
+
         proj = (
             await db.execute(select(ContentProject).where(ContentProject.id == sp.project_id))
         ).scalar_one_or_none()
@@ -454,8 +441,38 @@ async def run_due_scheduled_posts(db: AsyncSession) -> list[dict[str, Any]]:
                 security_manager=sec_mgr,
             )
 
+            if pub_res.get("status") != "PUBLISHED":
+                # Not connected (or any non-published outcome): never mark as published nor count it.
+                not_published_msg = str(pub_res.get("message") or f"{sp.channel}: no publicado ({pub_res.get('status')}).")
+                sp.publish_status = "FAILED"
+                sp.publish_error = not_published_msg
+                if ws_id is not None:
+                    db.add(
+                        AuditLog(
+                            workspace_id=ws_id,
+                            project_id=sp.project_id,
+                            action_type=f"SCHEDULED_PUBLISH_{sp.channel.upper()}",
+                            agent_or_user_id="PublishingScheduler",
+                            security_tier=3,
+                            operation_status=str(pub_res.get("status") or NOT_CONFIGURED_STATUS),
+                            hitl_token_id=sp.hitl_approval_token,
+                            payload={"error": not_published_msg, "channel": sp.channel},
+                            ip_source="scheduler",
+                        )
+                    )
+                results.append(
+                    {
+                        "post_id": str(sp.id),
+                        "project_id": str(sp.project_id),
+                        "channel": sp.channel,
+                        "status": str(pub_res.get("status") or NOT_CONFIGURED_STATUS),
+                        "error": not_published_msg,
+                    }
+                )
+                continue
+
             sp.external_platform_id = pub_res["external_platform_id"]
-            sp.canonical_url = pub_res["canonical_url"]
+            sp.canonical_url = pub_res.get("canonical_url")
             sp.publish_status = "PUBLISHED"
             sp.published_at = now_utc
             sp.publish_error = None
@@ -480,6 +497,35 @@ async def run_due_scheduled_posts(db: AsyncSession) -> list[dict[str, Any]]:
                     "post_id": str(sp.id),
                     "project_id": str(sp.project_id),
                     **pub_res,
+                }
+            )
+        except SocialRateLimitError as exc:
+            # Meta asked to stop: pause the whole channel, keep the post scheduled after the pause.
+            resume_at = register_channel_pause(sp.channel, exc.retry_after)
+            sp.scheduled_at = resume_at
+            sp.publish_error = f"{exc} Se reintentará a partir de {resume_at.isoformat()}."
+            if ws_id is not None:
+                db.add(
+                    AuditLog(
+                        workspace_id=ws_id,
+                        project_id=sp.project_id,
+                        action_type=f"SCHEDULED_PUBLISH_{sp.channel.upper()}",
+                        agent_or_user_id="PublishingScheduler",
+                        security_tier=3,
+                        operation_status=RATE_LIMITED_STATUS,
+                        hitl_token_id=sp.hitl_approval_token,
+                        payload=rate_limit_audit_payload(sp.channel, str(exc), exc.retry_after, resume_at),
+                        ip_source="scheduler",
+                    )
+                )
+            results.append(
+                {
+                    "post_id": str(sp.id),
+                    "project_id": str(sp.project_id),
+                    "channel": sp.channel,
+                    "status": "RATE_LIMITED",
+                    "error": str(exc),
+                    "retry_after": exc.retry_after,
                 }
             )
         except Exception as exc:

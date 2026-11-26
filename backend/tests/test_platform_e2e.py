@@ -331,7 +331,12 @@ class TestFastAPIEndToEnd:
             # Process media -> transitions to PRODUCED_VALIDATED
             media_res = client.post(
                 "/api/v1/media/process",
-                json={"project_id": pid, "raw_media_url": "s3://ace-media-vault/demo.mp4"},
+                # No real source in tests: explicitly opt in to the synthetic test clip.
+                json={
+                    "project_id": pid,
+                    "raw_media_url": "s3://ace-media-vault/demo.mp4",
+                    "generate_demo_source_if_missing": True,
+                },
             )
             assert media_res.status_code == 200
             assert media_res.json()["qc_passed"] is True
@@ -358,19 +363,36 @@ class TestFastAPIEndToEnd:
                     "tier": 3,
                     "action": "publish_linkedin",
                     "actor": "creator",
-                    "two_factor_code": "884210",
                 },
             ).json()["token"]
 
-            pub_ok = client.post(
-                "/api/v1/social/publish",
-                json={
-                    "project_id": pid,
-                    "channels": ["LinkedIn"],
-                    "hitl_token": t3_tok,
-                    "actor": "creator",
-                },
-            )
+            # No fabricated "sandbox" publications any more: simulate a connected LinkedIn with a mocked API reply.
+            with (
+                patch.object(get_settings(), "linkedin_access_token", "mock_li_live_token"),
+                patch.object(
+                    LinkedInUGCConnector,
+                    "_dispatch_oauth_request",
+                    new=AsyncMock(
+                        return_value={
+                            "status": "PUBLISHED",
+                            "mode": "live_oauth2",
+                            "channel": "LinkedIn",
+                            "external_platform_id": "urn:li:share:123",
+                            "canonical_url": "https://www.linkedin.com/feed/update/urn:li:share:123/",
+                            "auth_verified": True,
+                        }
+                    ),
+                ),
+            ):
+                pub_ok = client.post(
+                    "/api/v1/social/publish",
+                    json={
+                        "project_id": pid,
+                        "channels": ["LinkedIn"],
+                        "hitl_token": t3_tok,
+                        "actor": "creator",
+                    },
+                )
             assert pub_ok.status_code == 200
             assert pub_ok.json()["status"] == "PUBLISHED_LIVE"
 
@@ -472,16 +494,13 @@ class TestFastAPIEndToEnd:
             assert len(data["ga4_utm_links"]) >= 3
             assert all("utm_source=" in link["url"] for link in data["ga4_utm_links"])
 
-    def test_kigalchat_auto_sweep_and_interactions(self):
+    def test_kigalchat_manual_trigger_and_bot_interactions(self):
         with (
             patch("app.core.config.Settings.save_creator_profile_file", return_value=None),
             TestClient(app) as client,
         ):
-            # Before configuring triggers, auto-sweep returns processed_count=0 cleanly
-            empty_sweep = client.post("/api/v1/kigalchat/auto-sweep")
-            assert empty_sweep.status_code == 200
-            assert empty_sweep.json()["processed_count"] == 0
-            assert empty_sweep.json()["interactions"] == []
+            # The simulated auto-sweep endpoint no longer exists
+            assert client.post("/api/v1/kigalchat/auto-sweep").status_code in (404, 405)
 
             initial_list = client.get("/api/v1/kigalchat/interactions")
             assert initial_list.status_code == 200
@@ -532,27 +551,12 @@ class TestFastAPIEndToEnd:
             assert trig_data["public_comment_reply"]
             assert trig_data["triggers_count"] == 1
 
-            # Auto-sweep processes active rule and increments triggers_count
-            sweep = client.post("/api/v1/kigalchat/auto-sweep")
-            assert sweep.status_code == 200
-            sweep_data = sweep.json()
-            assert sweep_data["processed_count"] == 1
-            assert len(sweep_data["interactions"]) == 1
-            item = sweep_data["interactions"][0]
-            assert item["matched_keyword"] == "SISTEMA"
-            assert item["lead_magnet_title"] == "Blueprint KigalChat IA"
-            assert item["delivery_url"] == "https://kigalcontent.studio/recursos/blueprint"
-            assert item["public_comment_reply"]
-            assert item["dm_reply_text"]
-            assert item["status"] == "DELIVERED"
-
-            # Persisted triggers_count is now 2 and interactions list has both records
+            # Persisted triggers_count is 1 (only the real trigger counted)
             prof = client.get("/api/v1/creator-profile").json()
-            assert prof["manychat_triggers"][0]["triggers_count"] == 2
+            assert prof["manychat_triggers"][0]["triggers_count"] == 1
 
-            interactions = client.get("/api/v1/kigalchat/interactions").json()
-            assert len(interactions) == 2
-            assert all(i["public_comment_reply"] for i in interactions)
+            # Interactions come only from the bot tables (absent in SQLite): empty, never invented
+            assert client.get("/api/v1/kigalchat/interactions").json() == []
 
     def test_ideas_ai_evaluate_and_radar_matutino_ingest(self):
         with TestClient(app) as client:
@@ -878,7 +882,7 @@ class TestFastAPIEndToEnd:
             patch.object(httpx.AsyncClient, "post", new=AsyncMock()) as mock_http_post,
             TestClient(app) as client,
         ):
-            # 1. Create a DRAFT post without HITL PIN
+            # 1. Create a DRAFT post
             draft_resp = client.post(
                 "/api/v1/publishing/posts",
                 json={
@@ -898,21 +902,22 @@ class TestFastAPIEndToEnd:
             assert draft_post["publish_status"] == "DRAFT"
             assert draft_post["project_title"]
 
-            # 2. SCHEDULED with auto_publish=True without PIN must be rejected (400)
+            # 2. SCHEDULED with auto_publish=True is accepted without any PIN
             future_10d = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
-            blocked_sched = client.post(
+            accepted_sched = client.post(
                 "/api/v1/publishing/posts",
                 json={
                     "channels": ["LinkedIn"],
-                    "post_body": "Post programado sin PIN",
+                    "post_body": "Post programado sin PIN (ya no se exige)",
                     "publish_mode": "SCHEDULED",
                     "scheduled_at": future_10d,
                     "auto_publish": True,
                 },
             )
-            assert blocked_sched.status_code == 400
+            assert accepted_sched.status_code == 200
+            assert accepted_sched.json()["posts"][0]["hitl_approval_token"]
 
-            # 3. Create multi-channel SCHEDULED posts with PIN + per_channel_overrides
+            # 3. Create multi-channel SCHEDULED posts + per_channel_overrides
             sched_resp = client.post(
                 "/api/v1/publishing/posts",
                 json={
@@ -930,7 +935,6 @@ class TestFastAPIEndToEnd:
                     "scheduled_at": future_10d,
                     "timezone": "Europe/Madrid",
                     "auto_publish": True,
-                    "hitl_pin": "884210",
                 },
             )
             assert sched_resp.status_code == 200
@@ -969,7 +973,11 @@ class TestFastAPIEndToEnd:
             bt_data = bt_resp.json()
             assert bt_data["channel"] == "LinkedIn"
             assert len(bt_data["grid"]) == 168
-            assert bt_data["peak_slot"]["score"] >= 85
+            # Only real analytics: without PerformanceSnapshot data the grid is empty, never benchmark curves.
+            assert bt_data["source"] in ("analytics", "empty")
+            if bt_data["source"] == "empty":
+                assert all(slot["score"] == 0 for slot in bt_data["grid"])
+                assert bt_data["peak_slot"]["score"] == 0
 
             # 7. Autolists CRUD + calendar projection
             now_utc = datetime.now(timezone.utc)
@@ -1037,8 +1045,10 @@ class TestFastAPIEndToEnd:
             assert tick_data["processed_count"] >= 1
             dispatched = [r for r in tick_data["results"] if r["post_id"] == li_sched["id"]]
             assert len(dispatched) == 1
-            assert dispatched[0]["status"] == "PUBLISHED"
-            assert dispatched[0]["mode"] == "sandbox_verified"
+            # Without LinkedIn credentials nothing is published nor invented: explicit NOT_CONFIGURED, no URL.
+            assert dispatched[0]["status"] == "NOT_CONFIGURED"
+            assert "no está conectado" in dispatched[0]["error"]
+            assert "canonical_url" not in dispatched[0]
             mock_http_post.assert_not_called()
 
             # 9. Clean up items, autolist, and draft post

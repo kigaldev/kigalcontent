@@ -162,7 +162,9 @@ export function InstagramPlatformVisor({
                     Gancho 0–3s de Ruptura de Scroll:
                   </span>
                   <span className="font-mono text-[10px] text-pink-400">
-                    Hold Rate: {activeHook.estimated_hold_rate}%
+                    {activeHook.estimated_hold_rate
+                      ? `Retención estimada por IA: ${activeHook.estimated_hold_rate}%`
+                      : "Sin estimación"}
                   </span>
                 </div>
                 <p className="text-xs text-slate-200 font-medium">

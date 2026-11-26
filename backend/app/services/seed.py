@@ -8,7 +8,6 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.models.entities import (
     AuditLog,
     ContentProject,
@@ -107,9 +106,6 @@ async def seed_initial_data(db: AsyncSession) -> Workspace:
         await purge_test_dummy_records(db)
         return existing_ws
 
-    settings = get_settings()
-    profile_json = settings.load_creator_profile_file()
-
     ws = Workspace(
         id=DEFAULT_WORKSPACE_ID,
         name="Kigal Content Studio — Enterprise",
@@ -118,19 +114,20 @@ async def seed_initial_data(db: AsyncSession) -> Workspace:
     db.add(ws)
     await db.flush()
 
+    # Empty profile: the creator fills it in from the app. Nothing invented
+    # (the bundled skill config/creator_profile.json is a sample, not the owner's data).
     creator = CreatorProfile(
         workspace_id=ws.id,
-        creator_code=profile_json.get("creator_id", "CR-001"),
-        creator_name=profile_json.get("name", "David"),
-        personal_brand_tagline=profile_json.get("personal_brand_tagline", ""),
-        niche=profile_json.get("niche", "Solopreneurship & AI Systems"),
-        target_icp=profile_json.get("ideal_customer_profile", "Fundadores B2B y creadores"),
-        active_goal=profile_json.get("active_conversion_goal", "EMAIL_LEAD_CAPTURE"),
-        content_pillars=profile_json.get("content_pillars", []),
-        conversion_goals_catalog=profile_json.get("conversion_goals_catalog", {}),
-        lead_magnets=profile_json.get("lead_magnets", []),
-        social_profiles=profile_json.get("social_profiles", {}),
-        voice_guidelines=profile_json.get("voice_guidelines", "Directo, empírico, sin rodeos, orientado a resultados."),
+        creator_name="",
+        personal_brand_tagline="",
+        niche="",
+        target_icp="",
+        active_goal="EMAIL_LEAD_CAPTURE",
+        content_pillars=[],
+        conversion_goals_catalog={},
+        lead_magnets=[],
+        social_profiles={},
+        voice_guidelines="",
     )
     db.add(creator)
     await db.commit()

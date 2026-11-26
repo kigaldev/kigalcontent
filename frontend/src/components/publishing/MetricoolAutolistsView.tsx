@@ -154,20 +154,7 @@ export function MetricoolAutolistsView({
         setAutolists((prev) => [created, ...prev]);
         setSelectedId(created.id);
       } else {
-        const localCreated: AutolistRecord = {
-          id: `local-al-${Date.now()}`,
-          name: newName.trim(),
-          description: newDesc.trim(),
-          channels: newChannels,
-          schedule_slots: newSlots,
-          timezone: newTimezone,
-          is_active: true,
-          repeat_loop: true,
-          items: [],
-          created_at: new Date().toISOString(),
-        };
-        setAutolists((prev) => [localCreated, ...prev]);
-        setSelectedId(localCreated.id);
+        throw new Error("Backend sin conexión: la autolista no se ha guardado.");
       }
       setNewName("");
       setNewDesc("");
@@ -272,15 +259,7 @@ export function MetricoolAutolistsView({
           first_comment: itemFirstComment.trim() || null,
         });
       } else {
-        createdItem = {
-          id: `local-item-${Date.now()}`,
-          autolist_id: selectedAutolist.id,
-          title: itemTitle.trim() || null,
-          post_body: itemBody.trim(),
-          first_comment: itemFirstComment.trim() || null,
-          position: selectedAutolist.items.length,
-          times_published: 0,
-        };
+        throw new Error("Backend sin conexión: el elemento no se ha guardado.");
       }
 
       setAutolists((prev) =>

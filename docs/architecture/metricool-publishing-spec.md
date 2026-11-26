@@ -28,7 +28,7 @@
      - **Curvas B2B / Creador calibradas por red** cuando aún no hay suficientes snapshots (p. ej. LinkedIn picos Mar–Jue `08:00–10:00` y `12:00–14:00`; Instagram `12:00–14:00` y `19:00–21:00`; TikTok `18:00–22:00`; YouTube Jue–Dom `17:00–21:00`).
    - El botón **"⚡ Próxima Mejor Hora"** selecciona automáticamente el siguiente slot con mayor puntuación futura respetando `timezone` IANA (`Europe/Madrid` por defecto).
 4. **Split-Screen Post Composer (Modal `<dialog>` nativo)**
-   - **Columna Izquierda (Editor):** Selector multicanal, toggle `Personalizar texto por red` (master copy vs variantes por canal), `RichTextToolbar` (negritas/cursivas Unicode, viñetas, emojis), selector de modo visual (`Solo Texto`, `Carrusel PDF`, `Imagen / Infografía`, `Video 9:16`), campo dedicado **Primer Comentario Automático de LinkedIn** (protección Zero-Link -60% alcance), y barra inferior de programación (`Programar`, `Guardar Borrador`, `Recordatorio Manual`, `Publicar Ahora`) + PIN HITL Tier 3.
+   - **Columna Izquierda (Editor):** Selector multicanal, toggle `Personalizar texto por red` (master copy vs variantes por canal), `RichTextToolbar` (negritas/cursivas Unicode, viñetas, emojis), selector de modo visual (`Solo Texto`, `Carrusel PDF`, `Imagen / Infografía`, `Video 9:16`), campo dedicado **Primer Comentario Automático de LinkedIn** (protección Zero-Link -60% alcance), y barra inferior de programación (`Programar`, `Guardar Borrador`, `Recordatorio Manual`, `Publicar Ahora`) + aviso de confirmación antes de publicar (sin PIN).
    - **Columna Derecha (Vista Previa Nativa):** Previsualización Desktop / Móvil en tiempo real por plataforma con indicador de corte (`...ver más` a los 135 caracteres en LinkedIn y 120 en Instagram) y botón **Copiar con Formato** (`copyPreservingLineBreaks`).
 5. **Autolists (Colas Evergreen Cíclicas)**
    - Repositorios temáticos con canales objetivo, franjas semanales configurables (`day_of_week` + `HH:MM`), switch `Activa` y switch `Modo Bucle (Repeat Loop)`.
@@ -50,7 +50,7 @@
 
 ## 3. Reglas de Seguridad HITL en Publicación Diferida
 
-1. Toda publicación automática programada (`publish_mode="SCHEDULED"` con `auto_publish=true`) exige PIN HITL Nivel 3 en el momento en que el creador la programa.
-2. El backend emite y firma un token HMAC-SHA256 (`HITL_AUTH_CREATOR_OK_<PID>_T3_<EXP>_<SIG>`) con expiración ajustada a `max(3600, min(180 * 86400, delta_hasta_scheduled + 7200))`.
+1. Toda publicación automática programada (`publish_mode="SCHEDULED"` con `auto_publish=true`) no exige PIN: la confirmación es el aviso claro que muestra el botón final («Publicar ahora» / «Programar») antes de ejecutar la acción.
+2. El backend emite por su cuenta (sin código del creador) y firma un token HMAC-SHA256 (`HITL_AUTH_CREATOR_OK_<PID>_T3_<EXP>_<SIG>`) con expiración ajustada a `max(3600, min(180 * 86400, delta_hasta_scheduled + 7200))`.
 3. Al llegar `scheduled_at`, el dispatcher valida criptográficamente el token antes de invocar al conector OAuth2 y registra el evento en `audit_logs`.
 4. Si una prueba automatizada o cuenta en Sandbox ejecuta el tick, los conectores sin token real responden en `sandbox_verified` sin emitir tráfico externo de escritura.

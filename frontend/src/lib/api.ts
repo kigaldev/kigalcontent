@@ -19,6 +19,7 @@ import type {
   IdeaChatRefineRequest,
   IdeaChatRefineResponse,
   KigalChatInteraction,
+  KigalChatStatus,
   LeadMagnetItem,
   LinkedInAdLibrarySearchRequest,
   LinkedInAdLibrarySearchResponse,
@@ -248,7 +249,6 @@ export const apiClient = {
     tier: 2 | 3;
     action: string;
     actor: string;
-    two_factor_code?: string;
   }) =>
     requestJson<{
       token: string;
@@ -317,6 +317,8 @@ export const apiClient = {
     platform?: string;
     username?: string;
     comment_text?: string;
+    /** true: solo comprueba la coincidencia; no suma contadores ni registra nada. */
+    dry_run?: boolean;
   }) =>
     requestJson<{
       matched: boolean;
@@ -531,7 +533,8 @@ export const apiClient = {
       project_id: string;
       publications: Array<{
         status?: string;
-        mode?: "live_oauth2" | "sandbox_verified" | string;
+        mode?: string;
+        message?: string;
         channel?: string;
         external_platform_id?: string;
         canonical_url?: string;
@@ -626,14 +629,7 @@ export const apiClient = {
   listKigalChatInteractions: () =>
     requestJson<KigalChatInteraction[]>("/kigalchat/interactions"),
 
-  runKigalChatAutoSweep: () =>
-    requestJson<{ processed_count: number; interactions: KigalChatInteraction[] }>(
-      "/kigalchat/auto-sweep",
-      {
-        method: "POST",
-        body: JSON.stringify({}),
-      }
-    ),
+  getKigalChatStatus: () => requestJson<KigalChatStatus>("/kigalchat/status"),
 
   generateAdCampaign: (payload: AdCampaignGenerateRequest) =>
     requestJson<AdCampaignResponse>("/ads/generate-campaign", {
@@ -669,7 +665,6 @@ export const apiClient = {
       timezone?: string;
       auto_publish?: boolean;
       publish_status?: string;
-      hitl_pin?: string;
       hitl_token?: string | null;
     }
   ) =>

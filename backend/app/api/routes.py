@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,9 +13,11 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import desc, select
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -78,8 +81,9 @@ from app.schemas.contracts import (
     IdeaChatRefineRequest,
     IdeaChatRefineResponse,
     InfrastructureServiceStatus,
-    KigalChatAutoSweepResponse,
+    KigalChatFunnelRow,
     KigalChatInteraction,
+    KigalChatStatus,
     LeadMagnetItem,
     LinkedInAdLibrarySearchRequest,
     LinkedInAdLibrarySearchResponse,
@@ -138,13 +142,22 @@ from app.services.linkedin_ads import (
 )
 from app.services.mcp_hub import MCPClientHub
 from app.services.publishing_scheduler import (
+    RATE_LIMITED_STATUS,
+    channel_pause_message,
     compute_best_time_heatmap,
+    get_channel_pause_until,
     project_autolist_slots,
+    rate_limit_audit_payload,
+    register_channel_pause,
     resolve_effective_social_credential,
     run_due_scheduled_posts,
 )
 from app.services.social_connectors import (
+    InstagramApiError,
+    MetaGraphConnector,
     SocialCopyCraftEngine,
+    SocialPublishError,
+    SocialRateLimitError,
     get_connector_for_channel,
     validate_preflight,
 )
@@ -762,6 +775,36 @@ async def import_github_repos_batch(body: GitHubBatchImportRequest) -> GitHubBat
     )
 
 
+_KEYWORD_STRIP_MARKS = {"\u0300", "\u0301", "\u0302", "\u0308"}
+
+
+def _normalize_keyword_text(value: str) -> str:
+    """Drop grave/acute/circumflex/diaeresis but keep the tilde of ñ, then lowercase (as bot/lib/match.ts)."""
+    decomposed = unicodedata.normalize("NFD", value)
+    return "".join(ch for ch in decomposed if ch not in _KEYWORD_STRIP_MARKS).lower()
+
+
+def _is_word_char(ch: str) -> bool:
+    return unicodedata.category(ch)[0] in ("L", "M", "N")
+
+
+def _matches_keyword(text: str, keyword: str) -> bool:
+    """Whole-word match: GUIA matches "guía!!" and "quiero la guia", never "guias", "GUIAR" or "seguía"."""
+    k = _normalize_keyword_text(keyword.strip())
+    if not k:
+        return False
+    haystack = _normalize_keyword_text(text)
+    start = haystack.find(k)
+    while start != -1:
+        end = start + len(k)
+        before_ok = start == 0 or not _is_word_char(haystack[start - 1])
+        after_ok = end == len(haystack) or not _is_word_char(haystack[end])
+        if before_ok and after_ok:
+            return True
+        start = haystack.find(k, start + 1)
+    return False
+
+
 def _build_kigalchat_public_reply(
     username: str,
     keyword: str,
@@ -818,7 +861,7 @@ async def execute_manychat_keyword_trigger(
 
     profile = _serialize_creator_profile(row)
     incoming_kw = body.keyword.strip().upper()
-    comment_upper = (body.comment_text or body.keyword).strip().upper()
+    comment_text = body.comment_text or body.keyword
 
     matched_rule: ManyChatTriggerRule | None = None
     for rule in profile.manychat_triggers:
@@ -826,8 +869,7 @@ async def execute_manychat_keyword_trigger(
             continue
         if rule.platform not in ("all", body.platform.lower()):
             continue
-        rule_kw = rule.keyword.strip().upper()
-        if rule_kw == incoming_kw or (rule_kw and rule_kw in comment_upper):
+        if _matches_keyword(comment_text, rule.keyword):
             matched_rule = rule
             break
 
@@ -856,6 +898,20 @@ async def execute_manychat_keyword_trigger(
         variant_seed=matched_rule.triggers_count,
     )
 
+    if body.dry_run:
+        # Rule tester: same match result, but no counter, no AuditLog and no broadcast.
+        return ManyChatTriggerResponse(
+            matched=True,
+            keyword=matched_rule.keyword,
+            platform=body.platform,
+            lead_magnet=linked_lm,
+            public_comment_reply=public_comment_reply,
+            dm_reply_text=dm_reply_text,
+            delivery_url=delivery_url,
+            manychat_flow_id=matched_rule.manychat_flow_id,
+            triggers_count=matched_rule.triggers_count,
+        )
+
     # Increment triggers_count & persist
     matched_rule.triggers_count += 1
     current_catalog = dict(row.conversion_goals_catalog or {})
@@ -880,14 +936,15 @@ async def execute_manychat_keyword_trigger(
             "dm_reply_text": dm_reply_text,
             "lead_magnet_title": lm_title,
             "delivery_url": delivery_url,
-            "status": "DELIVERED",
+            # This endpoint only computes the replies for an external ManyChat flow; it delivers nothing.
+            "status": "MATCHED",
         },
         ip_source=request.client.host if request.client else "127.0.0.1",
     )
     await db.commit()
 
     await broadcaster.broadcast(
-        "MANYCHAT_LEAD_MAGNET_DELIVERED",
+        "MANYCHAT_KEYWORD_MATCHED",
         {
             "keyword": matched_rule.keyword,
             "platform": body.platform,
@@ -910,148 +967,133 @@ async def execute_manychat_keyword_trigger(
     )
 
 
+def _pg_text_array(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [k.strip('"') for k in value.strip("{}").split(",") if k]
+    return [str(k) for k in value]
+
+
+async def _bot_tables_present(db: AsyncSession) -> tuple[bool, bool]:
+    """Return (core bot tables exist, funnel view exists) without reading their data."""
+
+    def _check(sync_session: Any) -> tuple[bool, bool]:
+        insp = sa_inspect(sync_session.connection())
+        tables = set(insp.get_table_names())
+        core = {"bot_accounts", "bot_rules", "bot_sent"} <= tables
+        try:
+            views = set(insp.get_view_names())
+        except Exception:
+            views = set()
+        return core, "bot_embudo_7d" in views
+
+    return await db.run_sync(_check)
+
+
 @router.get("/kigalchat/interactions", response_model=list[KigalChatInteraction])
 async def list_kigalchat_interactions(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ) -> list[KigalChatInteraction]:
-    """Return recent KigalChat / ManyChat keyword trigger interactions recorded in AuditLog."""
+    """Messages the Instagram bot actually sent, read-only from bot_sent (+ bot_rules, bot_accounts).
+
+    bot_sent stores neither the original comment nor which reply variant was sent, so comment_text,
+    public_comment_reply and dm_reply_text stay empty instead of being invented.
+    Returns [] when the bot tables do not exist (see /kigalchat/status).
+    """
+    core, _ = await _bot_tables_present(db)
+    if not core:
+        return []
+    limit = max(1, min(limit, 500))
     rows = (
         await db.execute(
-            select(AuditLog)
-            .where(AuditLog.action_type == "MANYCHAT_KEYWORD_TRIGGERED")
-            .order_by(desc(AuditLog.created_at))
-            .limit(limit)
+            sa_text(
+                "SELECT s.id, s.account_id, s.username, s.rule_id, s.kind, s.created_at, "
+                "r.name AS rule_name, r.keywords AS keywords, a.username AS account_username "
+                "FROM bot_sent s "
+                "LEFT JOIN bot_rules r ON r.id = s.rule_id "
+                "LEFT JOIN bot_accounts a ON a.account_id = s.account_id "
+                "ORDER BY s.created_at DESC LIMIT :limit"
+            ),
+            {"limit": limit},
         )
-    ).scalars().all()
+    ).mappings().all()
 
     interactions: list[KigalChatInteraction] = []
     for r in rows:
-        p = r.payload or {}
+        created = r["created_at"]
+        username = (r["username"] or "").strip()
         interactions.append(
             KigalChatInteraction(
-                id=str(r.id),
-                timestamp=(r.created_at or datetime.now(timezone.utc)).isoformat(),
-                platform=str(p.get("platform") or "instagram"),
-                username=str(p.get("username") or "@usuario"),
-                comment_text=str(p.get("comment_text") or p.get("keyword") or ""),
-                matched_keyword=str(p.get("keyword") or ""),
-                public_comment_reply=str(p.get("public_comment_reply") or ""),
-                dm_reply_text=str(p.get("dm_reply_text") or ""),
-                lead_magnet_title=str(p.get("lead_magnet_title") or "Recurso"),
-                delivery_url=str(p.get("delivery_url") or ""),
-                status=str(p.get("status") or ("DELIVERED" if r.operation_status == "SUCCESS" else r.operation_status)),
+                id=f"bot-{r['id']}",
+                timestamp=created.isoformat() if hasattr(created, "isoformat") else str(created or ""),
+                platform="instagram",
+                username=f"@{username.lstrip('@')}" if username else "",
+                comment_text="",
+                matched_keyword=", ".join(_pg_text_array(r["keywords"])),
+                public_comment_reply="",
+                dm_reply_text="",
+                lead_magnet_title=str(r["rule_name"] or ""),
+                delivery_url="",
+                status="SENT",
+                kind=str(r["kind"] or ""),
+                account_username=r["account_username"],
+                rule_id=r["rule_id"],
             )
         )
     return interactions
 
 
-@router.post("/kigalchat/auto-sweep", response_model=KigalChatAutoSweepResponse)
-async def auto_sweep_kigalchat_rules(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-) -> KigalChatAutoSweepResponse:
-    """Sweep active KigalChat trigger rules, generate realistic comment+DM interactions, and persist metrics."""
-    row = (await db.execute(select(CreatorProfile).limit(1))).scalar_one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail="Creator profile not found.")
-
-    profile = _serialize_creator_profile(row)
-    active_rules = [r for r in profile.manychat_triggers if r.active]
-    if not active_rules:
-        return KigalChatAutoSweepResponse(processed_count=0, interactions=[])
-
-    sample_handles = ["@carlos_founder", "@laura_ops", "@martin_saas", "@sofia_b2b", "@alex_growth"]
-    sample_platforms = ["instagram", "tiktok", "youtube", "linkedin"]
-    sample_comments = [
-        "¡Brutal sistema! Quiero {kw} por favor 🙌",
-        "Justo necesitaba esto hoy, envíame {kw}",
-        "{kw} 🚀 me interesa implementarlo",
-        "Tremendo valor, quiero recibir {kw}!",
-    ]
-
-    interactions: list[KigalChatInteraction] = []
-    ip_src = request.client.host if request.client else "127.0.0.1"
-
-    for idx, rule in enumerate(active_rules):
-        _, lm_title, delivery_url = _resolve_rule_lead_magnet(
-            rule, profile, row, fallback_first=True
+@router.get("/kigalchat/status", response_model=KigalChatStatus)
+async def kigalchat_status(db: AsyncSession = Depends(get_db)) -> KigalChatStatus:
+    """Whether the Instagram bot tables exist, enabled accounts, active rules and the 7-day funnel."""
+    core, has_view = await _bot_tables_present(db)
+    if not core:
+        return KigalChatStatus(
+            bot_connected=False,
+            detail="Las tablas del bot (bot_*) no existen en esta base de datos.",
         )
-        platform = (
-            rule.platform.lower()
-            if rule.platform.lower() != "all"
-            else sample_platforms[idx % len(sample_platforms)]
-        )
-        seed = idx + rule.triggers_count
-        username = sample_handles[seed % len(sample_handles)]
-        comment_text = sample_comments[seed % len(sample_comments)].format(kw=rule.keyword)
-        template = rule.dm_reply_template.strip() or (
-            f"¡Hola {username}! Aquí tienes acceso directo a {lm_title}:"
-        )
-        dm_reply_text = f"{template} {delivery_url}".strip()
-        public_comment_reply = _build_kigalchat_public_reply(
-            username=username,
-            keyword=rule.keyword,
-            lead_magnet_title=lm_title,
-            variant_seed=seed,
-        )
-
-        rule.triggers_count += 1
-        audit_entry = await _record_audit(
-            db=db,
-            workspace_id=row.workspace_id,
-            action_type="MANYCHAT_KEYWORD_TRIGGERED",
-            agent_or_user_id=f"KigalChat:{platform}",
-            security_tier=1,
-            operation_status="SUCCESS",
-            payload={
-                "keyword": rule.keyword,
-                "platform": platform,
-                "username": username,
-                "comment_text": comment_text,
-                "public_comment_reply": public_comment_reply,
-                "dm_reply_text": dm_reply_text,
-                "lead_magnet_title": lm_title,
-                "delivery_url": delivery_url,
-                "status": "DELIVERED",
-                "source": "kigalchat_auto_sweep",
-            },
-            ip_source=ip_src,
-        )
-        interactions.append(
-            KigalChatInteraction(
-                id=str(audit_entry.id),
-                timestamp=(audit_entry.created_at or datetime.now(timezone.utc)).isoformat(),
-                platform=platform,
-                username=username,
-                comment_text=comment_text,
-                matched_keyword=rule.keyword,
-                public_comment_reply=public_comment_reply,
-                dm_reply_text=dm_reply_text,
-                lead_magnet_title=lm_title,
-                delivery_url=delivery_url,
-                status="DELIVERED",
+    accounts = (await db.execute(sa_text("SELECT count(*) FROM bot_accounts WHERE enabled"))).scalar_one()
+    active_rules = (
+        await db.execute(
+            sa_text(
+                "SELECT count(*) FROM bot_rules r JOIN bot_accounts a ON a.account_id = r.account_id "
+                "WHERE r.enabled AND a.enabled"
             )
         )
-
-    current_catalog = dict(row.conversion_goals_catalog or {})
-    current_catalog["_manychat_triggers"] = [
-        t.model_dump(mode="json") for t in profile.manychat_triggers
-    ]
-    row.conversion_goals_catalog = current_catalog
-    await db.commit()
-
-    await broadcaster.broadcast(
-        "KIGALCHAT_AUTO_SWEEP_COMPLETED",
-        {
-            "processed_count": len(interactions),
-            "interactions": [i.model_dump(mode="json") for i in interactions],
-        },
-    )
-
-    return KigalChatAutoSweepResponse(
-        processed_count=len(interactions),
-        interactions=interactions,
+    ).scalar_one()
+    funnel: list[KigalChatFunnelRow] = []
+    if has_view:
+        rows = (
+            await db.execute(
+                sa_text(
+                    "SELECT rule_id, account_id, name, keywords, enabled, botones, enlaces, conversion_pct "
+                    "FROM bot_embudo_7d"
+                )
+            )
+        ).mappings().all()
+        for r in rows:
+            keywords = _pg_text_array(r["keywords"])
+            funnel.append(
+                KigalChatFunnelRow(
+                    rule_id=r["rule_id"],
+                    account_id=str(r["account_id"]),
+                    name=str(r["name"]),
+                    keyword=keywords[0] if keywords else None,
+                    keywords=keywords,
+                    enabled=r["enabled"],
+                    prompts_sent=int(r["botones"] or 0),
+                    rewards_sent=int(r["enlaces"] or 0),
+                    conversion_pct=float(r["conversion_pct"]) if r["conversion_pct"] is not None else None,
+                )
+            )
+    return KigalChatStatus(
+        bot_connected=True,
+        accounts=int(accounts or 0),
+        active_rules=int(active_rules or 0),
+        funnel_7d=funnel,
+        detail="" if has_view else "Falta la vista bot_embudo_7d.",
     )
 
 
@@ -1119,7 +1161,8 @@ async def score_idea_ice(
                 hook_text=hook.hook_text,
                 hook_type=hook.category,
                 verdict="SOLID" if result.threshold_met else "TEST",
-                observed_hold_rate=hook.estimated_hold_rate,
+                # An estimate is not an observation: stays null until real post metrics exist.
+                observed_hold_rate=None,
                 semantic_vector=compute_deterministic_embedding(hook.hook_text),
             )
         )
@@ -1710,12 +1753,6 @@ async def issue_hitl_token(
     db: AsyncSession = Depends(get_db),
 ) -> HITLTokenIssueResponse:
     ws = await _get_default_workspace(db)
-    if body.tier == 3 and (not body.two_factor_code or len(body.two_factor_code.strip()) < 4):
-        raise HTTPException(
-            status_code=400,
-            detail="Tier 3 HITL authorization requires explicit 2FA confirmation code (>=4 chars).",
-        )
-
     sec_mgr = HITLSecurityManager()
     issued = sec_mgr.issue_hitl_token(
         project_id=body.project_id,
@@ -2021,17 +2058,23 @@ async def process_media_endpoint(
     if script and script.two_column_blocks:
         script_hint = " ".join(b.get("audio_voiceover", "") for b in script.two_column_blocks[:2]).strip()
 
-    report = run_full_media_pipeline(
-        project_id=str(project.id),
-        raw_media_url=body.raw_media_url,
-        script_text_hint=script_hint,
-        silence_noise_db=body.silence_noise_db,
-        min_silence_duration_sec=body.min_silence_duration_sec,
-        target_lufs=body.target_lufs,
-        subtitle_y_percent=body.subtitle_y_percent,
-        generate_demo_source_if_missing=body.generate_demo_source_if_missing,
-        target_platform_signature=body.target_platform_signature,
-    )
+    try:
+        report = run_full_media_pipeline(
+            project_id=str(project.id),
+            raw_media_url=body.raw_media_url,
+            script_text_hint=script_hint,
+            silence_noise_db=body.silence_noise_db,
+            min_silence_duration_sec=body.min_silence_duration_sec,
+            target_lufs=body.target_lufs,
+            subtitle_y_percent=body.subtitle_y_percent,
+            generate_demo_source_if_missing=body.generate_demo_source_if_missing,
+            target_platform_signature=body.target_platform_signature,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encuentra el vídeo original. Súbelo o indica una ruta válida antes de procesarlo.",
+        ) from exc
 
     asset = VideoAsset(
         project_id=project.id,
@@ -2521,6 +2564,10 @@ async def save_social_credential(
         row = SocialCredential(channel=ch, access_token=token, person_urn=person_urn)
         db.add(row)
     else:
+        if token and ch == "instagram" and token != row.access_token and person_urn is None:
+            # New Instagram token: the stored ig_user_id/account may belong to another account.
+            row.person_urn = None
+            row.account_name = None
         if token:
             row.access_token = token
         if person_urn is not None:
@@ -2696,6 +2743,49 @@ async def test_social_credential(
             "message": status_res.message,
         }
 
+    if ch == "instagram":
+        # Llamada real a graph.instagram.com (Instagram API with Instagram Login): username real o el error de Meta.
+        try:
+            me = await MetaGraphConnector(token).fetch_profile()
+        except InstagramApiError as exc:
+            return {"ok": False, "channel": "instagram", "status_code": exc.http_status, "message": str(exc)}
+        except httpx.HTTPError as exc:
+            return {
+                "ok": False,
+                "channel": "instagram",
+                "message": f"No se pudo contactar con graph.instagram.com ({type(exc).__name__}).",
+            }
+        username = str(me.get("username") or "").strip()
+        ig_user_id = str(me.get("user_id") or "").strip()
+        if not username or not ig_user_id:
+            return {
+                "ok": False,
+                "channel": "instagram",
+                "message": "Instagram respondió sin user_id/username: revisa que el token sea de Instagram Login.",
+            }
+        row = (
+            await db.execute(select(SocialCredential).where(SocialCredential.channel == "instagram"))
+        ).scalar_one_or_none()
+        # person_urn holds the ig_user_id bound to this token; the connector prefers it over the env setting.
+        if row is None:
+            db.add(
+                SocialCredential(
+                    channel="instagram", access_token=token, person_urn=ig_user_id, account_name=f"@{username}"
+                )
+            )
+        else:
+            row.access_token = token
+            row.person_urn = ig_user_id
+            row.account_name = f"@{username}"
+        await db.commit()
+        return {
+            "ok": True,
+            "channel": "instagram",
+            "account_name": f"@{username}",
+            "ig_user_id": ig_user_id,
+            "message": f"✅ Conectado con Instagram como @{username}. Token guardado en el servidor.",
+        }
+
     if ch == "linkedin":
         async with httpx.AsyncClient(timeout=15.0) as client:
             resolved_urn = provided_urn or (saved_urn if saved_urn != "urn:li:person:creator-001" else "")
@@ -2777,6 +2867,7 @@ async def test_social_credential(
 async def execute_social_publish(
     body: SocialPublishExecuteRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     project = (await db.execute(select(ContentProject).where(ContentProject.id == body.project_id))).scalar_one_or_none()
@@ -2785,14 +2876,42 @@ async def execute_social_publish(
 
     posts = (await db.execute(select(SocialPost).where(SocialPost.project_id == project.id))).scalars().all()
     post_by_channel = {p.channel: p for p in posts}
+    missing = [ch.value for ch in body.channels if ch.value not in post_by_channel]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"No prepared post found for {', '.join(missing)}.")
     ip_addr = request.client.host if request.client else "127.0.0.1"
     sec_mgr = HITLSecurityManager()
 
     results: list[dict[str, Any]] = []
+    max_retry_after = 0
     for ch in body.channels:
-        sp = post_by_channel.get(ch.value)
-        if not sp:
-            raise HTTPException(status_code=404, detail=f"No prepared post found for {ch.value}.")
+        sp = post_by_channel[ch.value]
+        if sp.publish_status == "PUBLISHED":
+            # Already live on the platform: never publish it twice on a retry.
+            results.append(
+                {
+                    "status": "PUBLISHED",
+                    "already_published": True,
+                    "channel": ch.value,
+                    "external_platform_id": sp.external_platform_id,
+                    "canonical_url": sp.canonical_url,
+                }
+            )
+            continue
+
+        paused_until = await get_channel_pause_until(db, ch.value)
+        if paused_until is not None:
+            retry_after = max(1, int((paused_until - datetime.now(timezone.utc)).total_seconds()))
+            max_retry_after = max(max_retry_after, retry_after)
+            results.append(
+                {
+                    "status": RATE_LIMITED_STATUS,
+                    "channel": ch.value,
+                    "error": channel_pause_message(ch.value, paused_until),
+                    "retry_after": retry_after,
+                }
+            )
+            continue
 
         eff_token, eff_urn, _, _ = await _get_effective_social_credential(db, ch.value.lower())
         connector = get_connector_for_channel(
@@ -2829,18 +2948,77 @@ async def execute_social_publish(
             )
             await db.commit()
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SocialRateLimitError as exc:
+            resume_at = register_channel_pause(ch.value, exc.retry_after)
+            max_retry_after = max(max_retry_after, int(exc.retry_after))
+            sp.publish_error = f"{exc} Se podrá reintentar a partir de {resume_at.isoformat()}."
+            await _record_audit(
+                db=db,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+                action_type=f"PUBLISH_{ch.value.upper()}",
+                agent_or_user_id=body.actor,
+                security_tier=3,
+                operation_status=RATE_LIMITED_STATUS,
+                hitl_token_id=body.hitl_token,
+                payload=rate_limit_audit_payload(ch.value, str(exc), exc.retry_after, resume_at),
+                ip_source=ip_addr,
+            )
+            await db.commit()
+            results.append(
+                {
+                    "status": RATE_LIMITED_STATUS,
+                    "channel": ch.value,
+                    "error": str(exc),
+                    "retry_after": int(exc.retry_after),
+                }
+            )
+            continue
         except Exception as exc:
             err_detail = str(exc)
             resp = getattr(exc, "response", None)
             if resp is not None:
                 err_detail = f"Error API {ch.value} ({resp.status_code}): {resp.text[:300]}"
-            raise HTTPException(status_code=502, detail=err_detail) from exc
+            sp.publish_status = "FAILED"
+            sp.publish_error = err_detail
+            await _record_audit(
+                db=db,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+                action_type=f"PUBLISH_{ch.value.upper()}",
+                agent_or_user_id=body.actor,
+                security_tier=3,
+                operation_status="FAILED",
+                hitl_token_id=body.hitl_token,
+                payload={"channel": ch.value, "error": err_detail},
+                ip_source=ip_addr,
+            )
+            await db.commit()
+            results.append({"status": "FAILED", "channel": ch.value, "error": err_detail})
+            continue
+
+        if pub_res.get("status") != "PUBLISHED":
+            # Not connected: nothing was published, so nothing is marked or counted as published.
+            results.append(pub_res)
+            await _record_audit(
+                db=db,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+                action_type=f"PUBLISH_{ch.value.upper()}",
+                agent_or_user_id=body.actor,
+                security_tier=3,
+                operation_status=str(pub_res.get("status") or "NOT_CONFIGURED"),
+                hitl_token_id=body.hitl_token,
+                payload={"channel": ch.value, "message": pub_res.get("message")},
+                ip_source=ip_addr,
+            )
+            await db.commit()
+            continue
 
         sp.external_platform_id = pub_res["external_platform_id"]
-        sp.canonical_url = pub_res["canonical_url"]
+        sp.canonical_url = pub_res.get("canonical_url")
         sp.publish_status = "PUBLISHED"
+        sp.publish_error = None
         sp.published_at = datetime.now(timezone.utc)
         sp.hitl_approval_token = body.hitl_token
         results.append(pub_res)
@@ -2857,6 +3035,23 @@ async def execute_social_publish(
             payload=pub_res,
             ip_source=ip_addr,
         )
+        # Commit each live publication immediately: a later channel failing must never lose it.
+        await db.commit()
+
+    if max_retry_after:
+        response.headers["Retry-After"] = str(max_retry_after)
+
+    published_count = sum(1 for r in results if r.get("status") == "PUBLISHED")
+    if published_count < len(results):
+        # At least one channel did not go out: the project does not go live.
+        await db.commit()
+        if published_count:
+            overall = "PARTIALLY_PUBLISHED"
+        elif max_retry_after:
+            overall = RATE_LIMITED_STATUS
+        else:
+            overall = "NOT_PUBLISHED"
+        return {"status": overall, "project_id": str(project.id), "publications": results}
 
     project.current_state = FSMState.PUBLISHED_LIVE.value
     history = list(project.state_history or [])
@@ -3052,7 +3247,7 @@ async def import_video_from_google_drive(
             project_id=str(proj.id),
             raw_media_url=str(local_path),
             script_text_hint=body.script_text_hint,
-            generate_demo_source_if_missing=True,
+            generate_demo_source_if_missing=False,
         )
 
         # Update Project and Video Asset in DB
@@ -4179,11 +4374,6 @@ async def create_publishing_posts(
                 raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
             approval_token = body.hitl_token
         else:
-            if not body.hitl_pin or len(body.hitl_pin.strip()) < 4:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Tier 3 HITL authorization requires explicit 2FA confirmation code (>=4 chars).",
-                )
             ttl_seconds = _compute_scheduled_hitl_ttl(scheduled_utc)
             issued = sec_mgr.issue_hitl_token(
                 project_id=str(project.id),
@@ -4257,7 +4447,20 @@ async def create_publishing_posts(
         db.add(sp)
         await db.flush()
 
-        if mode == "PUBLISH_NOW":
+        paused_until = await get_channel_pause_until(db, ch.value) if mode == "PUBLISH_NOW" else None
+        if paused_until is not None:
+            pause_msg = channel_pause_message(ch.value, paused_until)
+            sp.publish_status = "FAILED"
+            sp.publish_error = pause_msg
+            publications.append(
+                {
+                    "channel": ch.value,
+                    "status": RATE_LIMITED_STATUS,
+                    "error": pause_msg,
+                    "retry_after": max(1, int((paused_until - datetime.now(timezone.utc)).total_seconds())),
+                }
+            )
+        elif mode == "PUBLISH_NOW":
             eff_token, eff_urn, _, _ = await _get_effective_social_credential(db, ch.value.lower())
             connector = get_connector_for_channel(
                 ch,
@@ -4272,8 +4475,12 @@ async def create_publishing_posts(
                     actor="creator",
                     security_manager=sec_mgr,
                 )
+                if pub_res.get("status") != "PUBLISHED":
+                    raise SocialPublishError(
+                        str(pub_res.get("message") or f"{ch.value}: no publicado ({pub_res.get('status')}).")
+                    )
                 sp.external_platform_id = pub_res["external_platform_id"]
-                sp.canonical_url = pub_res["canonical_url"]
+                sp.canonical_url = pub_res.get("canonical_url")
                 sp.publish_status = "PUBLISHED"
                 sp.published_at = datetime.now(timezone.utc)
                 sp.publish_error = None
@@ -4289,6 +4496,32 @@ async def create_publishing_posts(
                     operation_status="SUCCESS",
                     hitl_token_id=approval_token,
                     payload=pub_res,
+                    ip_source=ip_addr,
+                )
+                # Persist each live publication at once so nothing later can lose it.
+                await db.commit()
+            except SocialRateLimitError as exc:
+                resume_at = register_channel_pause(ch.value, exc.retry_after)
+                sp.publish_status = "FAILED"
+                sp.publish_error = f"{exc} Se podrá reintentar a partir de {resume_at.isoformat()}."
+                publications.append(
+                    {
+                        "channel": ch.value,
+                        "status": RATE_LIMITED_STATUS,
+                        "error": str(exc),
+                        "retry_after": int(exc.retry_after),
+                    }
+                )
+                await _record_audit(
+                    db=db,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                    action_type=f"PUBLISH_{ch.value.upper()}",
+                    agent_or_user_id="creator",
+                    security_tier=3,
+                    operation_status=RATE_LIMITED_STATUS,
+                    hitl_token_id=approval_token,
+                    payload=rate_limit_audit_payload(ch.value, str(exc), exc.retry_after, resume_at),
                     ip_source=ip_addr,
                 )
             except Exception as exc:
@@ -4403,20 +4636,6 @@ async def reschedule_publishing_post(
             if not verif.valid:
                 raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
             post.hitl_approval_token = body.hitl_token
-        elif body.hitl_pin:
-            if len(body.hitl_pin.strip()) < 4:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Tier 3 HITL authorization requires explicit 2FA confirmation code (>=4 chars).",
-                )
-            issued = sec_mgr.issue_hitl_token(
-                project_id=str(post.project_id),
-                tier=3,
-                action="publish_all_channels",
-                actor="creator",
-                ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
-            )
-            post.hitl_approval_token = issued["token"]
         elif post.hitl_approval_token:
             verif = sec_mgr.verify_hitl_token(
                 token=post.hitl_approval_token,
@@ -4441,10 +4660,14 @@ async def reschedule_publishing_post(
                 )
                 post.hitl_approval_token = issued["token"]
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Tier 3 HITL authorization requires explicit PIN/2FA confirmation code (>=4 chars).",
+            issued = sec_mgr.issue_hitl_token(
+                project_id=str(post.project_id),
+                tier=3,
+                action="publish_all_channels",
+                actor="creator",
+                ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
             )
+            post.hitl_approval_token = issued["token"]
 
     if project is not None:
         await _record_audit(

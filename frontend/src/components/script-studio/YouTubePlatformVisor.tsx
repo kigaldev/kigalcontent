@@ -210,7 +210,9 @@ export function YouTubePlatformVisor({
                     Gancho de los Primeros 3 Segundos:
                   </span>
                   <span className="font-mono text-[10px] text-rose-400">
-                    Est. Hold: {activeHook.estimated_hold_rate}%
+                    {activeHook.estimated_hold_rate
+                      ? `Retención estimada: ${activeHook.estimated_hold_rate}%`
+                      : "Sin estimación"}
                   </span>
                 </div>
                 <p className="text-xs text-slate-200 leading-relaxed font-medium">

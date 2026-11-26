@@ -20,7 +20,8 @@ import {
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import {
-  buildFallbackHeatmap,
+  buildEmptyHeatmap,
+  onlyRealHeatmap,
   buildLocalDateTimeToUtcIso,
   COMMON_TIMEZONES,
   formatDateKey,
@@ -203,7 +204,7 @@ export function MetricoolCalendarView({
     timezone: "Europe/Madrid",
   }));
   const [heatmapData, setHeatmapData] = useState<BestTimeHeatmapResponse>(() =>
-    buildFallbackHeatmap("LinkedIn", "Europe/Madrid")
+    buildEmptyHeatmap("LinkedIn", "Europe/Madrid")
   );
   const [loading, setLoading] = useState<boolean>(false);
   const [isOfflineFallback, setIsOfflineFallback] = useState<boolean>(false);
@@ -258,7 +259,7 @@ export function MetricoolCalendarView({
         apiClient.getBestTimes(heatmapChannel, timezone),
       ]);
       setCalendarData(calRes);
-      setHeatmapData(hmRes);
+      setHeatmapData(onlyRealHeatmap(hmRes, heatmapChannel, timezone));
       setIsOfflineFallback(false);
     } catch {
       const fallbackPosts = (activeProject?.social_posts ?? []).filter((p) =>
@@ -270,7 +271,7 @@ export function MetricoolCalendarView({
         connected_channels: inferFallbackConnectedChannels(creatorProfile),
         timezone,
       });
-      setHeatmapData(buildFallbackHeatmap(heatmapChannel, timezone));
+      setHeatmapData(buildEmptyHeatmap(heatmapChannel, timezone));
       setIsOfflineFallback(true);
     } finally {
       setLoading(false);
@@ -685,7 +686,7 @@ export function MetricoolCalendarView({
                   </span>
                 ) : (
                   <span className="rounded-full bg-slate-800 px-1.5 py-0.2 text-[10px] text-slate-400">
-                    {accountHint ? `${accountHint} · Sandbox` : "Sandbox"}
+                    {accountHint ? `${accountHint} · Sin conectar` : "Sin conectar"}
                   </span>
                 )}
               </button>
@@ -697,7 +698,7 @@ export function MetricoolCalendarView({
           {isOfflineFallback && (
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300">
               <WifiOff className="h-3 w-3" />
-              Vista local
+              Backend sin conexión
             </span>
           )}
           <button
@@ -832,14 +833,20 @@ export function MetricoolCalendarView({
             <Flame className="h-3.5 w-3.5 text-cyan-400" />
             <span>
               Mapa de audiencia <strong className="text-slate-200">{heatmapChannel}</strong>{" "}
-              ({heatmapData.source === "analytics" ? "Datos históricos reales" : "Curva calibrada B2B/Creador"})
+              ({heatmapData.source === "analytics"
+                ? "Datos históricos reales"
+                : "Sin datos todavía: aparecerá cuando haya publicaciones medidas"})
             </span>
-            <span className="hidden sm:inline text-slate-500">·</span>
-            <span className="text-cyan-300 font-medium">
-              Pico semanal: {heatmapData.peak_slot?.day_label}{" "}
-              {String(heatmapData.peak_slot?.hour ?? 9).padStart(2, "0")}:00 (
-              {heatmapData.peak_slot?.score ?? 94}%)
-            </span>
+            {heatmapData.source === "analytics" && (heatmapData.peak_slot?.score ?? 0) > 0 && (
+              <>
+                <span className="hidden sm:inline text-slate-500">·</span>
+                <span className="text-cyan-300 font-medium">
+                  Pico semanal: {heatmapData.peak_slot.day_label}{" "}
+                  {String(heatmapData.peak_slot.hour).padStart(2, "0")}:00 (
+                  {heatmapData.peak_slot.score}%)
+                </span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             <span>Menor</span>

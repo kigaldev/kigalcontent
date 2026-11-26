@@ -413,66 +413,50 @@ export function findNextBestSlot(
     return best;
   }
 
-  // Graceful fallback: tomorrow at 09:00
+  // No real data: tomorrow at 09:00 with score 0 (no invented affinity)
   return {
     dateStr: addCalendarDays(todayStr, 1),
     timeStr: "09:00",
-    score: 85,
+    score: 0,
   };
 }
 
 /**
- * Generates deterministic B2B/creator audience heatmap curves when backend is offline.
+ * Empty heatmap (all scores 0). Used whenever there is no real publishing history:
+ * the UI never shows invented "best time" curves.
  */
-export function buildFallbackHeatmap(
+export function buildEmptyHeatmap(
   channel: string,
   tz: string
 ): BestTimeHeatmapResponse {
   const grid: BestTimeHeatmapResponse["grid"] = [];
-  let peak = { day_label: "Mar", hour: 9, score: 94 };
-
   for (let d = 0; d < 7; d++) {
     for (let h = 0; h < 24; h++) {
-      let score = 22;
-      if (channel === "LinkedIn") {
-        if (d <= 4 && h >= 8 && h <= 10) score = d >= 1 && d <= 3 ? 94 : 84;
-        else if (d <= 4 && h >= 12 && h <= 14) score = d >= 1 && d <= 3 ? 88 : 76;
-        else if (d <= 4 && h >= 17 && h <= 19) score = 68;
-        else if (d >= 5) score = 30;
-      } else if (channel === "Instagram") {
-        if (h >= 12 && h <= 14) score = 86;
-        else if (h >= 19 && h <= 21) score = d >= 2 ? 93 : 88;
-        else if (h >= 8 && h <= 11) score = 62;
-      } else if (channel === "TikTok") {
-        if (h >= 18 && h <= 22) score = d >= 3 ? 95 : 89;
-        else if (h >= 12 && h <= 14) score = 74;
-      } else {
-        // YouTube
-        if (d >= 3 && h >= 17 && h <= 21) score = 92;
-        else if (h >= 15 && h <= 21) score = 79;
-      }
-
-      if (score > peak.score) {
-        peak = { day_label: WEEKDAY_SHORT_ES[d], hour: h, score };
-      }
-
       grid.push({
         day_of_week: d,
         day_label: WEEKDAY_SHORT_ES[d],
         hour: h,
-        score,
-        label: score >= 85 ? "Óptimo" : score >= 65 ? "Bueno" : "Bajo",
+        score: 0,
+        label: "Sin datos",
       });
     }
   }
-
   return {
     channel,
     timezone: normalizeTimeZone(tz),
     source: "benchmark",
-    peak_slot: peak,
+    peak_slot: { day_label: "", hour: 0, score: 0 },
     grid,
   };
+}
+
+/** Keeps only heatmaps built from real analytics; anything else becomes empty. */
+export function onlyRealHeatmap(
+  heatmap: BestTimeHeatmapResponse,
+  channel: string,
+  tz: string
+): BestTimeHeatmapResponse {
+  return heatmap.source === "analytics" ? heatmap : buildEmptyHeatmap(channel, tz);
 }
 
 export function formatFriendlyDateEs(dateStr: string): string {

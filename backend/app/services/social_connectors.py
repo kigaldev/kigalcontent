@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import ipaddress
+import json
 import re
-import time
+from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -274,10 +277,8 @@ class SocialCopyCraftEngine:
                     " ".join(hashtags),
                 ]
             )
-            first_comment = (
-                f"👉 Recurso y arquitectura completa ({cta_text}) — acceso directo: "
-                "https://contentengine.local/blueprint"
-            )
+            # No real link available here: never invent one. The CTA comes from the creator profile.
+            first_comment = f"👉 {cta_text}" if cta_text else None
 
         return {
             "channel": SocialChannel.LINKEDIN.value,
@@ -421,6 +422,31 @@ def validate_preflight(channel: SocialChannel, post_data: dict[str, Any]) -> Pre
     )
 
 
+NOT_CONFIGURED_STATUS = "NOT_CONFIGURED"
+
+
+class SocialPublishError(RuntimeError):
+    """A platform API rejected the publication (message already readable for the creator)."""
+
+
+class InstagramApiError(SocialPublishError):
+    """Error returned by graph.instagram.com, with Meta's own message and code."""
+
+    def __init__(self, message: str, code: int | None = None, subcode: int | None = None, http_status: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.subcode = subcode
+        self.http_status = http_status
+
+
+class SocialRateLimitError(InstagramApiError):
+    """Meta rate limit or abuse block: pause the channel for retry_after seconds, never retry in a loop."""
+
+    def __init__(self, message: str, retry_after: int, **kwargs: Any) -> None:
+        super().__init__(message, **kwargs)
+        self.retry_after = retry_after
+
+
 class BaseSocialConnector:
     """Idempotent OAuth2 connector with exponential retry configuration."""
 
@@ -460,17 +486,17 @@ class BaseSocialConnector:
         if self.access_token:
             return await self._dispatch_oauth_request(project_id, payload, idem_key)
 
-        # Deterministic verified sandbox execution when live OAuth2 token is not configured
-        ext_id = f"{self.channel.value.upper()}_{idem_key[:10]}_{int(time.time())}"
+        # Sin credenciales no se publica nada ni se inventa un resultado: estado explícito.
         return {
-            "status": "PUBLISHED",
-            "mode": "sandbox_verified",
+            "status": NOT_CONFIGURED_STATUS,
+            "mode": "not_configured",
             "channel": self.channel.value,
-            "external_platform_id": ext_id,
-            "canonical_url": f"https://social.contentengine.local/{self.channel.value.lower()}/{ext_id}",
+            "external_platform_id": None,
+            "canonical_url": None,
+            "message": f"{self.channel.value} no está conectado: añade el token en Ajustes",
             "idempotency_key": idem_key,
             "preflight_warnings": preflight.warnings,
-            "auth_verified": True,
+            "auth_verified": False,
         }
 
     async def _dispatch_oauth_request(
@@ -503,7 +529,9 @@ class YouTubeDataConnector(BaseSocialConnector):
             resp = await client.post(self.api_base, headers=headers, json=body)
             resp.raise_for_status()
             data = resp.json()
-            vid = data.get("id", f"yt_{idempotency_key[:8]}")
+            vid = data.get("id")
+            if not vid:
+                raise SocialPublishError("YouTube no devolvió el id del vídeo: no se marca como publicado.")
             return {
                 "status": "PUBLISHED",
                 "mode": "live_oauth2",
@@ -515,35 +543,335 @@ class YouTubeDataConnector(BaseSocialConnector):
             }
 
 
+INSTAGRAM_RATE_LIMIT_CODES = {4, 17, 32, 613}
+INSTAGRAM_ABUSE_CODE = 368
+VIDEO_EXTENSIONS = (".mp4", ".mov")
+JPEG_EXTENSIONS = (".jpg", ".jpeg")
+NOT_PUBLIC_MEDIA_MESSAGE = (
+    "El {kind} tiene que estar en una URL pública (https) para que Instagram lo descargue: "
+    "súbelo a R2/S3 o a un alojamiento público. No se ha publicado nada."
+)
+
+
+def _url_extension(url: str) -> str:
+    path = urlparse(url).path.lower()
+    return PurePosixPath(path).suffix
+
+
+def resolve_public_media_url(raw: str, kind: str = "archivo") -> str:
+    """Return an Internet-reachable URL for a media reference, or raise ValueError (never publish half-way)."""
+    ref = (raw or "").strip()
+    not_public = ValueError(NOT_PUBLIC_MEDIA_MESSAGE.format(kind=kind))
+    if not ref:
+        raise not_public
+    parsed = urlparse(ref)
+    scheme = parsed.scheme.lower()
+
+    if scheme in ("s3", "r2"):
+        from app.services.storage_s3 import ObjectStorageService
+
+        settings = get_settings()
+        bucket = parsed.netloc
+        key = parsed.path.lstrip("/")
+        if not key or not bucket or bucket != settings.s3_bucket_name:
+            raise not_public
+        presigned = ObjectStorageService().presigned_public_get_url(key, settings.instagram_media_url_ttl_seconds)
+        if not presigned:
+            raise not_public
+        return presigned
+
+    if scheme == "https" and parsed.hostname:
+        host = parsed.hostname.lower().rstrip(".")
+        if host in ("localhost", "0.0.0.0") or host.endswith(".local") or host.endswith(".localhost"):
+            raise not_public
+        # Hosts without a dot ("intranet") or purely numeric/abbreviated IPs ("127.1", "2130706433")
+        # are never a public CDN: reject them instead of guessing how they resolve.
+        if "." not in host and ":" not in host:
+            raise not_public
+        if host.replace(".", "").isdigit():
+            try:
+                ip = ipaddress.ip_address(host)
+            except ValueError:
+                raise not_public
+            if not ip.is_global:
+                raise not_public
+        elif ":" in host:
+            try:
+                ip6 = ipaddress.ip_address(host)
+            except ValueError:
+                raise not_public
+            if not ip6.is_global:
+                raise not_public
+        return ref
+
+    # data:, file://, http:// and local paths are not downloadable by Meta.
+    raise not_public
+
+
 class MetaGraphConnector(BaseSocialConnector):
+    """Instagram API with Instagram Login (graph.instagram.com). Mirrors studio/meta/ig.mjs."""
+
     channel = SocialChannel.INSTAGRAM
-    api_base = "https://graph.facebook.com/v21.0"
+
+    def __init__(
+        self,
+        access_token: str = "",
+        ig_user_id: str = "",
+        transport: httpx.AsyncBaseTransport | None = None,
+        poll_interval_seconds: float | None = None,
+        video_poll_timeout_seconds: float | None = None,
+        image_poll_timeout_seconds: float | None = None,
+    ) -> None:
+        super().__init__(access_token)
+        settings = get_settings()
+        self.api_base = f"{settings.instagram_graph_base_url.rstrip('/')}/{settings.instagram_api_version}"
+        self.ig_user_id = ig_user_id or settings.instagram_business_account_id
+        self._transport = transport
+        self.poll_interval = (
+            settings.instagram_poll_interval_seconds if poll_interval_seconds is None else poll_interval_seconds
+        )
+        self.video_poll_timeout = (
+            settings.instagram_video_poll_timeout_seconds if video_poll_timeout_seconds is None else video_poll_timeout_seconds
+        )
+        self.image_poll_timeout = (
+            settings.instagram_image_poll_timeout_seconds if image_poll_timeout_seconds is None else image_poll_timeout_seconds
+        )
+
+    # ---------- HTTP ----------
+
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=30.0, transport=self._transport)
+
+    @staticmethod
+    def _raise_meta_error(resp: httpx.Response, body: dict[str, Any]) -> None:
+        err = body.get("error") if isinstance(body, dict) else None
+        err = err if isinstance(err, dict) else {}
+        code = err.get("code")
+        subcode = err.get("error_subcode")
+        msg = err.get("message") or "Error de Meta"
+        full = f"Instagram: {msg} (código {code if code is not None else '?'}"
+        full += f"/{subcode}" if subcode else ""
+        full += f", HTTP {resp.status_code})"
+        if code == INSTAGRAM_ABUSE_CODE:
+            raise SocialRateLimitError(full + ". Pausa de 24 h.", retry_after=86400, code=code, subcode=subcode, http_status=resp.status_code)
+        if (
+            code in INSTAGRAM_RATE_LIMIT_CODES
+            or (isinstance(code, int) and 80000 <= code <= 80099)
+            or resp.status_code == 429
+        ):
+            raise SocialRateLimitError(full + ". Pausa de 1 h.", retry_after=3600, code=code, subcode=subcode, http_status=resp.status_code)
+        raise InstagramApiError(full, code=code, subcode=subcode, http_status=resp.status_code)
+
+    async def _api(self, client: httpx.AsyncClient, method: str, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        url = f"{self.api_base}/{endpoint.lstrip('/')}"
+        clean = {k: v for k, v in (params or {}).items() if v is not None}
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        if method == "GET":
+            resp = await client.get(url, params=clean, headers=headers)
+        else:
+            form = {
+                k: (json.dumps(v) if isinstance(v, (dict, list)) else ("true" if v is True else "false" if v is False else str(v)))
+                for k, v in clean.items()
+            }
+            resp = await client.post(url, data=form, headers=headers)
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        if resp.status_code >= 400 or (isinstance(body, dict) and body.get("error")):
+            self._raise_meta_error(resp, body)
+        return body if isinstance(body, dict) else {}
+
+    async def fetch_profile(self, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+        """GET /me?fields=user_id,username (user_id, not id, is the publishing IG user id)."""
+        if client is None:
+            async with self._client() as own:
+                return await self._api(own, "GET", "me", {"fields": "user_id,username"})
+        return await self._api(client, "GET", "me", {"fields": "user_id,username"})
+
+    async def _ensure_user_id(self, client: httpx.AsyncClient) -> str:
+        if self.ig_user_id:
+            return self.ig_user_id
+        me = await self.fetch_profile(client)
+        user_id = str(me.get("user_id") or "").strip()
+        if not user_id:
+            raise InstagramApiError("Instagram no devolvió user_id para este token.")
+        self.ig_user_id = user_id
+        return user_id
+
+    async def _check_publishing_limit(self, client: httpx.AsyncClient, ig_id: str) -> None:
+        data = await self._api(client, "GET", f"{ig_id}/content_publishing_limit", {"fields": "config,quota_usage"})
+        rows = data.get("data") or []
+        if not rows:
+            return
+        usage = rows[0].get("quota_usage")
+        total = (rows[0].get("config") or {}).get("quota_total")
+        if isinstance(usage, int) and isinstance(total, int) and usage >= total:
+            raise SocialRateLimitError(
+                f"Instagram: has llegado al límite de {total} publicaciones por API en 24 h. Pausa de 1 h.",
+                retry_after=3600,
+            )
+
+    async def _wait_container(self, client: httpx.AsyncClient, container_id: str, label: str, timeout: float) -> None:
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        while True:
+            c = await self._api(client, "GET", container_id, {"fields": "status_code,status"})
+            code = c.get("status_code")
+            if code == "FINISHED":
+                return
+            if code in ("ERROR", "EXPIRED"):
+                raise InstagramApiError(f"Instagram no pudo procesar {label}: {code} · {c.get('status') or 'sin motivo'}")
+            if loop.time() - start >= timeout:
+                raise InstagramApiError(
+                    f"Instagram tardó más de {int(timeout)} s en procesar {label} (último estado: {code or 'desconocido'}). No se ha publicado."
+                )
+            await asyncio.sleep(self.poll_interval)
+
+    # ---------- payload ----------
+
+    @staticmethod
+    def _media_spec(payload: dict[str, Any]) -> tuple[str, list[str], dict[str, Any]]:
+        meta = payload.get("metadata_payload") or {}
+
+        def pick(key: str) -> Any:
+            return payload.get(key) if payload.get(key) is not None else meta.get(key)
+
+        urls_raw = pick("media_urls") or pick("carousel_media_urls")
+        if isinstance(urls_raw, list):
+            urls = [str(u) for u in urls_raw if u]
+        else:
+            single = pick("media_url") or pick("video_url") or pick("image_url")
+            urls = [str(single)] if single else []
+        requested = str(pick("ig_media_type") or pick("media_type") or "").strip().upper()
+        if requested in ("REEL", "VIDEO"):
+            requested = "REELS"
+        if requested in ("CAROUSEL_ALBUM",):
+            requested = "CAROUSEL"
+        if not requested:
+            if len(urls) > 1:
+                requested = "CAROUSEL"
+            elif urls and _url_extension(urls[0]) in VIDEO_EXTENSIONS:
+                requested = "REELS"
+            else:
+                requested = "IMAGE"
+        options = {
+            "share_to_feed": pick("share_to_feed"),
+            "thumb_offset": pick("thumb_offset"),
+            "trial_params": pick("trial_params"),
+            "cover_url": pick("cover_url"),
+            "alt_text": pick("alt_text"),
+        }
+        return requested, urls, options
+
+    @staticmethod
+    def _validate_spec(media_type: str, urls: list[str]) -> None:
+        if media_type not in ("REELS", "IMAGE", "CAROUSEL"):
+            raise ValueError(f"Tipo de publicación de Instagram no soportado: {media_type}.")
+        if not urls:
+            raise ValueError("Instagram necesita un vídeo o una imagen (media_url) para publicar. No se ha publicado nada.")
+        if media_type == "CAROUSEL" and not (2 <= len(urls) <= 20):
+            raise ValueError(f"Un carrusel de Instagram lleva de 2 a 20 elementos (tiene {len(urls)}).")
+        if media_type in ("REELS", "IMAGE") and len(urls) != 1:
+            raise ValueError(f"Un {media_type.lower()} de Instagram lleva un solo archivo.")
+        for u in urls:
+            ext = _url_extension(u)
+            if media_type == "IMAGE" and ext in VIDEO_EXTENSIONS:
+                raise ValueError("Una publicación de imagen no puede llevar un vídeo: usa un reel.")
+            if media_type == "REELS" and ext and ext not in VIDEO_EXTENSIONS:
+                raise ValueError(f"Un reel necesita un vídeo MP4 o MOV (recibido {ext}).")
+            if media_type in ("IMAGE", "CAROUSEL") and ext not in VIDEO_EXTENSIONS and ext not in JPEG_EXTENSIONS:
+                raise ValueError(
+                    f"Instagram solo acepta imágenes JPEG (recibido {ext or 'sin extensión'}). "
+                    "Exporta la imagen como .jpg y vuelve a intentarlo."
+                )
+
+    # ---------- publish ----------
 
     async def _dispatch_oauth_request(self, project_id: str, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
-        settings = get_settings()
-        ig_id = settings.instagram_business_account_id or "me"
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{self.api_base}/{ig_id}/media",
-                headers={"Authorization": f"Bearer {self.access_token}", "X-Idempotency-Key": idempotency_key},
-                json={
+        media_type, raw_urls, options = self._media_spec(payload)
+        self._validate_spec(media_type, raw_urls)
+        kind = "vídeo" if media_type == "REELS" else "archivo"
+        urls = [resolve_public_media_url(u, kind) for u in raw_urls]
+        cover_url = resolve_public_media_url(str(options["cover_url"]), "portada") if options.get("cover_url") else None
+        caption = str(payload.get("post_body") or "")
+
+        async with self._client() as client:
+            ig_id = await self._ensure_user_id(client)
+            await self._check_publishing_limit(client, ig_id)
+
+            if media_type == "CAROUSEL":
+                children: list[str] = []
+                alt_texts = options.get("alt_text") if isinstance(options.get("alt_text"), list) else []
+                for i, u in enumerate(urls):
+                    is_video = _url_extension(u) in VIDEO_EXTENSIONS
+                    params: dict[str, Any] = (
+                        {"media_type": "VIDEO", "video_url": u, "is_carousel_item": True}
+                        if is_video
+                        else {"image_url": u, "is_carousel_item": True, "alt_text": alt_texts[i] if i < len(alt_texts) else None}
+                    )
+                    child = await self._api(client, "POST", f"{ig_id}/media", params)
+                    await self._wait_container(
+                        client, child["id"], f"la diapositiva {i + 1}",
+                        self.video_poll_timeout if is_video else self.image_poll_timeout,
+                    )
+                    children.append(child["id"])
+                container = await self._api(
+                    client, "POST", f"{ig_id}/media",
+                    {"media_type": "CAROUSEL", "children": ",".join(children), "caption": caption},
+                )
+                timeout = self.image_poll_timeout
+            elif media_type == "REELS":
+                params = {
                     "media_type": "REELS",
-                    "caption": payload.get("post_body", ""),
-                    "share_to_feed": True,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            media_id = data.get("id", f"ig_{idempotency_key[:8]}")
-            return {
-                "status": "PUBLISHED",
-                "mode": "live_oauth2",
-                "channel": self.channel.value,
-                "external_platform_id": media_id,
-                "canonical_url": f"https://www.instagram.com/reel/{media_id}/",
-                "idempotency_key": idempotency_key,
-                "auth_verified": True,
-            }
+                    "video_url": urls[0],
+                    "caption": caption,
+                    "cover_url": cover_url,
+                    "share_to_feed": options.get("share_to_feed"),
+                    "thumb_offset": options.get("thumb_offset"),
+                    "trial_params": options.get("trial_params"),
+                }
+                if params["trial_params"] is not None:
+                    # A trial reel is only shown to non-followers: never also share it to the feed.
+                    params["share_to_feed"] = False
+                container = await self._api(client, "POST", f"{ig_id}/media", params)
+                timeout = self.video_poll_timeout
+            else:
+                alt = options.get("alt_text")
+                container = await self._api(
+                    client, "POST", f"{ig_id}/media",
+                    {"image_url": urls[0], "caption": caption, "alt_text": alt if isinstance(alt, str) else None},
+                )
+                timeout = self.image_poll_timeout
+
+            container_id = str(container.get("id") or "")
+            if not container_id:
+                raise InstagramApiError("Instagram no devolvió el id del contenedor.")
+            await self._wait_container(client, container_id, "la publicación", timeout)
+
+            published = await self._api(client, "POST", f"{ig_id}/media_publish", {"creation_id": container_id})
+            media_id = str(published.get("id") or "")
+            if not media_id:
+                raise InstagramApiError("Instagram no devolvió el id de la publicación.")
+            try:
+                info = await self._api(client, "GET", media_id, {"fields": "permalink,timestamp"})
+            except InstagramApiError:
+                info = {}
+
+        return {
+            "status": "PUBLISHED",
+            "mode": "live_oauth2",
+            "api": "instagram_login",
+            "channel": self.channel.value,
+            "media_type": media_type,
+            "trial_reel": options.get("trial_params") is not None and media_type == "REELS",
+            "container_id": container_id,
+            "external_platform_id": media_id,
+            "canonical_url": info.get("permalink"),
+            "published_timestamp": info.get("timestamp"),
+            "idempotency_key": idempotency_key,
+            "auth_verified": True,
+        }
 
 
 class TikTokContentConnector(BaseSocialConnector):
@@ -566,13 +894,16 @@ class TikTokContentConnector(BaseSocialConnector):
             )
             resp.raise_for_status()
             data = resp.json()
-            pub_id = data.get("data", {}).get("publish_id", f"tt_{idempotency_key[:8]}")
+            pub_id = data.get("data", {}).get("publish_id")
+            if not pub_id:
+                raise SocialPublishError("TikTok no devolvió publish_id: no se marca como publicado.")
             return {
                 "status": "PUBLISHED",
                 "mode": "live_oauth2",
                 "channel": self.channel.value,
                 "external_platform_id": pub_id,
-                "canonical_url": f"https://www.tiktok.com/@creator/video/{pub_id}",
+                # publish_id is not a video id: TikTok gives no public URL at this step.
+                "canonical_url": None,
                 "idempotency_key": idempotency_key,
                 "auth_verified": True,
             }
@@ -647,7 +978,9 @@ class LinkedInUGCConnector(BaseSocialConnector):
             }
             resp = await client.post(self.api_base, headers=headers, json=ugc_body)
             resp.raise_for_status()
-            post_urn = resp.json().get("id", f"urn:li:share:{idempotency_key[:8]}")
+            post_urn = resp.json().get("id") or resp.headers.get("x-restli-id")
+            if not post_urn:
+                raise SocialPublishError("LinkedIn no devolvió el id de la publicación: no se marca como publicada.")
 
             first_comment_text = str(payload.get("first_comment") or "").strip()
             meta = payload.get("metadata_payload") or {}
@@ -700,7 +1033,11 @@ def get_connector_for_channel(
     settings = get_settings()
     mapping: dict[SocialChannel, BaseSocialConnector] = {
         SocialChannel.YOUTUBE: YouTubeDataConnector(access_token_override or settings.youtube_access_token),
-        SocialChannel.INSTAGRAM: MetaGraphConnector(access_token_override or settings.instagram_access_token),
+        # For Instagram the credential's person_urn holds the ig_user_id that /me returned for that token.
+        SocialChannel.INSTAGRAM: MetaGraphConnector(
+            access_token_override or settings.instagram_access_token,
+            ig_user_id=(person_urn_override or "").strip() if (person_urn_override or "").strip().isdigit() else "",
+        ),
         SocialChannel.TIKTOK: TikTokContentConnector(access_token_override or settings.tiktok_access_token),
         SocialChannel.LINKEDIN: LinkedInUGCConnector(
             access_token_override or settings.linkedin_access_token,

@@ -342,11 +342,11 @@ def transcribe_word_timestamps(
         except Exception:
             pass
 
-    # Deterministic phonetic alignment fallback when Whisper weights/GPU are absent
-    sample_phrase = script_text_hint or (
-        "Si optimizas sistemas con datos reales multiplicas tu retención sin grabar el doble"
-    )
-    tokens = [tok.strip() for tok in sample_phrase.split() if tok.strip()]
+    # Without Whisper, spread the script's own words over the audio. No script -> no words
+    # (never an invented phrase); confidence 0.0 marks the timings as estimated, not transcribed.
+    if not script_text_hint:
+        return []
+    tokens = [tok.strip() for tok in script_text_hint.split() if tok.strip()]
     step = max(180, duration_ms // max(len(tokens), 1))
     words = []
     for idx, token in enumerate(tokens):
@@ -357,7 +357,7 @@ def transcribe_word_timestamps(
                 word=token,
                 start_ms=start_ms,
                 end_ms=end_ms,
-                confidence=0.97,
+                confidence=0.0,
             )
         )
     return words

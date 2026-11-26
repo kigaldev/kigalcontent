@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useId, useRef, useState } from "react";
-import { KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { useEngineStore } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import { HUMAN_STATE_LABELS } from "@/lib/utils";
@@ -15,7 +15,6 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [actor, setActor] = useState("Creador");
-  const [twoFactorCode, setTwoFactorCode] = useState("884210");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -52,11 +51,9 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
     setErrorMsg(null);
     try {
       if (!backendOnline) {
-        showToast(
-          "info",
-          `Modo local: Aprobación registrada para ${hitlModal.assetCode}.`
+        setErrorMsg(
+          "Backend sin conexión: la aprobación no se ha registrado. Conecta el backend y vuelve a intentarlo."
         );
-        dialogRef.current?.close();
         return;
       }
 
@@ -65,7 +62,6 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
         tier: hitlModal.tier,
         action: hitlModal.action,
         actor,
-        two_factor_code: hitlModal.tier === 3 ? twoFactorCode : undefined,
       });
 
       await apiClient.transitionProject(hitlModal.projectId, {
@@ -140,27 +136,16 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
                 required
               />
             </label>
-
-            {hitlModal.tier === 3 && (
-              <label className="block text-xs font-semibold text-slate-300">
-                Código de Confirmación del Creador
-                <div className="relative mt-1">
-                  <KeyRound className="w-4 h-4 text-rose-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={twoFactorCode}
-                    onChange={(e) => setTwoFactorCode(e.target.value)}
-                    minLength={4}
-                    className="w-full rounded-lg bg-slate-950 border border-rose-500/40 pl-9 pr-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-rose-400"
-                    required
-                  />
-                </div>
-                <span className="text-[10px] text-slate-400 block mt-1">
-                  Código de seguridad para autorizar la publicación pública en redes
-                </span>
-              </label>
-            )}
           </div>
+
+          {hitlModal.tier === 3 && (
+            <div
+              role="alert"
+              className="rounded-lg border border-rose-500/60 bg-rose-950/60 px-3 py-2.5 text-xs text-rose-100 leading-relaxed"
+            >
+              Vas a publicar {hitlModal.assetCode} en tus redes ahora mismo. Se verá en tu perfil y no se puede deshacer desde aquí.
+            </div>
+          )}
 
           {errorMsg && (
             <div className="rounded-lg bg-rose-950/70 border border-rose-500/50 px-3 py-2 text-xs text-rose-200">
@@ -187,7 +172,11 @@ export function HITLApprovalDialog({ onSuccessRefresh }: HITLApprovalDialogProps
               }`}
             >
               <ShieldCheck className="w-4 h-4" />
-              {submitting ? "Confirmando..." : "Confirmar y Continuar"}
+              {submitting
+                ? "Confirmando..."
+                : hitlModal.tier === 3
+                ? "Sí, publicar ahora"
+                : "Confirmar y Continuar"}
             </button>
           </div>
         </form>

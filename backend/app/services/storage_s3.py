@@ -106,3 +106,27 @@ class ObjectStorageService:
             )
         except Exception:
             return f"{self.settings.s3_endpoint_url}/{bucket}/{object_key}"
+
+    def is_remote_storage_configured(self) -> bool:
+        """True only for a real S3/R2 endpoint with real keys (not LocalStack/localhost defaults)."""
+        endpoint = (self.settings.s3_endpoint_url or "").lower()
+        local_hosts = ("localhost", "127.0.0.1", "localstack", "0.0.0.0")
+        return (
+            endpoint.startswith("https://")
+            and not any(h in endpoint for h in local_hosts)
+            and self.settings.aws_access_key_id not in ("", "test")
+            and self.settings.aws_secret_access_key not in ("", "test")
+        )
+
+    def presigned_public_get_url(self, object_key: str, expires_in: int) -> str | None:
+        """Presigned GET reachable from the Internet, or None when no real S3/R2 is configured."""
+        if not self.is_remote_storage_configured():
+            return None
+        try:
+            return self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.settings.s3_bucket_name, "Key": object_key},
+                ExpiresIn=expires_in,
+            )
+        except Exception:
+            return None
