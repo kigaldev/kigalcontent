@@ -23,12 +23,25 @@ Piezas: Next.js en **Vercel** (plan Hobby) + **Supabase** (el de kigalcontent). 
 
 ---
 
+## Estado (2026-11-26)
+- [x] Supabase: `0001_init.sql` aplicado en el proyecto de kigalcontent (en otra cuenta de Supabase, ref `qzoadrfrnurtlyebdzrx`).
+- [x] Vercel: proyecto `bot` (Root Directory `bot`), producción en **https://bot-eosin-omega.vercel.app**, variables puestas.
+- [ ] Supabase: `0002_cron_reintentos.sql` con `CRON_SECRET` y `https://bot-eosin-omega.vercel.app/api/cron/reintentos`.
+- [ ] Meta «Reel Studio»: webhook `https://bot-eosin-omega.vercel.app/api/webhook` (campos `comments` y `messages`),
+      privacidad `/privacidad`, borrado de datos `/eliminar-datos`.
+- [ ] `studio\proyectos\kikegallego\.env` con `IG_TOKEN`; después `node bot\scripts\cuenta.mjs conectar --proyecto kikegallego`.
+      El bot lee el token de `bot_accounts`, no de las variables de Vercel.
+- [ ] Primera regla (`regla.mjs crear … --si`) y prueba real (apartado 6).
+- [ ] Sustituir la service_role por una secret key nueva (`sb_secret_…`) en Vercel y en `studio\.env`, y desactivar la antigua.
+- [ ] El panel KigalChat aún no ve estas tablas: el backend local usa SQLite y no tiene conexión a este Supabase.
+
 ## Puesta en marcha (una vez)
 
 ### 1. Supabase
-No se crea un proyecto nuevo: el bot usa el proyecto Supabase de kigalcontent (el mismo de `DATABASE_URL`), en el esquema
-`public`, con tablas de prefijo `bot_` (`bot_accounts`, `bot_rules`, `bot_processed_comments`, `bot_pending_follow`,
-`bot_sent`, `bot_retry_comments` y la vista `bot_embudo_7d`). Así el panel de kigalcontent puede leerlas.
+No se crea un proyecto nuevo: el bot usa el proyecto Supabase de kigalcontent, en el esquema `public`, con tablas de
+prefijo `bot_` (`bot_accounts`, `bot_rules`, `bot_processed_comments`, `bot_pending_follow`, `bot_sent`,
+`bot_retry_comments` y la vista `bot_embudo_7d`). El panel KigalChat las leerá cuando el backend se conecte a ese
+Supabase (hoy el backend local usa SQLite).
 1. En ese proyecto, SQL Editor → ejecuta `supabase/migrations/0001_init.sql` (idempotente; no toca las tablas de kigalcontent).
 2. Project Settings → API: copia la **URL** y la **service_role key** de ese mismo proyecto.
 
