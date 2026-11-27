@@ -21,7 +21,7 @@
             {
               "id": "msg-text",
               "name": "telegram_message",
-              "value": "=🎬 *Nuevo Video Listo para Revisión Final*\n\n📌 *Activo:* {{ $json.body.asset_code || 'ACE-VIDEO' }}\n📝 *Título:* {{ $json.body.working_title || 'Sin título' }}\n🔒 *Seguridad:* Esperando tu autorización humana (Nivel 3)\n\n👉 Abre tu panel Studio en http://localhost:3000 para revisar el guión, los copies y autorizar la publicación.",
+              "value": "=🎬 *Nuevo Video Listo para Revisión Final*\n\n📌 *Activo:* {{ $json.body.asset_code || 'ACE-VIDEO' }}\n📝 *Título:* {{ $json.body.working_title || 'Sin título' }}\n🔒 *Seguridad:* Esperando tu autorización humana (Nivel 3)\n\n👉 Abre tu panel Studio en https://kigalcontent.vercel.app para revisar el guión, los copies y autorizar la publicación.",
               "type": "string"
             }
           ]

@@ -22,10 +22,10 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/ideas/radar-matutino",
+        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/ideas/radar-matutino",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"context_notes\": \"Radar Matutino: Modelos abiertos Qwen3 y DeepSeek optimizados para MiniPCs de 24GB. Permite orquestar guiones, voces y edición sin cuotas de suscripción mensuales.\",\n  \"source_origin\": \"radar_matutino\",\n  \"source_url\": \"https://news.ycombinator.com\",\n  \"target_platforms\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\", \"X\"],\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"auto_evaluate_ai\": true,\n  \"auto_create_project\": true\n}",
+        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"context_notes\": \"Radar Matutino: Modelos abiertos Qwen3 y DeepSeek optimizados para MiniPCs de 24GB. Permite orquestar guiones, voces y edición sin cuotas de suscripción mensuales.\",\n  \"source_origin\": \"radar_matutino\",\n  \"source_url\": \"https://news.ycombinator.com\",\n  \"target_platforms\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\", \"X\"],\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"auto_evaluate_ai\": true,\n  \"auto_create_project\": false\n}",
         "options": {}
       },
       "id": "http-eval-ice",
@@ -55,7 +55,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/projects",
+        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/projects",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"working_title\": \"{{ $json.concept_title || 'Idea Automática IA Local' }}\",\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\"\n}",
@@ -70,7 +70,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'http://ace-backend:8000/api/v1' }}/scripts/generate",
+        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/scripts/generate",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"project_id\": \"{{ $json.id }}\",\n  \"duration_preset\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"wpm_rate\": 140\n}",
@@ -88,14 +88,14 @@
       "main": [
         [
           {
-            "node": "Evaluar Idea (ICE Scorer)",
+            "node": "Radar Matutino Ingest & AI ICE",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Evaluar Idea (ICE Scorer)": {
+    "Radar Matutino Ingest & AI ICE": {
       "main": [
         [
           {
