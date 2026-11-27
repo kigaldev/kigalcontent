@@ -624,7 +624,10 @@ class MetaGraphConnector(BaseSocialConnector):
     ) -> None:
         super().__init__(access_token)
         settings = get_settings()
-        self.api_base = f"{settings.instagram_graph_base_url.rstrip('/')}/{settings.instagram_api_version}"
+        base_host = settings.instagram_graph_base_url.rstrip("/")
+        if self._is_unified_token() and base_host == "https://graph.instagram.com":
+            base_host = "https://graph.facebook.com"
+        self.api_base = f"{base_host}/{settings.instagram_api_version}"
         self.ig_user_id = ig_user_id or settings.instagram_business_account_id
         self._transport = transport
         self.poll_interval = (
@@ -636,6 +639,9 @@ class MetaGraphConnector(BaseSocialConnector):
         self.image_poll_timeout = (
             settings.instagram_image_poll_timeout_seconds if image_poll_timeout_seconds is None else image_poll_timeout_seconds
         )
+
+    def _is_unified_token(self) -> bool:
+        return self.access_token.strip().startswith("EAA")
 
     # ---------- HTTP ----------
 
@@ -683,11 +689,27 @@ class MetaGraphConnector(BaseSocialConnector):
         return body if isinstance(body, dict) else {}
 
     async def fetch_profile(self, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
-        """GET /me?fields=user_id,username (user_id, not id, is the publishing IG user id)."""
+        """Resolve IG user_id and username for both Unified Login (EAA -> graph.facebook.com) and Instagram Login (IGAA)."""
+        async def _run(c: httpx.AsyncClient) -> dict[str, Any]:
+            if self._is_unified_token():
+                assigned = await self._api(c, "GET", "me/assigned_instagram_accounts", {"fields": "id,username"})
+                items = assigned.get("data") if isinstance(assigned.get("data"), list) else []
+                acc = items[0] if items else None
+                if not acc:
+                    pages = await self._api(c, "GET", "me/accounts", {"fields": "instagram_business_account{id,username}"})
+                    for p in pages.get("data") or []:
+                        if isinstance(p, dict) and isinstance(p.get("instagram_business_account"), dict):
+                            acc = p["instagram_business_account"]
+                            break
+                if not acc or not acc.get("id"):
+                    raise InstagramApiError("No se encontró ninguna cuenta de Instagram asignada a este token Unified Login.")
+                return {"user_id": str(acc["id"]), "id": str(acc["id"]), "username": str(acc.get("username") or "")}
+            return await self._api(c, "GET", "me", {"fields": "user_id,username"})
+
         if client is None:
             async with self._client() as own:
-                return await self._api(own, "GET", "me", {"fields": "user_id,username"})
-        return await self._api(client, "GET", "me", {"fields": "user_id,username"})
+                return await _run(own)
+        return await _run(client)
 
     async def _ensure_user_id(self, client: httpx.AsyncClient) -> str:
         if self.ig_user_id:

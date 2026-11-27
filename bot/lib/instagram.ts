@@ -1,4 +1,5 @@
-// Llamadas a la API oficial de Instagram (Instagram API with Instagram Login, graph.instagram.com).
+// Llamadas a la API oficial de Instagram: soporta Meta Unified Login (graph.facebook.com, tokens EAA...)
+// y el flujo clásico Instagram Login (graph.instagram.com, tokens IGAA...).
 import type { Account } from './db';
 import { env } from './env';
 
@@ -11,8 +12,12 @@ export class IgError extends Error {
 export const FOLLOW_PAYLOAD = 'FOLLOW_CHECK';
 const BUTTON_TITLE = 'Ya te sigo';
 
+export const isUnifiedToken = (token: string) => token.trim().startsWith('EAA');
+export const graphHost = (token: string) =>
+  isUnifiedToken(token) ? 'https://graph.facebook.com' : 'https://graph.instagram.com';
+
 async function ig<T>(token: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`https://graph.instagram.com/${env.apiVersion}/${path}`, {
+  const res = await fetch(`${graphHost(token)}/${env.apiVersion}/${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -71,6 +76,10 @@ export async function isFollower(acc: Account, igsid: string): Promise<boolean |
 }
 
 export async function refreshToken(token: string): Promise<{ access_token: string; expires_in: number }> {
+  // Los tokens EAA de Meta Unified Login (System User) no usan ig_refresh_token en graph.instagram.com.
+  if (isUnifiedToken(token)) {
+    return { access_token: token, expires_in: 0 };
+  }
   const res = await fetch(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(token)}`, { cache: 'no-store' });
   const json = await res.json();
   if (!res.ok || json.error) throw new IgError(json.error?.message || `HTTP ${res.status}`, json.error?.code, res.status);

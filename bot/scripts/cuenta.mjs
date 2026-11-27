@@ -12,7 +12,21 @@ const sb = supabase();
 
 async function igMe(token) {
   const v = process.env.IG_API_VERSION || 'v27.0';
-  const r = await fetch(`https://graph.instagram.com/${v}/me?fields=user_id,username`, { headers: { Authorization: `Bearer ${token}` } });
+  const headers = { Authorization: `Bearer ${token}` };
+  if (token.trim().startsWith('EAA')) {
+    const r = await fetch(`https://graph.facebook.com/${v}/me/assigned_instagram_accounts?fields=id,username`, { headers });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error?.message || `HTTP ${r.status}`);
+    let acc = j.data?.[0];
+    if (!acc) {
+      const r2 = await fetch(`https://graph.facebook.com/${v}/me/accounts?fields=instagram_business_account{id,username}`, { headers });
+      const j2 = await r2.json();
+      acc = (j2.data ?? []).map((p) => p.instagram_business_account).find(Boolean);
+    }
+    if (!acc?.id) throw new Error('No se encontró ninguna cuenta de Instagram asignada a este token Unified Login.');
+    return { user_id: acc.id, username: acc.username || acc.id };
+  }
+  const r = await fetch(`https://graph.instagram.com/${v}/me?fields=user_id,username`, { headers });
   const j = await r.json();
   if (!r.ok || j.error) throw new Error(j.error?.message || `HTTP ${r.status}`);
   return j;

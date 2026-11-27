@@ -119,8 +119,11 @@ class MetaError extends Error {
   get esAbuso() { return this.code === 368; }
 }
 
+const isUnifiedToken = (token) => String(token || '').trim().startsWith('EAA');
+const graphHost = (token) => (isUnifiedToken(token) ? 'https://graph.facebook.com' : 'https://graph.instagram.com');
+
 async function api(cfg, method, endpoint, params = {}) {
-  const url = new URL(`https://graph.instagram.com/${cfg.version}/${endpoint.replace(/^\//, '')}`);
+  const url = new URL(`${graphHost(cfg.token)}/${cfg.version}/${endpoint.replace(/^\//, '')}`);
   const opts = { method, headers: { Authorization: `Bearer ${cfg.token}` } };
   if (method === 'GET') {
     for (const [k, v] of Object.entries(params)) if (v !== undefined) url.searchParams.set(k, String(v));
@@ -135,17 +138,36 @@ async function api(cfg, method, endpoint, params = {}) {
   return json;
 }
 
+async function fetchMe(cfg) {
+  if (isUnifiedToken(cfg.token)) {
+    const assigned = await api(cfg, 'GET', 'me/assigned_instagram_accounts', { fields: 'id,username' });
+    let acc = assigned.data?.[0];
+    if (!acc) {
+      const pages = await api(cfg, 'GET', 'me/accounts', { fields: 'instagram_business_account{id,username}' });
+      acc = (pages.data || []).map((p) => p.instagram_business_account).find(Boolean);
+    }
+    if (!acc?.id) throw new Error('No se encontró ninguna cuenta profesional de Instagram asignada a este token Unified Login.');
+    const detail = await api(cfg, 'GET', acc.id, { fields: 'id,username,followers_count,media_count' }).catch(() => acc);
+    return { user_id: acc.id, ...detail };
+  }
+  return api(cfg, 'GET', 'me', { fields: 'user_id,username,account_type,media_count,followers_count' });
+}
+
 async function ensureUserId(cfg) {
   if (cfg.userId) return cfg.userId;
-  const me = await api(cfg, 'GET', 'me', { fields: 'user_id,username' });
-  // Ojo: es user_id, no id.
-  cfg.userId = me.user_id;
-  setEnvValue(cfg.envFile, 'IG_USER_ID', me.user_id);
+  const me = await fetchMe(cfg);
+  cfg.userId = me.user_id || me.id;
+  setEnvValue(cfg.envFile, 'IG_USER_ID', cfg.userId);
   log(`IG_USER_ID guardado para @${me.username}`);
   return cfg.userId;
 }
 
 async function refreshToken(cfg) {
+  if (isUnifiedToken(cfg.token)) {
+    log(`Token Unified Login (EAA) de ${cfg.proyecto}: los System User tokens no requieren renovación ig_refresh_token.`);
+    setEnvValue(cfg.envFile, 'IG_TOKEN_REFRESHED_AT', new Date().toISOString());
+    return;
+  }
   const url = `https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(cfg.token)}`;
   const res = await fetch(url);
   const json = await res.json();
@@ -435,7 +457,7 @@ async function metricas(proyecto, dias) {
       if (Date.parse(m.timestamp) < desde) { next = null; break; }
       filas.push({ ...m, caption: (m.caption || '').slice(0, 120), insights: await insights(cfg, m) });
     }
-    if (next && r.paging?.next) { next = r.paging.next.replace(/^https:\/\/graph\.instagram\.com\/v[\d.]+\//, '').split('?')[0]; params = Object.fromEntries(new URL(r.paging.next).searchParams); delete params.access_token; }
+    if (next && r.paging?.next) { next = r.paging.next.replace(/^https:\/\/graph\.(?:instagram|facebook)\.com\/v[\d.]+\//, '').split('?')[0]; params = Object.fromEntries(new URL(r.paging.next).searchParams); delete params.access_token; }
     else next = null;
   }
   const outDir = path.join(cfg.dir, 'metricas');
@@ -453,9 +475,9 @@ try {
   switch (cmd) {
     case 'whoami': {
       const cfg = proyectoConfig(a.proyecto);
-      const me = await api(cfg, 'GET', 'me', { fields: 'user_id,username,account_type,media_count,followers_count' });
+      const me = await fetchMe(cfg);
       console.log(me);
-      if (!cfg.userId) { setEnvValue(cfg.envFile, 'IG_USER_ID', me.user_id); log('IG_USER_ID guardado.'); }
+      if (!cfg.userId) { setEnvValue(cfg.envFile, 'IG_USER_ID', me.user_id || me.id); log('IG_USER_ID guardado.'); }
       break;
     }
     case 'limite': {
