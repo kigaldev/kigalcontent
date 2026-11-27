@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Cpu,
+  Eye,
+  Lock,
   Server,
   Sparkles,
   Zap,
@@ -216,6 +218,8 @@ interface MiniPCModelMeta {
   size_label: string;
   role: string;
   badge?: string;
+  supports_vision: boolean;
+  visual_note: string;
 }
 
 const MINIPC_INSTALLED_MODELS: MiniPCModelMeta[] = [
@@ -224,41 +228,81 @@ const MINIPC_INSTALLED_MODELS: MiniPCModelMeta[] = [
     size_label: "16.5 GB",
     role: "Principal en tu MiniPC · Guiones, copy y estrategia en español",
     badge: "Principal",
+    supports_vision: true,
+    visual_note: "Visión multimodal + prompts de portada/infografía (no genera PNG)",
   },
   {
     model_id: "qwen3.6-27b-64k:latest",
     size_label: "16.5 GB",
     role: "Ventana larga 64K · Guiones extensos y análisis profundo",
     badge: "64K",
+    supports_vision: true,
+    visual_note: "Visión multimodal 64K + diseño de prompts visuales (no genera PNG)",
   },
   {
     model_id: "gemma3:27b",
     size_label: "16.2 GB",
     role: "Google Gemma 3 27B · Copy creativo, ganchos y variaciones ágiles",
+    supports_vision: true,
+    visual_note: "Visión multimodal + análisis de portadas/capturas (no genera PNG)",
   },
   {
     model_id: "qwen3-coder:30b",
     size_label: "17.3 GB",
     role: "Especialista en código, JSON estricto y automatizaciones",
+    supports_vision: false,
+    visual_note: "Solo texto/código · No apto para tareas visuales",
   },
   {
     model_id: "qwen3-coder-64k:latest",
     size_label: "17.3 GB",
     role: "Código y prompts estructurados con contexto largo 64K",
     badge: "64K",
+    supports_vision: false,
+    visual_note: "Solo texto/código · No apto para tareas visuales",
   },
   {
     model_id: "laguna-xs-2.1:latest",
     size_label: "18.9 GB",
     role: "Redacción avanzada y tono editorial local",
+    supports_vision: false,
+    visual_note: "Solo texto · No apto para tareas visuales",
   },
   {
     model_id: "laguna-xs-64k:latest",
     size_label: "18.9 GB",
     role: "Redacción avanzada con ventana larga 64K",
     badge: "64K",
+    supports_vision: false,
+    visual_note: "Solo texto · No apto para tareas visuales",
   },
 ];
+
+const PROVIDER_MODE_DETAILS: Record<
+  LLMProviderMode,
+  { title: string; effect: string }
+> = {
+  auto: {
+    title: "Híbrido Inteligente (Auto)",
+    effect:
+      "Al generar ideas, guiones o copy, KigalContent usa primero tu MiniPC Ollama; si el MiniPC estuviera apagado, pasa automáticamente a OpenRouter (si tiene clave) o al motor paramétrico de respaldo.",
+  },
+  ollama: {
+    title: "Solo MiniPC Local (Ollama)",
+    effect:
+      "Fuerza que todas las peticiones de IA vayan exclusivamente a la GPU de tu MiniPC (0,00 €). Nunca llamará a APIs externas de pago; si Ollama no responde, usa respaldo local determinista.",
+  },
+  openai_compatible: {
+    title: "OpenRouter / Compatible",
+    effect:
+      "Envía las generaciones de IA al endpoint externo compatible con OpenAI/OpenRouter configurado en los ajustes avanzados.",
+  },
+  deterministic: {
+    title: "Paramétrico Instantáneo",
+    effect:
+      "Desactiva las llamadas a modelos IA y genera estructuras, guiones base y copys al instante (0 ms) mediante reglas y plantillas locales.",
+  },
+};
 
 interface LoadedSkillSpec {
   agent_id: string;
@@ -374,6 +418,8 @@ export const SocialCredentialsSettings: React.FC = () => {
   const [openAiApiKey, setOpenAiApiKey] = useState("");
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillSpec[]>([]);
   const [llmSaving, setLlmSaving] = useState(false);
+  const [modeSavedNotice, setModeSavedNotice] = useState<string | null>(null);
+  const [showAdvancedLlmConn, setShowAdvancedLlmConn] = useState(false);
   const [activatingModel, setActivatingModel] = useState<string | null>(null);
   const [llmTesting, setLlmTesting] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{
@@ -393,6 +439,8 @@ export const SocialCredentialsSettings: React.FC = () => {
           model_id: detected,
           size_label: "Local",
           role: "Detectado en vivo en Ollama de tu MiniPC",
+          supports_vision: false,
+          visual_note: "Modelo local adicional detectado en Ollama",
         });
       }
     }
@@ -705,16 +753,24 @@ export const SocialCredentialsSettings: React.FC = () => {
     }
   };
 
-  const handleSaveLlmConfig = async (overrideModel?: string) => {
+  const handleSaveLlmConfig = async (
+    overrideModel?: string,
+    overrideProvider?: LLMProviderMode
+  ) => {
     const modelToSave = (overrideModel ?? ollamaModel).trim();
+    const providerToSave = overrideProvider ?? llmProvider;
     if (overrideModel) {
       setOllamaModel(modelToSave);
       setActivatingModel(modelToSave);
     }
+    if (overrideProvider) {
+      setLlmProvider(providerToSave);
+      setModeSavedNotice("Guardando ajuste...");
+    }
     setLlmSaving(true);
     try {
       const updated = await apiClient.updateLLMConfig({
-        active_provider: llmProvider,
+        active_provider: providerToSave,
         ollama_base_url: ollamaBaseUrl.trim(),
         ollama_model: modelToSave,
         ollama_api_key: ollamaApiKey.trim() || undefined,
@@ -728,19 +784,25 @@ export const SocialCredentialsSettings: React.FC = () => {
       }
       setOllamaApiKey("");
       setOpenAiApiKey("");
+      if (overrideProvider) {
+        setModeSavedNotice(`Modo «${PROVIDER_MODE_DETAILS[providerToSave].title}» guardado en el servidor ✓`);
+      }
       setLlmTestResult({
-        reachable: Boolean(updated.ollama_reachable || llmProvider !== "ollama"),
+        reachable: Boolean(updated.ollama_reachable || providerToSave !== "ollama"),
         provider: updated.effective_provider,
         message: updated.ollama_reachable
-          ? `Modelo "${modelToSave}" guardado y MiniPC Ollama conectado (${(updated.ollama_models_detected ?? []).length} modelos disponibles).`
-          : `Modelo "${modelToSave}" guardado en base de datos.`,
+          ? `Ajuste guardado · Modo ${providerToSave} · Modelo "${modelToSave}" conectado (${(updated.ollama_models_detected ?? []).length} modelos disponibles).`
+          : `Ajuste guardado en base de datos (modo ${providerToSave}, modelo "${modelToSave}").`,
         installed_models: updated.ollama_models_detected ?? [],
-        fallback_used: !updated.ollama_reachable && llmProvider === "ollama",
+        fallback_used: !updated.ollama_reachable && providerToSave === "ollama",
       });
     } catch {
+      if (overrideProvider) {
+        setModeSavedNotice("No se pudo guardar en el servidor (revisa conexión).");
+      }
       setLlmTestResult({
         reachable: false,
-        provider: llmProvider,
+        provider: providerToSave,
         message: "Error al guardar la configuración en el backend.",
         installed_models: [],
         fallback_used: true,
@@ -838,188 +900,247 @@ export const SocialCredentialsSettings: React.FC = () => {
             </div>
           </div>
 
-          {/* 1-Click Provider Mode Selector (Sin Claude API) */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              {
-                id: "auto" as const,
-                title: "Híbrido Inteligente (Auto)",
-                sub: "Prioriza MiniPC Ollama -> OpenRouter -> Instantáneo",
-                icon: <Sparkles className="w-4 h-4 text-cyan-300" />,
-              },
-              {
-                id: "ollama" as const,
-                title: "MiniPC Local (Ollama)",
-                sub: "Solo modelos locales · Coste 0,00 € · Privacidad total",
-                icon: <Server className="w-4 h-4 text-emerald-300" />,
-              },
-              {
-                id: "deterministic" as const,
-                title: "Paramétrico Instantáneo",
-                sub: "Sin llamadas LLM · 0 ms de latencia",
-                icon: <Zap className="w-4 h-4 text-amber-300" />,
-              },
-            ].map((opt) => (
-              <button
-                type="button"
-                key={opt.id}
-                onClick={() => setLlmProvider(opt.id)}
-                className={`p-3.5 rounded-xl border-2 text-left transition ${
-                  llmProvider === opt.id
-                    ? "bg-emerald-500/18 border-emerald-400 shadow-lg shadow-emerald-500/15"
-                    : "bg-slate-950/60 border-white/10 hover:border-emerald-400/40"
-                }`}
-              >
-                <div className="flex items-center gap-2 font-bold text-xs text-white">
-                  {opt.icon}
-                  <span>{opt.title}</span>
-                </div>
-                <p className="text-[11px] text-slate-300 mt-1">{opt.sub}</p>
-              </button>
-            ))}
+          {/* 1-Click Provider Mode Selector (Auto-guarda al seleccionar + explicación clara) */}
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                {
+                  id: "auto" as const,
+                  title: "Híbrido Inteligente (Auto)",
+                  sub: "MiniPC Ollama primero -> OpenRouter -> Instantáneo",
+                  icon: <Sparkles className="w-4 h-4 text-cyan-300" />,
+                },
+                {
+                  id: "ollama" as const,
+                  title: "Solo MiniPC Local (Ollama)",
+                  sub: "Coste 0,00 € · 100% privado en tu GPU",
+                  icon: <Server className="w-4 h-4 text-emerald-300" />,
+                },
+                {
+                  id: "deterministic" as const,
+                  title: "Paramétrico Instantáneo",
+                  sub: "Sin llamadas LLM · 0 ms de latencia",
+                  icon: <Zap className="w-4 h-4 text-amber-300" />,
+                },
+              ].map((opt) => {
+                const isSelected = llmProvider === opt.id;
+                return (
+                  <button
+                    type="button"
+                    key={opt.id}
+                    disabled={llmSaving}
+                    onClick={() => void handleSaveLlmConfig(undefined, opt.id)}
+                    className={`p-3.5 rounded-xl border-2 text-left transition cursor-pointer disabled:opacity-60 ${
+                      isSelected
+                        ? "bg-emerald-500/20 border-emerald-400 shadow-lg shadow-emerald-500/15"
+                        : "bg-slate-950/60 border-white/10 hover:border-emerald-400/45"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 font-bold text-xs text-white">
+                      <span className="flex items-center gap-2">
+                        {opt.icon}
+                        <span>{opt.title}</span>
+                      </span>
+                      {isSelected && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-400 text-slate-950">
+                          Activo
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-1">{opt.sub}</p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Small-print live explanation of what the active mode changes */}
+            <div className="rounded-xl border border-emerald-400/25 bg-slate-950/75 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300">
+              <p className="leading-relaxed">
+                <strong className="text-emerald-300">
+                  Qué hace «{PROVIDER_MODE_DETAILS[llmProvider].title}»:
+                </strong>{" "}
+                {PROVIDER_MODE_DETAILS[llmProvider].effect}
+              </p>
+              {modeSavedNotice && (
+                <span className="shrink-0 font-semibold text-emerald-300">
+                  {modeSavedNotice}
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Main 2-Col: Left = Connection Settings | Right = Installed MiniPC Models Ready to Use */}
-          <div className="grid lg:grid-cols-12 gap-4 text-xs">
-            {/* Left: Endpoint & Keys */}
-            <div className="lg:col-span-5 space-y-4 bg-[#040c11]/80 border-2 border-emerald-400/25 rounded-xl p-4">
-              <div className="font-bold text-emerald-200 flex items-center justify-between border-b border-white/10 pb-2.5">
-                <span>Conexión a Ollama (MiniPC)</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
-                  {ollamaApiKeyConfigured ? "Túnel Bearer Activo" : "Conexión Directa"}
-                </span>
+          {/* Installed MiniPC Models Ready to Use (Full Width Front & Center) */}
+          <div className="space-y-3 bg-[#040c11]/80 border-2 border-emerald-400/25 rounded-xl p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5">
+              <div>
+                <h3 className="font-bold text-emerald-200 text-xs sm:text-sm">
+                  Modelos Disponibles en tu MiniPC ({miniPcModelCards.length})
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Haz clic en cualquier modelo instalado para activarlo y guardarlo al instante.
+                </p>
               </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    URL de Ollama (Local o Túnel Cloudflare hacia tu MiniPC)
-                  </label>
-                  <input
-                    type="url"
-                    value={ollamaBaseUrl}
-                    onChange={(e) => setOllamaBaseUrl(e.target.value)}
-                    placeholder="http://127.0.0.1:11434 o https://...trycloudflare.com"
-                    className="w-full bg-slate-950 border-2 border-slate-700/90 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Token Túnel Ollama (Opcional · Bearer Auth)
-                  </label>
-                  <input
-                    type="password"
-                    value={ollamaApiKey}
-                    onChange={(e) => setOllamaApiKey(e.target.value)}
-                    placeholder={
-                      ollamaApiKeyConfigured
-                        ? "•••••••• (token guardado en servidor)"
-                        : "Token del túnel seguro del MiniPC"
-                    }
-                    className="w-full bg-slate-950 border-2 border-slate-700/90 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Modelo Activo Seleccionado
-                  </label>
-                  <input
-                    type="text"
-                    value={ollamaModel}
-                    onChange={(e) => setOllamaModel(e.target.value)}
-                    className="w-full bg-slate-950 border-2 border-emerald-400/50 rounded-xl px-3 py-2 text-emerald-200 font-mono font-bold text-xs focus:outline-none focus:border-emerald-300"
-                  />
-                </div>
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-2.5 pt-3 border-t border-white/10">
-                <div>
-                  <label className="block text-slate-400 mb-1">OpenRouter / Compatible URL</label>
-                  <input
-                    type="url"
-                    value={openAiBaseUrl}
-                    onChange={(e) => setOpenAiBaseUrl(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1">OpenRouter API Key (Opcional)</label>
-                  <input
-                    type="password"
-                    value={openAiApiKey}
-                    onChange={(e) => setOpenAiApiKey(e.target.value)}
-                    placeholder="sk-or-v1-..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold text-emerald-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                Listos en GPU local
+              </span>
             </div>
 
-            {/* Right: Installed MiniPC Models Ready to Use */}
-            <div className="lg:col-span-7 space-y-3 bg-[#040c11]/80 border-2 border-emerald-400/25 rounded-xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-2.5">
-                <div>
-                  <h3 className="font-bold text-emerald-200 text-xs sm:text-sm">
-                    Modelos Disponibles en tu MiniPC ({miniPcModelCards.length})
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Haz clic en cualquier modelo instalado para activarlo y guardarlo al instante.
-                  </p>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold text-emerald-200">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  Listos en GPU local
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {miniPcModelCards.map((m) => {
+                const isActive = ollamaModel === m.model_id;
+                const isActivating = activatingModel === m.model_id;
+                return (
+                  <button
+                    key={m.model_id}
+                    type="button"
+                    disabled={llmSaving}
+                    onClick={() => void handleSaveLlmConfig(m.model_id)}
+                    className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between gap-2 cursor-pointer disabled:opacity-60 ${
+                      isActive
+                        ? "bg-emerald-500/20 border-emerald-400 shadow-lg shadow-emerald-500/15"
+                        : "bg-slate-950/70 border-white/10 hover:border-emerald-400/55 hover:bg-emerald-950/35"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 w-full">
+                      <span className="font-mono font-bold text-xs text-white break-all">
+                        {m.model_id}
+                      </span>
+                      <span
+                        className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          isActive
+                            ? "bg-emerald-400 text-slate-950 border-emerald-300"
+                            : "bg-white/[0.06] text-slate-300 border-white/15"
+                        }`}
+                      >
+                        {isActivating ? "Activando..." : isActive ? "Activo" : "Usar"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-snug">{m.role}</p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.06] text-emerald-200 border border-white/10">
+                        {m.size_label}
+                      </span>
+                      {m.badge && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">
+                          {m.badge}
+                        </span>
+                      )}
+                      {m.supports_vision && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-400/30">
+                          Visión
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Collapsible Protected Connection Settings (Ollama Server + OpenRouter Backup) */}
+          <div className="rounded-xl border-2 border-emerald-400/20 bg-[#040c11]/70 overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedLlmConn((prev) => !prev)}
+              aria-expanded={showAdvancedLlmConn}
+              className="w-full px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-left hover:bg-white/[0.03] transition cursor-pointer"
+            >
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <Lock className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span className="font-bold text-slate-200">
+                  Conexión al Servidor Ollama y Respaldo OpenRouter
+                </span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-200">
+                  Ya configurado · Protegido
+                </span>
+                <span className="hidden md:inline text-[11px] font-mono text-slate-400 truncate max-w-[280px]">
+                  {ollamaBaseUrl}
                 </span>
               </div>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-300 shrink-0">
+                <span>{showAdvancedLlmConn ? "Ocultar ajustes" : "Desplegar para editar"}</span>
+                {showAdvancedLlmConn ? (
+                  <ChevronUp className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </span>
+            </button>
 
-              <div className="grid sm:grid-cols-2 gap-2.5">
-                {miniPcModelCards.map((m) => {
-                  const isActive = ollamaModel === m.model_id;
-                  const isActivating = activatingModel === m.model_id;
-                  return (
-                    <button
-                      key={m.model_id}
-                      type="button"
-                      disabled={llmSaving}
-                      onClick={() => void handleSaveLlmConfig(m.model_id)}
-                      className={`p-3 rounded-xl border-2 text-left transition flex flex-col justify-between gap-2 cursor-pointer disabled:opacity-60 ${
-                        isActive
-                          ? "bg-emerald-500/20 border-emerald-400 shadow-lg shadow-emerald-500/15"
-                          : "bg-slate-950/70 border-white/10 hover:border-emerald-400/55 hover:bg-emerald-950/35"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2 w-full">
-                        <span className="font-mono font-bold text-xs text-white break-all">
-                          {m.model_id}
-                        </span>
-                        <span
-                          className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            isActive
-                              ? "bg-emerald-400 text-slate-950 border-emerald-300"
-                              : "bg-white/[0.06] text-slate-300 border-white/15"
-                          }`}
-                        >
-                          {isActivating ? "Activando..." : isActive ? "Activo" : "Usar"}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-300 leading-snug">{m.role}</p>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.06] text-emerald-200 border border-white/10">
-                          {m.size_label}
-                        </span>
-                        {m.badge && (
-                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">
-                            {m.badge}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+            {showAdvancedLlmConn && (
+              <div className="p-4 border-t border-white/10 space-y-4">
+                <p className="text-[11px] text-amber-200/85 bg-amber-950/25 border border-amber-400/30 rounded-lg px-3 py-2">
+                  Estos parámetros ya están configurados y conectados con tu MiniPC. Edítalos únicamente si cambias de servidor, túnel o clave de OpenRouter.
+                </p>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      URL de Ollama (Local o Túnel Cloudflare)
+                    </label>
+                    <input
+                      type="url"
+                      value={ollamaBaseUrl}
+                      onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                      placeholder="http://127.0.0.1:11434 o https://...trycloudflare.com"
+                      className="w-full bg-slate-950 border-2 border-slate-700/90 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      Token Túnel Ollama (Bearer Auth)
+                    </label>
+                    <input
+                      type="password"
+                      value={ollamaApiKey}
+                      onChange={(e) => setOllamaApiKey(e.target.value)}
+                      placeholder={
+                        ollamaApiKeyConfigured
+                          ? "•••••••• (token guardado en servidor)"
+                          : "Token del túnel seguro del MiniPC"
+                      }
+                      className="w-full bg-slate-950 border-2 border-slate-700/90 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      Modelo Activo Manual
+                    </label>
+                    <input
+                      type="text"
+                      value={ollamaModel}
+                      onChange={(e) => setOllamaModel(e.target.value)}
+                      className="w-full bg-slate-950 border-2 border-emerald-400/50 rounded-xl px-3 py-2 text-emerald-200 font-mono font-bold text-xs focus:outline-none focus:border-emerald-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-3 pt-3 border-t border-white/10">
+                  <div>
+                    <label className="block text-slate-400 mb-1">Respaldo OpenRouter / Compatible URL</label>
+                    <input
+                      type="url"
+                      value={openAiBaseUrl}
+                      onChange={(e) => setOpenAiBaseUrl(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 mb-1">OpenRouter API Key (Opcional)</label>
+                    <input
+                      type="password"
+                      value={openAiApiKey}
+                      onChange={(e) => setOpenAiApiKey(e.target.value)}
+                      placeholder="sk-or-v1-..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Connection Probe Output & Active Skills Badges */}
@@ -1551,39 +1672,34 @@ export const SocialCredentialsSettings: React.FC = () => {
             <AstryxBadge label="Guardado seguro en servidor" variant="info" />
           </div>
 
-          {/* Local IA (Ollama) Summary Card */}
-          <div className="rounded-xl border-2 border-emerald-400/40 bg-emerald-950/30 p-4 space-y-2.5">
+          {/* Local IA (Ollama) Visual Capability Matrix */}
+          <div className="rounded-xl border-2 border-emerald-400/45 bg-emerald-950/30 p-4 space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-0.5">
+              <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
-                    <Cpu className="w-4 h-4 text-emerald-400" />
-                    Modelos de IA Local (MiniPC Ollama)
+                    <Eye className="w-4 h-4 text-emerald-400" />
+                    Modelos Locales del MiniPC · Capacidad Visual
                   </h4>
                   {localOllamaInfo.reachable ? (
                     <AstryxBadge
-                      label={`Activo (${localOllamaInfo.models.length} modelos)`}
+                      label={`Conectado (${miniPcModelCards.filter((m) => m.supports_vision).length} con visión)`}
                       variant="success"
                     />
                   ) : (
-                    <AstryxBadge label={`${localOllamaInfo.models.length} configurados`} variant="neutral" />
+                    <AstryxBadge
+                      label={`${miniPcModelCards.filter((m) => m.supports_vision).length} con visión configurados`}
+                      variant="neutral"
+                    />
                   )}
                 </div>
                 <p className="text-xs text-slate-300">
-                  Endpoint: <code className="text-emerald-300">{localOllamaInfo.baseUrl}</code> · Redacción y guiones locales a 0 € con privacidad total.
+                  Tus modelos locales con visión (<strong className="text-emerald-200">qwen3.6:27b</strong> y{" "}
+                  <strong className="text-emerald-200">gemma3:27b</strong>) están conectados y son muy útiles para{" "}
+                  <strong>analizar portadas/capturas y redactar prompts visuales</strong> a 0 €, pero los LLMs de Ollama{" "}
+                  <strong className="text-amber-200">no generan imágenes PNG desde cero</strong>. Para generar portadas o infografías raster automáticamente necesitarás{" "}
+                  <strong>OpenAI (GPT Images)</strong> o <strong>Google Gemini (Nano Banana)</strong>.
                 </p>
-                {localOllamaInfo.models.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {localOllamaInfo.models.map((m) => (
-                      <span
-                        key={m}
-                        className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/35 font-mono text-[11px] text-emerald-200"
-                      >
-                        {m}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
               <AstryxButton
                 type="button"
@@ -1595,6 +1711,45 @@ export const SocialCredentialsSettings: React.FC = () => {
                 onClick={() => void handleCheckLocalOllama()}
               />
             </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {miniPcModelCards.map((m) => {
+                const isConnected = localOllamaInfo.reachable && localOllamaInfo.models.includes(m.model_id);
+                return (
+                  <div
+                    key={m.model_id}
+                    className={`rounded-lg border px-3 py-2 text-xs space-y-1 ${
+                      m.supports_vision
+                        ? "border-emerald-400/40 bg-emerald-950/45"
+                        : "border-white/10 bg-slate-950/60 opacity-75"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="font-mono font-bold text-[11px] text-white truncate">
+                        {m.model_id}
+                      </span>
+                      <span
+                        className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                          m.supports_vision
+                            ? isConnected
+                              ? "bg-emerald-400/20 text-emerald-200 border-emerald-400/40"
+                              : "bg-cyan-400/15 text-cyan-200 border-cyan-400/35"
+                            : "bg-white/[0.06] text-slate-400 border-white/10"
+                        }`}
+                      >
+                        {m.supports_vision
+                          ? isConnected
+                            ? "Conectado · Útil (Visión)"
+                            : "Útil (Visión)"
+                          : "No visual"}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 leading-snug">{m.visual_note}</p>
+                  </div>
+                );
+              })}
+            </div>
+
             {localOllamaInfo.message && (
               <div
                 className={`rounded-xl border-2 px-3.5 py-2 text-xs ${
