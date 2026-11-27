@@ -21,7 +21,7 @@ import {
   Send,
   Sparkles,
 } from "lucide-react";
-import { useEngineStore } from "@/store/useEngineStore";
+import { useEngineStore, type PublishingSubTab } from "@/store/useEngineStore";
 import { apiClient } from "@/lib/api";
 import { runLocalPreflight } from "@/lib/utils";
 import { copyPreservingLineBreaks } from "@/lib/unicodeFormat";
@@ -44,13 +44,6 @@ import { AstryxButton } from "@/components/ui/AstryxPrimitives";
 interface PublishingAndHitlViewProps {
   onRefresh: () => Promise<void>;
 }
-
-type PublishingSubTab =
-  | "planner"
-  | "copy-native"
-  | "autolists"
-  | "kigalchat-dm"
-  | "hitl-audit";
 
 const SUB_TABS: Array<{
   id: PublishingSubTab;
@@ -147,13 +140,16 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     backendOnline,
     showToast,
     setSelectedDetail,
+    publishingSubTab,
+    setPublishingSubTab,
   } = useEngineStore();
 
   const auditCaptionId = useId();
   const tabBaseId = useId();
   const subTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const [activeSubTab, setActiveSubTab] = useState<PublishingSubTab>("planner");
+  const activeSubTab = publishingSubTab;
+  const setActiveSubTab = setPublishingSubTab;
   const [showTips, setShowTips] = useState(false);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [selectedChannels, setSelectedChannels] = useState<SocialChannel[]>([
@@ -420,28 +416,25 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
 
   return (
     <div className="space-y-5">
-      {/* Step Header */}
-      <div className="nle-panel flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
-        <div>
+      {/* Compact Glassy Header */}
+      <div className="glass-panel p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-xs font-bold text-slate-950">
-              4
-            </span>
+            <h2 className="text-base font-bold text-white tracking-tight">
+              Publicación y Crecimiento
+            </h2>
             {selectedDetail?.project ? (
-              <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono text-xs font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 font-mono text-[11px] font-semibold">
                 {selectedDetail.project.asset_code}
               </span>
             ) : (
-              <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 font-mono text-[11px] font-semibold">
-                METRICOOL STUDIO
+              <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-[11px] font-medium">
+                Calendario &amp; Autolistas
               </span>
             )}
-            <h2 className="text-base font-bold text-white">
-              Paso 4: Planificador Editorial, Copy Multicanal, Autolistas y Publicación
-            </h2>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Programa en el calendario visual con mapa de mejores horas, adapta el copy con huella nativa, activa Autolistas evergreen y publica directamente en tus redes.
+          <p className="text-xs text-slate-400 mt-0.5">
+            Programa en calendario, adapta el copy nativo, automatiza DMs y publica en tus redes.
           </p>
         </div>
 
@@ -449,9 +442,9 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
           <button
             type="button"
             onClick={() => setShowTips((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-[var(--kc-canvas)] text-slate-300 hover:text-white text-xs font-medium transition"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white text-xs font-medium backdrop-blur-md transition"
           >
-            <HelpCircle className="w-4 h-4 text-cyan-400" />
+            <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
             <span>{showTips ? "Ocultar Reglas" : "Ver Reglas por Red Social"}</span>
           </button>
 
@@ -459,9 +452,9 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
             <button
               type="button"
               onClick={handleRegenerateMatrix}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition shadow-sm"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-semibold text-xs transition shadow-sm"
             >
-              <Sparkles className="w-4 h-4" />
+              <Sparkles className="w-3.5 h-3.5" />
               Regenerar Textos con IA
             </button>
           ) : (
@@ -478,7 +471,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
 
       {/* Explanatory Banner on Rules */}
       {showTips && (
-        <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4 text-xs text-slate-200 space-y-2">
+        <div className="rounded-2xl border border-cyan-400/25 bg-cyan-950/20 backdrop-blur-md p-4 text-xs text-slate-200 space-y-2">
           <div className="font-bold text-cyan-300 text-sm flex items-center gap-2">
             💡 ¿Por qué adaptamos el texto para cada red social?
           </div>

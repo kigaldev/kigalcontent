@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -8,24 +8,16 @@ import {
   ArrowRight,
   BarChart3,
   CheckCircle2,
-  ChevronDown,
-  Cpu,
+  Compass,
   FileText,
   KanbanSquare,
-  Layers,
   Megaphone,
   Plug,
-  Plus,
-  RefreshCw,
   Send,
-  Settings,
-  ShieldCheck,
   Smartphone,
-  Sparkles,
-  Wifi,
-  WifiOff,
   Workflow,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { apiClient } from "@/lib/api";
 import {
@@ -36,7 +28,14 @@ import {
   buildEmptyProjectDetail,
 } from "@/lib/fallbackSeed";
 import { HUMAN_STATE_LABELS } from "@/lib/utils";
-import { useEngineStore, type ActiveStudioTab } from "@/store/useEngineStore";
+import {
+  useEngineStore,
+  type ActiveStudioTab,
+  type PublishingSubTab,
+} from "@/store/useEngineStore";
+import { StudioTopBar } from "@/components/navigation/StudioTopBar";
+import { StudioNavigationDrawer } from "@/components/navigation/StudioNavigationDrawer";
+import { ContentCreationGuideModal } from "@/components/guide/ContentCreationGuideModal";
 import { KanbanPipelineBoard } from "@/components/KanbanPipelineBoard";
 import { ScriptStudioView } from "@/components/ScriptStudioView";
 import { MobileSafeZoneSimulator } from "@/components/MobileSafeZoneSimulator";
@@ -44,101 +43,105 @@ import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { AdsCampaignStudioView } from "@/components/AdsCampaignStudioView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
-import { ProfileBubbleMenu, type CreatorModalTab } from "@/components/ProfileBubbleMenu";
+import type { CreatorModalTab } from "@/components/ProfileBubbleMenu";
 import { BackendStatusModal } from "@/components/BackendStatusModal";
 import { N8nWorkflowsHub } from "@/components/N8nWorkflowsHub";
 import { SocialCredentialsSettings } from "@/components/SocialCredentialsSettings";
 
-interface TabDefinition {
-  id: ActiveStudioTab;
-  stepNumber: number;
-  label: string;
-  shortLabel: string;
-  stepName: string;
-  summary: string;
-  icon: typeof KanbanSquare;
+interface ToolMeta {
+  title: string;
+  description: string;
+  icon: LucideIcon;
 }
 
-const PIPELINE_STEPS: TabDefinition[] = [
-  {
-    id: "pipeline",
-    stepNumber: 1,
-    label: "Ideas",
-    shortLabel: "Ideas",
-    stepName: "Ideas",
-    summary: "Evalúa y prioriza las mejores ideas antes de crear.",
+const TOOL_META: Record<ActiveStudioTab, ToolMeta> = {
+  pipeline: {
+    title: "Tablero de Contenido",
+    description: "Organiza tus ideas por fase de producción y prioriza con IA.",
     icon: KanbanSquare,
   },
-  {
-    id: "script-studio",
-    stepNumber: 2,
-    label: "Guión / Publicación",
-    shortLabel: "Borrador",
-    stepName: "Guión / Publicación",
-    summary: "Edita el guión o borrador de publicación, ganchos y formato visual.",
+  "script-studio": {
+    title: "Taller de Guiones y Copy",
+    description: "Edita el guión maestro, ganchos, teleprompter y textos por red.",
     icon: FileText,
   },
-  {
-    id: "mobile-simulator",
-    stepNumber: 3,
-    label: "Video 9:16",
-    shortLabel: "Video",
-    stepName: "Video 9:16",
-    summary: "Revisa subtítulos, audio, huella nativa y crea tu portada o miniatura.",
+  "mobile-simulator": {
+    title: "Estudio Video 9:16 y Portadas",
+    description: "Revisa zonas seguras, audio, huella nativa y crea tu miniatura.",
     icon: Smartphone,
   },
-  {
-    id: "publishing-hitl",
-    stepNumber: 4,
-    label: "Publicar",
-    shortLabel: "Publicar",
-    stepName: "Publicar",
-    summary: "Planificador visual estilo Metricool (Calendario, Mejores Horas, Autolistas), KigalChat Auto-DM y publicación directa.",
+  "publishing-hitl": {
+    title: "Distribución y Crecimiento",
+    description: "Planificador visual, autolistas, KigalChat Auto-DM y publicación directa.",
     icon: Send,
   },
-];
-
-const UTILITY_TABS: Array<{
-  id: ActiveStudioTab;
-  label: string;
-  summary: string;
-  icon: typeof Megaphone;
-}> = [
-  {
-    id: "ads-studio",
-    label: "Ads",
-    summary: "LinkedIn Ads B2B, Radar Ads Library, Meta Ads, Google RSA y YouTube Ads.",
+  "ads-studio": {
+    title: "Estudio de Ads",
+    description: "LinkedIn B2B, Radar Ads Library, Meta, Google RSA y YouTube Ads.",
     icon: Megaphone,
   },
-  {
-    id: "analytics-rmta",
-    label: "Resultados",
-    summary: "Analiza la retención y el aprendizaje de tus publicaciones.",
+  "analytics-rmta": {
+    title: "Resultados y Retención",
+    description: "Diagnóstico RMT-A, retención y pruebas Watch Time Share.",
     icon: BarChart3,
   },
-];
+  "automations-n8n": {
+    title: "Automatizaciones n8n",
+    description: "Catálogo de los 5 flujos n8n listos para importar y activar.",
+    icon: Workflow,
+  },
+  "connections-apis": {
+    title: "Conexiones Oficiales y LLM",
+    description: "Tokens OAuth de redes sociales y configuración de Ollama / IA.",
+    icon: Plug,
+  },
+};
 
-const ALL_TABS: TabDefinition[] = [
-  ...PIPELINE_STEPS,
-  ...UTILITY_TABS.map((u, idx) => ({
-    ...u,
-    stepNumber: 5 + idx,
-    shortLabel: u.label,
-    stepName: u.label,
-  })),
-];
+interface NextStepShortcut {
+  tab: ActiveStudioTab;
+  publishingSubTab?: PublishingSubTab;
+  label: string;
+}
 
-type DockTab = "n8n" | "apis";
-
-const DOCK_TABS: Array<{ id: DockTab; label: string; icon: typeof Workflow }> = [
-  { id: "n8n", label: "Automatizaciones n8n", icon: Workflow },
-  { id: "apis", label: "Conexiones Oficiales APIs", icon: Plug },
-];
+function getNextStepShortcut(
+  activeTab: ActiveStudioTab,
+  isTextOnlyProject: boolean
+): NextStepShortcut | null {
+  switch (activeTab) {
+    case "script-studio":
+      return isTextOnlyProject
+        ? {
+            tab: "publishing-hitl",
+            publishingSubTab: "planner",
+            label: "Siguiente: Planificador",
+          }
+        : { tab: "mobile-simulator", label: "Siguiente: Estudio 9:16" };
+    case "mobile-simulator":
+      return {
+        tab: "publishing-hitl",
+        publishingSubTab: "planner",
+        label: "Siguiente: Planificador",
+      };
+    case "publishing-hitl":
+      return { tab: "analytics-rmta", label: "Siguiente: Resultados" };
+    case "ads-studio":
+      return {
+        tab: "publishing-hitl",
+        publishingSubTab: "planner",
+        label: "Ir a Planificador",
+      };
+    default:
+      return null;
+  }
+}
 
 export default function KigalContentStudioPage() {
   const {
     activeTab,
     setActiveTab,
+    setNavDrawerOpen,
+    setCreationGuideOpen,
+    navigateToTool,
     backendOnline,
     setBackendOnline,
     projects,
@@ -158,34 +161,33 @@ export default function KigalContentStudioPage() {
   } = useEngineStore();
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isProfileBubbleOpen, setIsProfileBubbleOpen] = useState(false);
   const [profileModalTab, setProfileModalTab] = useState<CreatorModalTab>("general");
   const [isBackendModalOpen, setIsBackendModalOpen] = useState(false);
-  const [dockTab, setDockTab] = useState<DockTab>("n8n");
+  const [createIdeaSignal, setCreateIdeaSignal] = useState(0);
 
-  const dockBaseId = useId();
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const dockTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const dockDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const isBootstrappingRef = useRef(false);
 
   const activeProject =
     projects.find((p) => p.id === selectedProjectId) ?? selectedDetail?.project ?? null;
   const isTextOnlyProject = activeProject?.content_format === "TEXT_ONLY";
+  const currentToolMeta = TOOL_META[activeTab] ?? TOOL_META.pipeline;
+  const CurrentToolIcon = currentToolMeta.icon;
+  const nextShortcut = getNextStepShortcut(activeTab, isTextOnlyProject);
 
-  const effectiveSteps = isTextOnlyProject
-    ? PIPELINE_STEPS.filter((s) => s.id !== "mobile-simulator")
-    : PIPELINE_STEPS;
+  const handleOpenProfile = useCallback((tab: CreatorModalTab = "general") => {
+    setProfileModalTab(tab);
+    setIsProfileModalOpen(true);
+  }, []);
 
-  const currentTab =
-    ALL_TABS.find((t) => t.id === activeTab) ?? PIPELINE_STEPS[0];
-  const currentStepIndex = effectiveSteps.findIndex((t) => t.id === activeTab);
-  const prevTab =
-    currentStepIndex > 0 ? effectiveSteps[currentStepIndex - 1] : null;
-  const nextTab =
-    currentStepIndex >= 0 && currentStepIndex < effectiveSteps.length - 1
-      ? effectiveSteps[currentStepIndex + 1]
-      : null;
+  const handleCreateNewIdea = useCallback(() => {
+    setNavDrawerOpen(false);
+    setCreationGuideOpen(false);
+    setActiveTab("pipeline");
+    setCreateIdeaSignal((n) => n + 1);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [setActiveTab, setCreationGuideOpen, setNavDrawerOpen]);
 
   const loadWorkspaceData = useCallback(
     async (explicitProjectId?: string) => {
@@ -260,6 +262,7 @@ export default function KigalContentStudioPage() {
       setCreatorProfile,
       setProjects,
       setSelectedDetail,
+      setSelectedProjectId,
     ]
   );
 
@@ -314,7 +317,6 @@ export default function KigalContentStudioPage() {
           };
           const eventName = parsed.event ?? "actividad";
           const rawMessage = String(parsed.payload?.message ?? "");
-          // Ignore noisy connection/subscription handshakes when idle
           if (
             eventName === "system" ||
             rawMessage.toLowerCase().includes("subscribed to")
@@ -365,389 +367,122 @@ export default function KigalContentStudioPage() {
     return () => clearTimeout(timer);
   }, [toastMessage, clearToast]);
 
-  const handleTabKeyDown = (
-    e: KeyboardEvent<HTMLButtonElement>,
-    index: number
-  ) => {
-    let nextIndex = index;
-    if (e.key === "ArrowRight") {
-      nextIndex = (index + 1) % PIPELINE_STEPS.length;
-    } else if (e.key === "ArrowLeft") {
-      nextIndex = (index - 1 + PIPELINE_STEPS.length) % PIPELINE_STEPS.length;
-    } else if (e.key === "Home") {
-      nextIndex = 0;
-    } else if (e.key === "End") {
-      nextIndex = PIPELINE_STEPS.length - 1;
-    } else {
-      return;
-    }
-    e.preventDefault();
-    const targetTab = PIPELINE_STEPS[nextIndex];
-    setActiveTab(targetTab.id);
-    tabRefs.current[nextIndex]?.focus();
-    tabRefs.current[nextIndex]?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
-  };
-
-  const handleDockTabKeyDown = (
-    e: KeyboardEvent<HTMLButtonElement>,
-    index: number
-  ) => {
-    let nextIndex = index;
-    if (e.key === "ArrowRight") {
-      nextIndex = (index + 1) % DOCK_TABS.length;
-    } else if (e.key === "ArrowLeft") {
-      nextIndex = (index - 1 + DOCK_TABS.length) % DOCK_TABS.length;
-    } else if (e.key === "Home") {
-      nextIndex = 0;
-    } else if (e.key === "End") {
-      nextIndex = DOCK_TABS.length - 1;
-    } else {
-      return;
-    }
-    e.preventDefault();
-    setDockTab(DOCK_TABS[nextIndex].id);
-    dockTabRefs.current[nextIndex]?.focus();
-    dockTabRefs.current[nextIndex]?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
-  };
-
-  const handleOpenAutomationDock = () => {
-    if (dockDetailsRef.current) {
-      dockDetailsRef.current.open = true;
-      dockDetailsRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--kc-canvas)] text-slate-100">
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 border-b border-[var(--kc-border)] bg-[var(--kc-canvas)]/92 backdrop-blur-md">
-        <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-            {/* Brand + Pro Studio OS Badge */}
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500/20 via-indigo-500/20 to-emerald-500/20 border border-cyan-500/35 shadow-inner">
-                <Cpu className="h-5 w-5 text-cyan-300" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base font-bold tracking-tight text-white sm:text-lg">
-                    KigalContent
-                  </h1>
-                  <span className="inline-flex items-center rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-cyan-300">
-                    Pro Studio OS
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  {creatorProfile
-                    ? `${creatorProfile.name} · ${creatorProfile.niche}`
-                    : "Estudio profesional todo-en-uno de contenido, video 9:16 y Ads"}
-                </p>
-              </div>
-            </div>
+    <div className="min-h-screen flex flex-col text-slate-100">
+      {/* Single-Row Glassy TopBar */}
+      <StudioTopBar
+        onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
+        onOpenProfile={handleOpenProfile}
+        onOpenBackendModal={() => setIsBackendModalOpen(true)}
+        onCreateNewIdea={handleCreateNewIdea}
+      />
 
-            {/* Project Selector, Status, Profile & Quick Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              {projects.length > 0 ? (
-                <label className="flex items-center gap-2 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-panel)] px-2.5 py-1.5 text-xs">
-                  <Layers className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                  <span className="text-slate-400 hidden md:inline">Video Activo:</span>
-                  <select
-                    aria-label="Seleccionar video activo"
-                    value={selectedProjectId ?? ""}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                    className="max-w-[240px] truncate bg-transparent font-semibold text-slate-100 focus:outline-none"
-                  >
-                    {projects.map((project) => (
-                      <option
-                        key={project.id}
-                        value={project.id}
-                        className="bg-[var(--kc-panel)] text-slate-100"
-                      >
-                        [{project.asset_code}] {project.working_title} —{" "}
-                        {HUMAN_STATE_LABELS[project.current_state] ?? project.current_state}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("pipeline")}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-cyan-500/50 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer"
-                  title="Crea tu primer video en el Paso 1: Ideas"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>+ Crear Primera Idea</span>
-                </button>
-              )}
+      {/* Left Slide-Over Hamburger Navigation Drawer */}
+      <StudioNavigationDrawer
+        onOpenProfile={handleOpenProfile}
+        onCreateNewIdea={handleCreateNewIdea}
+      />
 
-              <button
-                type="button"
-                onClick={() => setIsBackendModalOpen(true)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition cursor-pointer hover:opacity-90 ${
-                  backendOnline
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:border-amber-400"
-                }`}
-                title={
-                  backendOnline
-                    ? `Servidor conectado (${apiClient.apiBase}). Clic para ver detalles.`
-                    : "Backend sin conexión: no se muestran datos. Haz clic para conectar con tu servidor de Railway o el miniPC."
-                }
-              >
-                {backendOnline ? (
-                  <Wifi className="h-3.5 w-3.5" />
-                ) : (
-                  <WifiOff className="h-3.5 w-3.5" />
-                )}
-                <span>{backendOnline ? "Servidor Online" : "Backend sin conexión"}</span>
-              </button>
+      {/* Interactive Step-by-Step Guide Modal */}
+      <ContentCreationGuideModal
+        onOpenProfile={handleOpenProfile}
+        onCreateNewIdea={handleCreateNewIdea}
+      />
 
-              {/* Top-Right Profile Bubble (Paso 0) */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsProfileBubbleOpen((prev) => !prev)}
-                  aria-expanded={isProfileBubbleOpen}
-                  className="inline-flex items-center gap-2 rounded-full border border-cyan-500/50 bg-gradient-to-r from-cyan-950/70 to-violet-950/70 pl-1.5 pr-3 py-1 text-xs font-semibold text-cyan-200 hover:border-cyan-400 hover:text-white transition shadow-sm shadow-cyan-500/10"
-                  title="Paso 0: Perfil, Repos GitHub, Lead Magnets y ManyChat"
-                >
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 flex items-center justify-center text-[11px] text-white font-bold">
-                    {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
-                  </div>
-                  <span className="hidden sm:inline">
-                    {creatorProfile?.name || "Perfil"}
-                  </span>
-                  <span className="rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">
-                    Paso 0
-                  </span>
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                </button>
-
-                <ProfileBubbleMenu
-                  isOpen={isProfileBubbleOpen}
-                  onClose={() => setIsProfileBubbleOpen(false)}
-                  creatorProfile={creatorProfile}
-                  onOpenPaso0={(tab = "general") => {
-                    setProfileModalTab(tab);
-                    setIsProfileModalOpen(true);
-                  }}
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={() => void loadWorkspaceData(selectedProjectId ?? undefined)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-panel)] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
-                title="Actualizar datos del proyecto"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Actualizar</span>
-              </button>
-
-              <div className="inline-flex items-center rounded-full border border-violet-500/40 bg-violet-950/30 p-0.5 gap-0.5">
-                {UTILITY_TABS.map((ut) => {
-                  const UIcon = ut.icon;
-                  const active = activeTab === ut.id;
-                  return (
-                    <button
-                      key={ut.id}
-                      type="button"
-                      onClick={() => setActiveTab(ut.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                        active
-                          ? "bg-violet-500 text-slate-950 shadow-sm"
-                          : "text-violet-200 hover:bg-violet-500/20 hover:text-white"
-                      }`}
-                      title={ut.summary}
-                    >
-                      <UIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                      <span>{ut.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleOpenAutomationDock}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-surface)] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-cyan-500/50 hover:text-white"
-                title="Abrir dock de Automatizaciones n8n y Conexiones Oficiales APIs"
-              >
-                <Settings className="h-3.5 w-3.5 text-cyan-400" aria-hidden="true" />
-                <span className="hidden lg:inline">Automatizaciones y APIs</span>
-                <span className="lg:hidden">APIs</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 4-Step Content Creation Navigation */}
-          <div className="flex items-center justify-between gap-4 border-t border-[var(--kc-border)]/70 pt-1">
-            <div
-              role="tablist"
-              aria-label="Pasos de creación de contenido"
-              className="flex items-center gap-1 sm:gap-2"
-            >
-              {PIPELINE_STEPS.map((tab, index) => {
-                const Icon = tab.icon;
-                const isSelected = activeTab === tab.id;
-                const isSkippedStep = isTextOnlyProject && tab.id === "mobile-simulator";
-                return (
-                  <button
-                    key={tab.id}
-                    ref={(el) => {
-                      tabRefs.current[index] = el;
-                    }}
-                    id={`tab-${tab.id}`}
-                    role="tab"
-                    type="button"
-                    aria-selected={isSelected}
-                    tabIndex={isSelected ? 0 : -1}
-                    onClick={() => {
-                      setActiveTab(tab.id);
-                      tabRefs.current[index]?.scrollIntoView({
-                        block: "nearest",
-                        inline: "nearest",
-                      });
-                    }}
-                    onKeyDown={(e) => handleTabKeyDown(e, index)}
-                    className={`inline-flex items-center gap-2 px-3 py-2.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
-                      isSelected
-                        ? "text-cyan-300"
-                        : isSkippedStep
-                        ? "text-slate-600 hover:text-slate-400 line-through decoration-slate-600/60"
-                        : "text-slate-400 hover:text-slate-200"
-                    }`}
-                    title={
-                      isSkippedStep
-                        ? "Omitido automáticamente en publicaciones de Solo Texto (puedes abrirlo si decides añadir video)"
-                        : tab.summary
-                    }
-                  >
-                    <span
-                      className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
-                        isSelected
-                          ? "bg-cyan-400 text-slate-950"
-                          : isSkippedStep
-                          ? "bg-slate-900 text-slate-600 border border-slate-800"
-                          : "bg-[var(--kc-surface)] text-slate-300 border border-[var(--kc-border)]"
-                      }`}
-                    >
-                      {tab.stepNumber}
-                    </span>
-                    <Icon
-                      className="h-3.5 w-3.5 hidden sm:inline shrink-0 opacity-85"
-                      aria-hidden="true"
-                    />
-                    <span className="hidden md:inline">{tab.label}</span>
-                    <span className="md:hidden">{tab.shortLabel}</span>
-                    {isSkippedStep && (
-                      <span className="hidden lg:inline rounded bg-slate-800/80 px-1.5 py-0.5 text-[9px] text-slate-500 no-underline">
-                        Omitido
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {activeProject && (
-              <div className="hidden xl:flex items-center gap-2 text-xs text-slate-400 pb-1 shrink-0">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                <span>Fase actual:</span>
-                <span className="rounded bg-[var(--kc-panel)] border border-[var(--kc-border)] px-2 py-0.5 text-[11px] font-semibold text-cyan-300">
-                  {HUMAN_STATE_LABELS[activeProject.current_state] ??
-                    activeProject.current_state}
-                </span>
-                <span className="text-slate-600">|</span>
-                <span title="Prioridad calculada de 1 a 10">Prioridad:</span>
-                <span className="font-mono font-bold text-white">
-                  {activeProject.ice_score.toFixed(1)}/10
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Visual Step-by-Step Flow Bar (non-sticky for content-first focus) */}
-      <div className="border-b border-[var(--kc-border)]/80 bg-[var(--kc-panel)]/70 py-2.5">
-        <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-slate-300">
-              <span className="rounded-md bg-cyan-500/20 px-2 py-0.5 font-bold text-cyan-300 text-[11px]">
-                {currentTab.stepNumber}. {currentTab.label}
-              </span>
-              <span className="text-slate-500">—</span>
-              <span className="text-slate-300">{currentTab.summary}</span>
-            </div>
-
-            {/* Quick Next / Prev Actions */}
-            <div className="flex items-center gap-2">
-              {prevTab && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab(prevTab.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--kc-border)] bg-[var(--kc-canvas)] px-2.5 py-1 text-slate-400 transition hover:border-slate-600 hover:text-white"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  <span>Anterior: {prevTab.stepName}</span>
-                </button>
-              )}
-              {nextTab && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab(nextTab.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 font-semibold text-cyan-200 transition hover:bg-cyan-500/20 hover:text-white"
-                >
-                  <span>Siguiente: {nextTab.stepName}</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Live Activity Ticker (if any) */}
-      {liveEvents.length > 0 && (
-        <div className="border-b border-[var(--kc-border)]/60 bg-[var(--kc-panel)]/40">
-          <div className="mx-auto flex max-w-[1600px] items-center gap-3 overflow-x-auto px-4 py-1.5 text-xs text-slate-300 sm:px-6">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-cyan-400 shrink-0">
-              <Activity className="h-3.5 w-3.5 animate-pulse" />
-              Actividad en vivo:
+      {/* Main Workspace Area */}
+      <main className="mx-auto w-full max-w-[1640px] flex-1 px-4 py-5 sm:px-6 space-y-5">
+        {/* Subtle Live Activity Strip (only when real events arrive) */}
+        {liveEvents.length > 0 && (
+          <div className="glass-pill flex items-center gap-2.5 overflow-x-auto rounded-xl px-3.5 py-2 text-xs text-slate-300">
+            <span className="inline-flex items-center gap-1.5 font-semibold text-sky-300 shrink-0">
+              <Activity className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
+              En vivo:
             </span>
             {liveEvents.slice(0, 3).map((ev, idx) => (
               <span
                 key={`${ev.timestamp}-${idx}`}
-                className="inline-flex items-center gap-1.5 rounded bg-[var(--kc-surface)] border border-[var(--kc-border)] px-2 py-0.5 text-[11px] shrink-0"
+                className="inline-flex items-center rounded-lg border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-slate-200 truncate max-w-[280px] shrink-0"
               >
-                <span className="text-slate-300 truncate max-w-[280px]">
-                  {ev.summary}
-                </span>
+                {ev.summary}
               </span>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Main Workspace Area */}
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6">
-        <section
-          id={`panel-${activeTab}`}
-          role="tabpanel"
-          aria-labelledby={`tab-${activeTab}`}
-          className="space-y-6"
-        >
+        {/* Slim Contextual Tool Bar inside sub-tools */}
+        {activeTab !== "pipeline" && (
+          <div className="glass-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-3 min-w-0">
+              <button
+                type="button"
+                onClick={() => setActiveTab("pipeline")}
+                className="glass-pill inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-sky-400/40 hover:text-white transition"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+                <span>Volver al Tablero</span>
+              </button>
+
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-sky-400/30 bg-sky-500/15 text-sky-300">
+                  <CurrentToolIcon className="h-4 w-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm font-bold text-white truncate">
+                      {currentToolMeta.title}
+                    </h2>
+                    {activeProject &&
+                      activeTab !== "automations-n8n" &&
+                      activeTab !== "connections-apis" && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-0.5 text-[11px] text-slate-200 max-w-[260px] truncate">
+                          <span className="font-mono font-bold text-sky-300">
+                            {activeProject.asset_code}
+                          </span>
+                          <span className="truncate">{activeProject.working_title}</span>
+                        </span>
+                      )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {currentToolMeta.description}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCreationGuideOpen(true)}
+                className="glass-pill inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-sky-200 hover:border-sky-400/40 hover:text-white transition"
+              >
+                <Compass className="h-3.5 w-3.5 text-sky-400" aria-hidden="true" />
+                <span>Guía paso a paso</span>
+              </button>
+
+              {nextShortcut && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateToTool(nextShortcut.tab, {
+                      publishingSubTab: nextShortcut.publishingSubTab,
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-sky-400 hover:bg-sky-300 px-3.5 py-1.5 text-xs font-bold text-slate-950 transition shadow-sm"
+                >
+                  <span>{nextShortcut.label}</span>
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Active Tool View */}
+        <section aria-label={currentToolMeta.title} className="space-y-6">
           {activeTab === "pipeline" && (
             <KanbanPipelineBoard
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
+              openCreateFormSignal={createIdeaSignal}
             />
           )}
           {activeTab === "script-studio" && (
@@ -775,135 +510,9 @@ export default function KigalContentStudioPage() {
               onRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
             />
           )}
+          {activeTab === "automations-n8n" && <N8nWorkflowsHub />}
+          {activeTab === "connections-apis" && <SocialCredentialsSettings />}
         </section>
-
-        {/* Step-by-Step Bottom Footer Navigation */}
-        <div className="nle-panel mt-10 flex flex-wrap items-center justify-between gap-4 p-4">
-          <div>
-            <span className="text-xs font-semibold text-cyan-400">
-              {currentTab.stepNumber}. {currentTab.label}
-            </span>
-            <p className="text-xs text-slate-400 mt-0.5">{currentTab.summary}</p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {prevTab && (
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab(prevTab.id);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-[var(--kc-border)] bg-[var(--kc-canvas)] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Paso Anterior: {prevTab.stepName}</span>
-              </button>
-            )}
-            {nextTab && (
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab(nextTab.id);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-500 hover:bg-cyan-400 px-4 py-2 text-xs font-bold text-slate-950 transition"
-              >
-                <span>Siguiente Paso: {nextTab.stepName}</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Bottom Collapsible Dock: Automatizaciones n8n & Conexiones Oficiales (APIs) */}
-        <details
-          ref={dockDetailsRef}
-          className="nle-panel mt-6 overflow-hidden scroll-mt-24"
-        >
-          <summary className="flex items-center justify-between gap-3 px-4 py-3.5 text-xs sm:text-sm font-semibold text-slate-100 hover:bg-white/[0.02] transition select-none">
-            <span className="flex items-center gap-2.5 min-w-0">
-              <ChevronDown
-                className="accordion-chevron h-4 w-4 text-cyan-400"
-                aria-hidden="true"
-              />
-              <span className="truncate">
-                ⚡ Automatizaciones n8n &amp; 🔌 Conexiones Oficiales (APIs)
-              </span>
-            </span>
-            <span className="hidden md:inline-flex items-center gap-2 text-[11px] font-normal text-slate-400 shrink-0">
-              5 flujos n8n · LLM Router · Credenciales de redes
-            </span>
-          </summary>
-
-          <div className="border-t border-[var(--kc-border)] p-4 sm:p-5 space-y-5">
-            {/* 2-Tab Switcher inside Collapsible Dock */}
-            <div className="border-b border-[var(--kc-border)]">
-              <div
-                role="tablist"
-                aria-label="Automatizaciones y Conexiones Oficiales"
-                className="flex items-center gap-2"
-              >
-                {DOCK_TABS.map((dTab, index) => {
-                  const Icon = dTab.icon;
-                  const isSelected = dockTab === dTab.id;
-                  return (
-                    <button
-                      key={dTab.id}
-                      ref={(el) => {
-                        dockTabRefs.current[index] = el;
-                      }}
-                      id={`${dockBaseId}-tab-${dTab.id}`}
-                      role="tab"
-                      type="button"
-                      aria-selected={isSelected}
-                      tabIndex={isSelected ? 0 : -1}
-                      onClick={() => {
-                        setDockTab(dTab.id);
-                        dockTabRefs.current[index]?.scrollIntoView({
-                          block: "nearest",
-                          inline: "nearest",
-                        });
-                      }}
-                      onKeyDown={(e) => handleDockTabKeyDown(e, index)}
-                      className={`inline-flex items-center gap-2 px-3 py-2.5 text-xs font-semibold transition sm:px-4 sm:text-sm ${
-                        isSelected
-                          ? "text-cyan-300"
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span>{dTab.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Dock Tab Panels (no padding/borders on role="tabpanel" itself per modern-web-guidance: tabs) */}
-            <div
-              role="tabpanel"
-              id={`${dockBaseId}-panel-n8n`}
-              aria-labelledby={`${dockBaseId}-tab-n8n`}
-              hidden={dockTab !== "n8n"}
-            >
-              <div>
-                <N8nWorkflowsHub />
-              </div>
-            </div>
-
-            <div
-              role="tabpanel"
-              id={`${dockBaseId}-panel-apis`}
-              aria-labelledby={`${dockBaseId}-tab-apis`}
-              hidden={dockTab !== "apis"}
-            >
-              <div>
-                <SocialCredentialsSettings />
-              </div>
-            </div>
-          </div>
-        </details>
       </main>
 
       {/* Creator Context Engine Profile Modal (Paso 0) */}
@@ -929,7 +538,7 @@ export default function KigalContentStudioPage() {
         <div
           role="status"
           aria-live="polite"
-          className="nle-panel fixed bottom-5 right-5 z-50 flex max-w-md items-start gap-3 p-4 text-sm backdrop-blur"
+          className="glass-panel fixed bottom-5 right-5 z-50 flex max-w-md items-start gap-3 p-4 text-sm"
         >
           {toastMessage.type === "error" ? (
             <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />
@@ -941,7 +550,7 @@ export default function KigalContentStudioPage() {
             type="button"
             onClick={clearToast}
             aria-label="Cerrar notificación"
-            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+            className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition"
           >
             <X className="h-4 w-4" />
           </button>

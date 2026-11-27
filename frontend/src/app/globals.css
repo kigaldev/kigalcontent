@@ -16,22 +16,24 @@
 :root {
   color-scheme: dark;
 
-  /* KigalContent Pro NLE Dark Studio Tokens (OLED Pitch Black + Astryx High-Contrast Surfaces) */
-  --kc-canvas: #020306;
-  --kc-panel: #07090e;
-  --kc-surface: #0c111d;
-  --kc-border: #1e2638;
-  --kc-accent: #22d3ee;
+  /* KigalContent Obsidian Liquid Glass Studio Tokens */
+  --kc-canvas: #050811;
+  --kc-panel: rgba(13, 19, 34, 0.62);
+  --kc-surface: rgba(18, 26, 46, 0.56);
+  --kc-border: rgba(255, 255, 255, 0.09);
+  --kc-border-strong: rgba(255, 255, 255, 0.16);
+  --kc-accent: #38bdf8;
+  --kc-accent-glow: rgba(56, 189, 248, 0.22);
   --kc-text: #f1f5f9;
   --kc-text-muted: #94a3b8;
 
   /* Derived tints via color-mix(in oklab, ...) — never in oklch with neutrals */
-  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 84%, var(--kc-panel));
-  --kc-border-specular: color-mix(in oklab, #334155 68%, white 18%);
-  --kc-specular-highlight: color-mix(in oklab, white 7%, transparent);
+  --kc-panel-elevated: color-mix(in oklab, var(--kc-surface) 86%, var(--kc-panel));
+  --kc-border-specular: color-mix(in oklab, var(--kc-border-strong) 82%, white 18%);
+  --kc-specular-highlight: color-mix(in oklab, white 10%, transparent);
   --kc-accent-soft: color-mix(in oklab, var(--kc-accent) 16%, transparent);
   --kc-accent-border: color-mix(in oklab, var(--kc-accent) 44%, var(--kc-border));
-  --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border) 60%, white 25%);
+  --kc-scrollbar-thumb: color-mix(in oklab, var(--kc-border-strong) 70%, white 22%);
 
   accent-color: var(--kc-accent);
   scrollbar-color: var(--kc-scrollbar-thumb) var(--kc-canvas);
@@ -55,19 +57,83 @@
 body {
   background-color: var(--kc-canvas);
   color: var(--kc-text);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Pro NLE Studio Panel: specular top bevel, crisp border, deep shadow */
-.nle-panel {
-  background: linear-gradient(180deg, var(--kc-panel-elevated) 0%, var(--kc-panel) 100%);
-  border: 1px solid var(--kc-border);
-  border-block-start-color: var(--kc-border-specular);
-  border-radius: 0.875rem;
-  box-shadow:
-    inset 0 1px 0 0 var(--kc-specular-highlight),
-    0 18px 40px -16px rgba(0, 0, 0, 0.78),
-    0 2px 8px -2px rgba(0, 0, 0, 0.5);
+.font-mono {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.kc-ambient-bg {
+  background-color: var(--kc-canvas);
+  background-image:
+    radial-gradient(ellipse 65% 50% at 12% 0%, rgba(56, 189, 248, 0.09), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 88% 6%, rgba(99, 102, 241, 0.08), transparent 72%),
+    radial-gradient(ellipse 70% 45% at 50% 100%, rgba(20, 184, 166, 0.05), transparent 70%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .glass-topbar {
+    background: rgba(7, 11, 22, 0.72);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 8px 32px -12px rgba(0, 0, 0, 0.65),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .glass-drawer {
+    background: rgba(8, 13, 25, 0.86);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border-right: 1px solid rgba(255, 255, 255, 0.11);
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.65);
+  }
+
+  /* Pro NLE Liquid Glass Panel: frosted translucency, specular top rim, deep shadow */
+  .glass-panel,
+  .nle-panel {
+    background: linear-gradient(155deg, rgba(255, 255, 255, 0.06) 0%, rgba(12, 18, 34, 0.62) 100%);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 1rem;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 20px 44px -18px rgba(0, 0, 0, 0.72);
+  }
+
+  .glass-card {
+    background: rgba(15, 23, 42, 0.56);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .glass-card:hover {
+    border-color: rgba(56, 189, 248, 0.38);
+    transform: translateY(-1px);
+    box-shadow:
+      0 12px 28px -12px rgba(0, 0, 0, 0.65),
+      0 0 24px -8px var(--kc-accent-glow);
+  }
+
+  .glass-column {
+    background: rgba(10, 15, 29, 0.52);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-pill {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
 }
 
 /* Native <details> & ::details-content smooth disclosure (modern-web-guidance: accordion) */
@@ -118,19 +184,23 @@ details:not([open])::details-content {
 dialog:modal {
   overscroll-behavior: contain;
   margin: auto;
-  border: 1px solid var(--kc-border);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 1rem;
-  background: var(--kc-panel);
+  background: rgba(10, 15, 28, 0.92);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
   color: var(--kc-text);
   padding: 0;
   max-width: min(94vw, 38rem);
   width: 100%;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 28px 64px -16px rgba(0, 0, 0, 0.85);
 }
 
 dialog::backdrop {
   background: rgba(4, 6, 12, 0.82);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
   overflow: hidden;
   overscroll-behavior: contain;
 }
@@ -154,8 +224,10 @@ dialog.wide-dialog:modal {
 dialog.composer-dialog:modal {
   max-width: min(96vw, 76rem);
   max-height: 92dvh;
-  border-color: var(--kc-border-specular);
-  background: var(--kc-panel);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 15, 28, 0.92);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
   overscroll-behavior: contain;
 }
 

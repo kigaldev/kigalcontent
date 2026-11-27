@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Bot,
@@ -10,7 +10,6 @@ import {
   Clock,
   FileText,
   Film,
-  HelpCircle,
   Instagram,
   Layers,
   Loader2,
@@ -50,6 +49,7 @@ import type {
 
 interface KanbanPipelineBoardProps {
   onRefresh: () => Promise<void>;
+  openCreateFormSignal?: number;
 }
 
 const NEXT_STATE_MAP: Partial<Record<FSMState, FSMState>> = {
@@ -61,6 +61,66 @@ const NEXT_STATE_MAP: Partial<Record<FSMState, FSMState>> = {
   HITL_PENDING_PUBLISH: "PUBLISHED_LIVE",
   PUBLISHED_LIVE: "AUDITED_CLOSED_LOOP",
 };
+
+const COLUMN_ACCENT_STYLES: Partial<Record<FSMState, string>> = {
+  CAPTURED: "border-slate-500/25",
+  RESEARCHED_TRIAGED: "border-sky-400/25",
+  SCRIPTED_PACKAGED: "border-cyan-400/30",
+  HITL_PENDING_PRODUCTION: "border-amber-400/30",
+  PRODUCED_VALIDATED: "border-teal-400/25",
+  HITL_PENDING_PUBLISH: "border-rose-400/25",
+  PUBLISHED_LIVE: "border-emerald-400/30",
+  AUDITED_CLOSED_LOOP: "border-violet-400/25",
+};
+
+const COLUMN_DOT_STYLES: Partial<Record<FSMState, string>> = {
+  CAPTURED: "bg-slate-400",
+  RESEARCHED_TRIAGED: "bg-sky-400",
+  SCRIPTED_PACKAGED: "bg-cyan-400",
+  HITL_PENDING_PRODUCTION: "bg-amber-400",
+  PRODUCED_VALIDATED: "bg-teal-400",
+  HITL_PENDING_PUBLISH: "bg-rose-400",
+  PUBLISHED_LIVE: "bg-emerald-400",
+  AUDITED_CLOSED_LOOP: "bg-violet-400",
+};
+
+function getCardStageAction(
+  state: FSMState,
+  format: ContentFormat
+): {
+  label: string;
+  tab: "script-studio" | "mobile-simulator" | "publishing-hitl" | "analytics-rmta";
+  publishingSubTab?: "planner";
+} {
+  switch (state) {
+    case "HITL_PENDING_PRODUCTION":
+      return {
+        label: format === "TEXT_ONLY" ? "Revisar Borrador" : "Estudio 9:16",
+        tab: format === "TEXT_ONLY" ? "script-studio" : "mobile-simulator",
+      };
+    case "PRODUCED_VALIDATED":
+    case "HITL_PENDING_PUBLISH":
+      return {
+        label: "Programar / Publicar",
+        tab: "publishing-hitl",
+        publishingSubTab: "planner",
+      };
+    case "PUBLISHED_LIVE":
+    case "AUDITED_CLOSED_LOOP":
+      return {
+        label: "Ver Resultados",
+        tab: "analytics-rmta",
+      };
+    case "CAPTURED":
+    case "RESEARCHED_TRIAGED":
+    case "SCRIPTED_PACKAGED":
+    default:
+      return {
+        label: format === "TEXT_ONLY" ? "Ver Borrador" : "Editar Guión",
+        tab: "script-studio",
+      };
+  }
+}
 
 const AVAILABLE_PLATFORMS: Array<{
   id: ScriptTargetPlatform;
@@ -112,20 +172,29 @@ const AVAILABLE_PLATFORMS: Array<{
   },
 ];
 
-export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
+export function KanbanPipelineBoard({
+  onRefresh,
+  openCreateFormSignal,
+}: KanbanPipelineBoardProps) {
   const {
     projects,
     selectedProjectId,
     setSelectedProjectId,
-    setActiveTab,
+    setCreationGuideOpen,
+    navigateToTool,
     showToast,
     backendOnline,
     setProjects,
   } = useEngineStore();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
   const [radarFilter, setRadarFilter] = useState<"all" | "radar" | "manual">("all");
+
+  useEffect(() => {
+    if (openCreateFormSignal && openCreateFormSignal > 0) {
+      setShowCreateForm(true);
+    }
+  }, [openCreateFormSignal]);
 
   // Idea Form State
   const [title, setTitle] = useState("");
@@ -214,6 +283,30 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
       ).length,
     [projects]
   );
+
+  const kpis = useMemo(() => {
+    const inProduction = projects.filter(
+      (p) =>
+        p.current_state === "SCRIPTED_PACKAGED" ||
+        p.current_state === "HITL_PENDING_PRODUCTION"
+    ).length;
+    const readyToPublish = projects.filter(
+      (p) =>
+        p.current_state === "PRODUCED_VALIDATED" ||
+        p.current_state === "HITL_PENDING_PUBLISH"
+    ).length;
+    const published = projects.filter(
+      (p) =>
+        p.current_state === "PUBLISHED_LIVE" ||
+        p.current_state === "AUDITED_CLOSED_LOOP"
+    ).length;
+    return {
+      total: projects.length,
+      inProduction,
+      readyToPublish,
+      published,
+    };
+  }, [projects]);
 
   const filteredProjects = useMemo(() => {
     if (radarFilter === "radar") {
@@ -446,127 +539,114 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
   return (
     <div className="space-y-6">
-      {/* Step Header & Radar Matutino Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-[#07090e] border border-slate-800 rounded-xl p-4 sm:p-5 shadow-lg">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-xs font-bold text-slate-950">
-              1
-            </span>
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              Paso 1: Tablero de Ideas y Prioridades
+      {/* Glassy Home Command Strip */}
+      <div className="glass-panel p-4 sm:p-5 space-y-4">
+        {/* Top Row: Title + Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1 min-w-0">
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+              Tablero de Contenido
             </h2>
+            <p className="text-xs text-slate-400">
+              Gestiona tus ideas de extremo a extremo o sigue la guía paso a paso.
+            </p>
           </div>
-          <p className="text-xs text-slate-400">
-            Organiza tus ideas según su fase de producción, recibe el material automático del <strong>Radar Matutino</strong> y calcula objetivamente la prioridad con IA antes de grabar.
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Prominent Frosted Sky/Cyan Step-by-Step Guide Trigger */}
+            <button
+              type="button"
+              onClick={() => setCreationGuideOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-sky-400/40 bg-sky-500/15 hover:bg-sky-400/25 text-sky-200 hover:text-white text-xs font-semibold backdrop-blur-md shadow-[0_0_20px_rgba(56,189,248,0.18)] transition"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-sky-300" />
+              <span>Guía Paso a Paso</span>
+            </button>
+
+            {/* Primary CTA: + Nueva Idea */}
+            <button
+              type="button"
+              onClick={() => setShowCreateForm((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs transition shadow-[0_0_18px_rgba(34,211,238,0.22)]"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>{showCreateForm ? "Cerrar Formulario" : "+ Nueva Idea"}</span>
+            </button>
+
+            {/* Secondary Glassy Button: Copiloto IA */}
+            <button
+              type="button"
+              onClick={() => setShowChatCopilot((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold backdrop-blur-md transition ${
+                showChatCopilot
+                  ? "bg-violet-500/25 text-white border-violet-400/60 ring-1 ring-violet-400/40"
+                  : "bg-white/5 hover:bg-white/10 border-white/15 text-violet-200 hover:text-white"
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-violet-300" />
+              <span>{showChatCopilot ? "Cerrar Copiloto" : "Copiloto IA"}</span>
+            </button>
+
+            {/* Compact Glassy Segmented Filter */}
+            <div className="flex items-center bg-white/[0.04] border border-white/10 rounded-xl p-0.5 text-xs font-medium backdrop-blur-md">
+              <button
+                type="button"
+                onClick={() => setRadarFilter("all")}
+                className={`px-2.5 py-1.5 rounded-lg transition ${
+                  radarFilter === "all"
+                    ? "bg-white/15 text-white font-semibold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Todos ({projects.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRadarFilter("radar")}
+                className={`px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 ${
+                  radarFilter === "radar"
+                    ? "bg-amber-500/20 text-amber-200 font-semibold"
+                    : "text-slate-400 hover:text-amber-200"
+                }`}
+              >
+                <Radio className="w-3 h-3 text-amber-400" />
+                <span>Radar ({radarCount})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRadarFilter("manual")}
+                className={`px-2.5 py-1.5 rounded-lg transition ${
+                  radarFilter === "manual"
+                    ? "bg-white/15 text-white font-semibold"
+                    : "text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Manuales ({manualCount})
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Filters and Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Radar Matutino Filter Chips */}
-          <div className="flex items-center bg-[#020306] border border-slate-800 rounded-lg p-0.5 text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => setRadarFilter("all")}
-              className={`px-2.5 py-1.5 rounded-md transition ${
-                radarFilter === "all"
-                  ? "bg-slate-800 text-white font-bold"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Todos ({projects.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setRadarFilter("radar")}
-              className={`px-2.5 py-1.5 rounded-md transition flex items-center gap-1.5 ${
-                radarFilter === "radar"
-                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold"
-                  : "text-slate-400 hover:text-amber-300"
-              }`}
-            >
-              <Radio className="w-3 h-3 text-amber-400" />
-              <span>Radar ({radarCount})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setRadarFilter("manual")}
-              className={`px-2.5 py-1.5 rounded-md transition ${
-                radarFilter === "manual"
-                  ? "bg-slate-800 text-white font-bold"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Manuales ({manualCount})
-            </button>
+        {/* Bottom Row: 4 Compact Glassy KPI Pills */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-3 border-t border-white/10">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 flex items-center justify-between backdrop-blur-sm">
+            <span className="text-[11px] font-medium text-slate-400">Total</span>
+            <span className="text-sm font-mono font-bold text-white">{kpis.total}</span>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setShowChatCopilot((v) => !v)}
-            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border font-bold text-xs transition shadow-md ${
-              showChatCopilot
-                ? "bg-gradient-to-r from-violet-600 to-cyan-600 text-white border-cyan-400 ring-2 ring-cyan-400/40"
-                : "bg-slate-900/90 hover:bg-slate-800 border-violet-500/50 text-violet-300 hover:text-white"
-            }`}
-          >
-            <MessageSquare className="w-4 h-4 text-violet-400 animate-pulse" />
-            <span>{showChatCopilot ? "Cerrar Copiloto" : "💬 Copiloto Estratega IA"}</span>
-            <span className="hidden sm:inline text-[9px] px-1.5 py-0.5 rounded bg-violet-500/30 text-violet-200 uppercase font-mono">
-              Anti-slop
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowGuide((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white text-xs font-medium transition"
-          >
-            <HelpCircle className="w-4 h-4 text-cyan-400" />
-            <span>{showGuide ? "Ocultar Guía" : "¿Cómo funciona?"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowCreateForm((v) => !v)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs sm:text-sm transition shadow-sm"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>{showCreateForm ? "Cerrar Formulario" : "Añadir Nueva Idea"}</span>
-          </button>
+          <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/[0.06] px-3 py-2 flex items-center justify-between backdrop-blur-sm">
+            <span className="text-[11px] font-medium text-cyan-200/80">En Guión / Grabación</span>
+            <span className="text-sm font-mono font-bold text-cyan-300">{kpis.inProduction}</span>
+          </div>
+          <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.06] px-3 py-2 flex items-center justify-between backdrop-blur-sm">
+            <span className="text-[11px] font-medium text-amber-200/80">Listas para Publicar</span>
+            <span className="text-sm font-mono font-bold text-amber-300">{kpis.readyToPublish}</span>
+          </div>
+          <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-3 py-2 flex items-center justify-between backdrop-blur-sm">
+            <span className="text-[11px] font-medium text-emerald-200/80">Publicadas</span>
+            <span className="text-sm font-mono font-bold text-emerald-300">{kpis.published}</span>
+          </div>
         </div>
       </div>
-
-      {/* Explanatory Box (Plain Language) */}
-      {showGuide && (
-        <div className="rounded-xl border border-cyan-500/30 bg-[#070c14] p-4 text-xs text-slate-200 space-y-2">
-          <div className="flex items-center gap-2 font-bold text-cyan-300 text-sm">
-            <Sparkles className="w-4 h-4" />
-            ¿Cómo saber qué idea grabar primero? (Prioridad Calculada con IA)
-          </div>
-          <p className="leading-relaxed">
-            Para evitar perder horas grabando videos que nadie verá, nuestro director de contenido IA evalúa cada idea y contexto según tres factores metodológicos:
-          </p>
-          <ul className="grid sm:grid-cols-3 gap-3 pt-1">
-            <li className="bg-[#020306] border border-slate-800 rounded-lg p-2.5">
-              <strong className="text-white block mb-0.5">1. Impacto</strong>
-              ¿Cuánto valor aporta a tu audiencia y qué potencial de retención y viralidad tiene?
-            </li>
-            <li className="bg-[#020306] border border-slate-800 rounded-lg p-2.5">
-              <strong className="text-white block mb-0.5">2. Confianza</strong>
-              ¿Qué tan validado está el interés y dolor de tu nicho y cliente ideal (ICP)?
-            </li>
-            <li className="bg-[#020306] border border-slate-800 rounded-lg p-2.5">
-              <strong className="text-white block mb-0.5">3. Facilidad</strong>
-              ¿Tienes notas y fuentes listas, o requiere una producción muy compleja?
-            </li>
-          </ul>
-          <p className="text-[11px] text-cyan-200/80 pt-1">
-            💡 Las ideas con una puntuación media de <strong>7.0 o superior</strong> se aprueban para pasar directamente al <strong>Paso 2 (Taller de Guiones)</strong> activando los visores de las plataformas que hayas seleccionado.
-          </p>
-        </div>
-      )}
 
       {/* Copiloto Estratega IA Panel (Conversational Ideation) */}
       {showChatCopilot && (
@@ -1078,19 +1158,23 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
           return (
             <section
               key={col.state}
-              className={`${col.bgClass || "bg-[#090e1c]"} border-2 ${col.colorClass || "border-slate-800"} rounded-xl p-3.5 flex flex-col min-h-[260px] shadow-xl backdrop-blur-sm transition-colors`}
+              className={`glass-column rounded-2xl p-3.5 flex flex-col min-h-[260px] transition-colors ${COLUMN_ACCENT_STYLES[col.state] ?? ""}`}
             >
-              <header className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-700/80">
-                <div>
-                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    {col.title}
+              <header className="flex items-center justify-between pb-2.5 mb-3 border-b border-white/10">
+                <div className="min-w-0">
+                  <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                    <span
+                      className={`h-2 w-2 rounded-full shrink-0 ${COLUMN_DOT_STYLES[col.state] ?? "bg-slate-400"}`}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{col.title}</span>
                   </h3>
-                  <span className="text-[10px] text-slate-400 font-medium">
+                  <span className="text-[10px] text-slate-400 font-medium pl-4 block">
                     {HUMAN_STATE_LABELS[col.state] ?? col.state}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold ${col.headerBadgeClass || "bg-slate-800 text-slate-200"}`}>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-white/[0.06] text-slate-200 border border-white/10">
                     {items.length}
                   </span>
                 </div>
@@ -1098,7 +1182,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
               <div className="space-y-3 flex-1">
                 {items.length === 0 && (
-                  <div className="h-28 rounded-xl border border-dashed border-slate-700/60 bg-[#050811]/40 flex flex-col items-center justify-center text-xs text-slate-500 text-center px-3">
+                  <div className="h-28 rounded-xl border border-dashed border-white/10 bg-white/[0.02] flex flex-col items-center justify-center text-xs text-slate-500 text-center px-3">
                     <p>No hay proyectos en esta fase</p>
                   </div>
                 )}
@@ -1114,64 +1198,65 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                       ? proj.target_platforms
                       : (["YouTube", "Instagram", "TikTok", "LinkedIn", "X"] as ScriptTargetPlatform[]);
                   const format = proj.content_format || "TEXT_AND_VIDEO";
+                  const stageAction = getCardStageAction(proj.current_state, format);
 
                   return (
                     <article
                       key={proj.id}
-                      className={`rounded-xl border p-3.5 transition-all duration-150 cursor-pointer ${
+                      className={`glass-card rounded-xl p-3.5 cursor-pointer ${
                         isSelected
-                          ? "bg-[#111c33] border-cyan-400 shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-400/60"
-                          : "bg-[#0b101e] border-slate-700/90 hover:border-cyan-400/70 hover:bg-[#10172a] shadow-md"
+                          ? "!bg-cyan-500/10 !border-cyan-400/60 shadow-lg shadow-cyan-500/15 ring-1 ring-cyan-400/40"
+                          : ""
                       }`}
                       onClick={() => setSelectedProjectId(proj.id)}
                     >
                       {/* Top Badges: Asset Code, Format Pill, Radar Pill & ICE Score */}
                       <div className="flex items-center justify-between gap-1.5 mb-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-mono font-bold text-cyan-300">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] font-mono font-semibold text-cyan-300">
                             {proj.asset_code}
                           </span>
                           {/* Format badge */}
                           {format === "TEXT_ONLY" ? (
                             <span
-                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-500/60 flex items-center gap-1"
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-violet-500/10 text-violet-200 border border-violet-400/25 flex items-center gap-1"
                               title="Publicación solo escrita / carrusel (sin video)"
                             >
-                              <FileText className="w-2.5 h-2.5 text-violet-400" />
+                              <FileText className="w-2.5 h-2.5 text-violet-300" />
                               Solo Texto
                             </span>
                           ) : format === "VIDEO_ONLY" ? (
                             <span
-                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-500/60 flex items-center gap-1"
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-200 border border-amber-400/25 flex items-center gap-1"
                               title="Solo video corto 9:16"
                             >
-                              <Film className="w-2.5 h-2.5 text-amber-400" />
+                              <Film className="w-2.5 h-2.5 text-amber-300" />
                               Solo Video
                             </span>
                           ) : (
                             <span
-                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-500/60 flex items-center gap-1"
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-cyan-500/10 text-cyan-200 border border-cyan-400/25 flex items-center gap-1"
                               title="Video 9:16 + Publicación escrita"
                             >
-                              <Layers className="w-2.5 h-2.5 text-cyan-400" />
+                              <Layers className="w-2.5 h-2.5 text-cyan-300" />
                               Video + Post
                             </span>
                           )}
                           {isRadar && (
                             <span
-                              className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1"
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-200 border border-amber-400/25 flex items-center gap-1"
                               title="Capturado automáticamente por el Radar Matutino n8n"
                             >
-                              <Radio className="w-2.5 h-2.5 text-amber-400" />
+                              <Radio className="w-2.5 h-2.5 text-amber-300" />
                               Radar
                             </span>
                           )}
                         </div>
                         <span
-                          className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-200 border border-emerald-400/25"
                           title="Prioridad de 1 a 10"
                         >
-                          Prioridad {proj.ice_score.toFixed(1)}/10
+                          {proj.ice_score.toFixed(1)}/10
                         </span>
                       </div>
 
@@ -1181,28 +1266,28 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
                       {/* Context Notes Excerpt if present */}
                       {proj.context_notes && (
-                        <p className="text-[10px] text-slate-300 line-clamp-2 italic mb-2.5 bg-[#050811] px-2 py-1 rounded border border-slate-700/70">
+                        <p className="text-[10px] text-slate-300 line-clamp-2 italic mb-2.5 bg-white/[0.03] px-2.5 py-1.5 rounded-lg border border-white/10">
                           {proj.context_notes}
                         </p>
                       )}
 
-                      {/* Platforms Pills with distinctive brand borders */}
+                      {/* Platforms Pills */}
                       <div className="flex flex-wrap items-center gap-1 mb-2.5">
                         {platforms.map((plat) => {
                           const platMeta = AVAILABLE_PLATFORMS.find((p) => p.id === plat);
                           return (
                             <span
                               key={plat}
-                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                              className={`px-1.5 py-0.5 rounded-md text-[9px] font-semibold border ${
                                 plat === "LinkedIn"
-                                  ? "bg-blue-950/60 text-blue-300 border-blue-600/70"
+                                  ? "bg-blue-500/10 text-blue-200 border-blue-400/25"
                                   : plat === "YouTube"
-                                  ? "bg-red-950/60 text-red-300 border-red-600/70"
+                                  ? "bg-red-500/10 text-red-200 border-red-400/25"
                                   : plat === "Instagram"
-                                  ? "bg-pink-950/60 text-pink-300 border-pink-600/70"
+                                  ? "bg-pink-500/10 text-pink-200 border-pink-400/25"
                                   : plat === "TikTok"
-                                  ? "bg-cyan-950/60 text-cyan-300 border-cyan-600/70"
-                                  : "bg-slate-800 text-slate-200 border-slate-600"
+                                  ? "bg-cyan-500/10 text-cyan-200 border-cyan-400/25"
+                                  : "bg-white/5 text-slate-200 border-white/15"
                               }`}
                             >
                               {platMeta?.shortLabel ?? plat}
@@ -1213,34 +1298,39 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
 
                       {/* Specs Tags */}
                       <div className="flex flex-wrap gap-1.5 text-[10px] mb-3">
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
-                          <Clock className="w-3 h-3 text-cyan-400" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] text-slate-300 border border-white/10">
+                          <Clock className="w-3 h-3 text-cyan-300" />
                           {DURATION_PRESET_META[proj.target_duration].shortLabel}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/60">
-                          <Target className="w-3 h-3 text-violet-400" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] text-slate-300 border border-white/10">
+                          <Target className="w-3 h-3 text-violet-300" />
                           {CONVERSION_GOAL_META[proj.conversion_goal].badge}
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-700/80">
+                      <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedProjectId(proj.id);
-                            setActiveTab("script-studio");
+                            navigateToTool(
+                              stageAction.tab,
+                              stageAction.publishingSubTab
+                                ? { publishingSubTab: stageAction.publishingSubTab }
+                                : undefined
+                            );
                           }}
-                          className="text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1"
+                          className="text-[11px] font-semibold text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 transition"
                         >
                           <Sparkles className="w-3 h-3" />
-                          <span>{format === "TEXT_ONLY" ? "Ver Borrador" : "Ir al Guión"}</span>
+                          <span>{stageAction.label}</span>
                         </button>
 
                         <div className="flex items-center gap-1.5">
                           {confirmDeleteId === proj.id ? (
                             <div
-                              className="inline-flex items-center gap-1 bg-rose-950/80 border border-rose-500/60 rounded px-1.5 py-0.5"
+                              className="inline-flex items-center gap-1 bg-rose-950/80 border border-rose-500/60 rounded-md px-1.5 py-0.5"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <button
@@ -1267,7 +1357,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                                 e.stopPropagation();
                                 setConfirmDeleteId(proj.id);
                               }}
-                              className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition"
+                              className="p-1 rounded-md text-slate-500 hover:text-rose-300 hover:bg-rose-500/15 transition"
                               title="Desechar / eliminar esta idea"
                               aria-label={`Eliminar idea ${proj.asset_code}`}
                             >
@@ -1282,7 +1372,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                                 e.stopPropagation();
                                 void handleAdvanceState(proj);
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-[11px] font-medium text-slate-200 transition"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-cyan-400 hover:text-slate-950 text-[11px] font-medium text-slate-200 border border-white/10 transition"
                             >
                               <ArrowRight className="w-3 h-3" />
                               Avanzar

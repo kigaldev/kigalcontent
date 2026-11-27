@@ -6,7 +6,6 @@ import type {
   AuditLogEntry,
   ContentProject,
   CreatorProfile,
-  FSMState,
   ProjectDetail,
 } from "@/types/engine";
 
@@ -16,20 +15,22 @@ export type ActiveStudioTab =
   | "mobile-simulator"
   | "publishing-hitl"
   | "ads-studio"
-  | "analytics-rmta";
+  | "analytics-rmta"
+  | "automations-n8n"
+  | "connections-apis";
 
-interface PendingHITLModal {
-  open: boolean;
-  projectId: string;
-  assetCode: string;
-  targetState: FSMState;
-  tier: 2 | 3;
-  action: string;
-  description: string;
-}
+export type PublishingSubTab =
+  | "planner"
+  | "copy-native"
+  | "autolists"
+  | "kigalchat-dm"
+  | "hitl-audit";
 
 interface EngineState {
   activeTab: ActiveStudioTab;
+  publishingSubTab: PublishingSubTab;
+  isNavDrawerOpen: boolean;
+  isCreationGuideOpen: boolean;
   backendOnline: boolean;
   projects: ContentProject[];
   selectedProjectId: string | null;
@@ -38,11 +39,16 @@ interface EngineState {
   auditLogs: AuditLogEntry[];
   analytics: AnalyticsOverview | null;
   liveEvents: Array<{ event: string; timestamp: string; summary: string }>;
-  hitlModal: PendingHITLModal | null;
   toastMessage: { type: "success" | "error" | "info"; text: string } | null;
-  activeHitlToken: string;
 
   setActiveTab: (tab: ActiveStudioTab) => void;
+  setPublishingSubTab: (tab: PublishingSubTab) => void;
+  setNavDrawerOpen: (open: boolean) => void;
+  setCreationGuideOpen: (open: boolean) => void;
+  navigateToTool: (
+    tab: ActiveStudioTab,
+    options?: { publishingSubTab?: PublishingSubTab }
+  ) => void;
   setBackendOnline: (online: boolean) => void;
   setProjects: (projects: ContentProject[]) => void;
   setSelectedProjectId: (id: string | null) => void;
@@ -51,15 +57,15 @@ interface EngineState {
   setAuditLogs: (logs: AuditLogEntry[]) => void;
   setAnalytics: (analytics: AnalyticsOverview) => void;
   pushLiveEvent: (ev: { event: string; timestamp: string; summary: string }) => void;
-  openHitlModal: (modal: PendingHITLModal) => void;
-  closeHitlModal: () => void;
   showToast: (type: "success" | "error" | "info", text: string) => void;
   clearToast: () => void;
-  setActiveHitlToken: (token: string) => void;
 }
 
 export const useEngineStore = create<EngineState>((set) => ({
   activeTab: "pipeline",
+  publishingSubTab: "planner",
+  isNavDrawerOpen: false,
+  isCreationGuideOpen: false,
   backendOnline: false,
   projects: [],
   selectedProjectId: null,
@@ -68,11 +74,18 @@ export const useEngineStore = create<EngineState>((set) => ({
   auditLogs: [],
   analytics: null,
   liveEvents: [],
-  hitlModal: null,
   toastMessage: null,
-  activeHitlToken: "",
 
   setActiveTab: (activeTab) => set({ activeTab }),
+  setPublishingSubTab: (publishingSubTab) => set({ publishingSubTab }),
+  setNavDrawerOpen: (isNavDrawerOpen) => set({ isNavDrawerOpen }),
+  setCreationGuideOpen: (isCreationGuideOpen) => set({ isCreationGuideOpen }),
+  navigateToTool: (tab, options) =>
+    set((state) => ({
+      activeTab: tab,
+      publishingSubTab: options?.publishingSubTab ?? state.publishingSubTab,
+      isNavDrawerOpen: false,
+    })),
   setBackendOnline: (backendOnline) => set({ backendOnline }),
   setProjects: (projects) =>
     set((state) => ({
@@ -91,9 +104,6 @@ export const useEngineStore = create<EngineState>((set) => ({
     set((state) => ({
       liveEvents: [ev, ...state.liveEvents].slice(0, 15),
     })),
-  openHitlModal: (hitlModal) => set({ hitlModal }),
-  closeHitlModal: () => set({ hitlModal: null }),
   showToast: (type, text) => set({ toastMessage: { type, text } }),
   clearToast: () => set({ toastMessage: null }),
-  setActiveHitlToken: (activeHitlToken) => set({ activeHitlToken }),
 }));

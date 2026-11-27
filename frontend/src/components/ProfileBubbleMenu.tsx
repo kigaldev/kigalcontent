@@ -76,15 +76,15 @@ export function ProfileBubbleMenu({
       ref={menuRef}
       role="dialog"
       aria-label="Globo de Perfil - Paso 0"
-      className="absolute right-0 top-full mt-2 w-80 sm:w-[400px] z-50 rounded-2xl border border-cyan-500/40 bg-slate-900/95 shadow-2xl shadow-black/60 backdrop-blur-xl animate-in fade-in slide-in-from-top-2"
+      className="absolute right-0 top-full mt-2 w-80 sm:w-[400px] z-50 rounded-2xl border border-white/15 bg-slate-950/85 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl animate-in fade-in slide-in-from-top-2"
     >
       {/* Bubble Pointer */}
-      <div className="absolute -top-2 right-6 h-4 w-4 rotate-45 border-l border-t border-cyan-500/40 bg-slate-900" />
+      <div className="absolute -top-2 right-6 h-4 w-4 rotate-45 border-l border-t border-white/15 bg-slate-950/85 backdrop-blur-2xl" />
 
       <div className="max-h-[82vh] overflow-y-auto p-4">
         {/* Header */}
-        <div className="relative flex items-start gap-3 border-b border-slate-800 pb-3.5">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-violet-600 text-sm font-bold text-white shadow-md">
+        <div className="relative flex items-start gap-3 border-b border-white/10 pb-3.5">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-violet-600 text-sm font-bold text-white shadow-md shadow-sky-500/20">
             {creatorProfile?.name ? creatorProfile.name.charAt(0).toUpperCase() : "C"}
           </div>
           <div className="min-w-0 flex-1">
@@ -92,7 +92,7 @@ export function ProfileBubbleMenu({
               <span className="truncate text-sm font-bold text-white">
                 {creatorProfile?.name || "Creador"}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/15 border border-sky-400/30 px-2 py-0.5 text-[10px] font-bold text-sky-300">
                 Paso 0
               </span>
             </div>
@@ -103,11 +103,11 @@ export function ProfileBubbleMenu({
         </div>
 
         {/* Mini Stats Grid */}
-        <div className="grid grid-cols-2 gap-2 py-3 border-b border-slate-800">
+        <div className="grid grid-cols-2 gap-2 py-3 border-b border-white/10">
           <button
             type="button"
             onClick={() => handleSelect("importar")}
-            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-left hover:border-violet-500/40 transition"
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.07] hover:border-violet-400/40 transition"
           >
             <div>
               <p className="text-[10px] text-slate-400">Repos GitHub</p>
@@ -119,7 +119,7 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("lead-magnets")}
-            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-left hover:border-amber-500/40 transition"
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.07] hover:border-amber-400/40 transition"
           >
             <div>
               <p className="text-[10px] text-slate-400">Lead Magnets</p>
@@ -131,7 +131,7 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("lead-magnets")}
-            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-left hover:border-emerald-500/40 transition"
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.07] hover:border-emerald-400/40 transition"
           >
             <div>
               <p className="text-[10px] text-slate-400">ManyChat</p>
@@ -143,13 +143,13 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("redes")}
-            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-left hover:border-cyan-500/40 transition"
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-left hover:bg-white/[0.07] hover:border-sky-400/40 transition"
           >
             <div>
               <p className="text-[10px] text-slate-400">Redes y Webs</p>
               <p className="text-xs font-bold text-white">{accountsCount} cuentas</p>
             </div>
-            <Globe className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+            <Globe className="h-4 w-4 text-sky-400" aria-hidden="true" />
           </button>
         </div>
 
@@ -158,10 +158,10 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("general")}
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/80 transition"
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.06] transition"
           >
             <span className="flex items-center gap-2">
-              <User className="h-4 w-4 text-cyan-400" aria-hidden="true" />
+              <User className="h-4 w-4 text-sky-400" aria-hidden="true" />
               Editar Perfil e Identidad (Paso 0)
             </span>
             <ChevronRight className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
@@ -170,7 +170,7 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("importar")}
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/80 transition"
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.06] transition"
           >
             <span className="flex items-center gap-2">
               <GitBranch className="h-4 w-4 text-violet-400" aria-hidden="true" />
@@ -182,7 +182,7 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("redes")}
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/80 transition"
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.06] transition"
           >
             <span className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-sky-400" aria-hidden="true" />
@@ -194,7 +194,7 @@ export function ProfileBubbleMenu({
           <button
             type="button"
             onClick={() => handleSelect("lead-magnets")}
-            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/80 transition"
+            className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/[0.06] transition"
           >
             <span className="flex items-center gap-2">
               <FolderOpen className="h-4 w-4 text-amber-400" aria-hidden="true" />
@@ -205,11 +205,11 @@ export function ProfileBubbleMenu({
         </div>
 
         {/* Primary CTA */}
-        <div className="mt-3 pt-3 border-t border-slate-800">
+        <div className="mt-3 pt-3 border-t border-white/10">
           <button
             type="button"
             onClick={() => handleSelect("general")}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-cyan-500/20 hover:opacity-95 transition"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-violet-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-sky-500/20 hover:opacity-95 transition"
           >
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Abrir Paso 0: Contexto Completo</span>
