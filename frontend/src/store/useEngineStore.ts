@@ -26,9 +26,15 @@ export type PublishingSubTab =
   | "kigalchat-dm"
   | "hitl-audit";
 
+export type ConnectionsSubTab =
+  | "llm-minipc"
+  | "social-apis"
+  | "visual-ai";
+
 interface EngineState {
   activeTab: ActiveStudioTab;
   publishingSubTab: PublishingSubTab;
+  connectionsSubTab: ConnectionsSubTab;
   isNavDrawerOpen: boolean;
   isCreationGuideOpen: boolean;
   backendOnline: boolean;
@@ -43,11 +49,15 @@ interface EngineState {
 
   setActiveTab: (tab: ActiveStudioTab) => void;
   setPublishingSubTab: (tab: PublishingSubTab) => void;
+  setConnectionsSubTab: (tab: ConnectionsSubTab) => void;
   setNavDrawerOpen: (open: boolean) => void;
   setCreationGuideOpen: (open: boolean) => void;
   navigateToTool: (
     tab: ActiveStudioTab,
-    options?: { publishingSubTab?: PublishingSubTab }
+    options?: {
+      publishingSubTab?: PublishingSubTab;
+      connectionsSubTab?: ConnectionsSubTab;
+    }
   ) => void;
   setBackendOnline: (online: boolean) => void;
   setProjects: (projects: ContentProject[]) => void;
@@ -64,6 +74,7 @@ interface EngineState {
 export const useEngineStore = create<EngineState>((set) => ({
   activeTab: "pipeline",
   publishingSubTab: "planner",
+  connectionsSubTab: "llm-minipc",
   isNavDrawerOpen: false,
   isCreationGuideOpen: false,
   backendOnline: false,
@@ -78,12 +89,14 @@ export const useEngineStore = create<EngineState>((set) => ({
 
   setActiveTab: (activeTab) => set({ activeTab }),
   setPublishingSubTab: (publishingSubTab) => set({ publishingSubTab }),
+  setConnectionsSubTab: (connectionsSubTab) => set({ connectionsSubTab }),
   setNavDrawerOpen: (isNavDrawerOpen) => set({ isNavDrawerOpen }),
   setCreationGuideOpen: (isCreationGuideOpen) => set({ isCreationGuideOpen }),
   navigateToTool: (tab, options) =>
     set((state) => ({
       activeTab: tab,
       publishingSubTab: options?.publishingSubTab ?? state.publishingSubTab,
+      connectionsSubTab: options?.connectionsSubTab ?? state.connectionsSubTab,
       isNavDrawerOpen: false,
     })),
   setBackendOnline: (backendOnline) => set({ backendOnline }),

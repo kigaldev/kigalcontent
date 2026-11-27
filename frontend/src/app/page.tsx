@@ -9,12 +9,15 @@ import {
   BarChart3,
   CheckCircle2,
   Compass,
+  Cpu,
   FileText,
   KanbanSquare,
+  KeyRound,
   Megaphone,
   Plug,
   Send,
   Smartphone,
+  Sparkles,
   Workflow,
   X,
   type LucideIcon,
@@ -31,6 +34,7 @@ import { HUMAN_STATE_LABELS } from "@/lib/utils";
 import {
   useEngineStore,
   type ActiveStudioTab,
+  type ConnectionsSubTab,
   type PublishingSubTab,
 } from "@/store/useEngineStore";
 import { StudioTopBar } from "@/components/navigation/StudioTopBar";
@@ -92,10 +96,46 @@ const TOOL_META: Record<ActiveStudioTab, ToolMeta> = {
   },
   "connections-apis": {
     title: "Conexiones Oficiales y LLM",
-    description: "Tokens OAuth de redes sociales y configuración de Ollama / IA.",
+    description: "Modelos IA del MiniPC, tokens OAuth de redes y APIs visuales.",
     icon: Plug,
   },
 };
+
+const CONNECTIONS_SECTIONS: Array<{
+  id: ConnectionsSubTab;
+  label: string;
+  icon: LucideIcon;
+  activeClass: string;
+  idleClass: string;
+}> = [
+  {
+    id: "llm-minipc",
+    label: "Motor IA y MiniPC",
+    icon: Cpu,
+    activeClass:
+      "border-2 border-emerald-400 bg-emerald-500/20 text-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.28)]",
+    idleClass:
+      "border border-emerald-500/25 bg-emerald-950/25 text-emerald-300/80 hover:border-emerald-400/50 hover:text-white",
+  },
+  {
+    id: "social-apis",
+    label: "Redes Sociales",
+    icon: KeyRound,
+    activeClass:
+      "border-2 border-sky-400 bg-sky-500/20 text-sky-100 shadow-[0_0_20px_rgba(56,189,248,0.28)]",
+    idleClass:
+      "border border-sky-500/25 bg-sky-950/25 text-sky-300/80 hover:border-sky-400/50 hover:text-white",
+  },
+  {
+    id: "visual-ai",
+    label: "Motores Visuales",
+    icon: Sparkles,
+    activeClass:
+      "border-2 border-fuchsia-400 bg-fuchsia-500/20 text-fuchsia-100 shadow-[0_0_20px_rgba(217,70,239,0.28)]",
+    idleClass:
+      "border border-fuchsia-500/25 bg-fuchsia-950/25 text-fuchsia-300/80 hover:border-fuchsia-400/50 hover:text-white",
+  },
+];
 
 interface NextStepShortcut {
   tab: ActiveStudioTab;
@@ -138,7 +178,9 @@ function getNextStepShortcut(
 export default function KigalContentStudioPage() {
   const {
     activeTab,
+    connectionsSubTab,
     setActiveTab,
+    setConnectionsSubTab,
     setNavDrawerOpen,
     setCreationGuideOpen,
     navigateToTool,
@@ -448,6 +490,34 @@ export default function KigalContentStudioPage() {
                 </div>
               </div>
             </div>
+
+            {activeTab === "connections-apis" && (
+              <div
+                role="tablist"
+                aria-label="Secciones de Conexiones Oficiales y LLM"
+                className="flex flex-wrap items-center gap-2"
+              >
+                {CONNECTIONS_SECTIONS.map((sec) => {
+                  const SIcon = sec.icon;
+                  const isSelected = connectionsSubTab === sec.id;
+                  return (
+                    <button
+                      key={sec.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      onClick={() => setConnectionsSubTab(sec.id)}
+                      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+                        isSelected ? sec.activeClass : sec.idleClass
+                      }`}
+                    >
+                      <SIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>{sec.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <button

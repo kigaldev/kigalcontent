@@ -163,10 +163,10 @@ class Settings(BaseSettings):
     linkedin_access_token: str = Field(default="")
     linkedin_person_urn: str = Field(default="urn:li:person:creator-001")
 
-    # Hybrid Skill-Aware LLM Router (Ollama MiniPC + Anthropic Prompt Caching + OpenAI Compatible)
+    # Hybrid Skill-Aware LLM Router (Ollama MiniPC + OpenAI Compatible)
     llm_provider: str = Field(default="auto")
     ollama_base_url: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="qwen3:14b")
+    ollama_model: str = Field(default="qwen3.6:27b")
     ollama_embedding_model: str = Field(default="bge-m3")
     ollama_api_key: str = Field(default="")
     anthropic_model: str = Field(default="claude-3-5-sonnet-latest")
