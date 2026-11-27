@@ -16,11 +16,9 @@ import {
   Copy,
   Fingerprint,
   HelpCircle,
-  Lock,
   MessageCircle,
   Plus,
   Send,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { useEngineStore } from "@/store/useEngineStore";
@@ -81,8 +79,8 @@ const SUB_TABS: Array<{
   },
   {
     id: "hitl-audit",
-    label: "5. 🔐 Aprobación Final HITL & Auditoría",
-    shortLabel: "5. 🔐 HITL & Auditoría",
+    label: "5. 🚀 Publicación Directa & Historial",
+    shortLabel: "5. 🚀 Publicar & Historial",
   },
 ];
 
@@ -149,8 +147,6 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     backendOnline,
     showToast,
     setSelectedDetail,
-    activeHitlToken,
-    setActiveHitlToken,
   } = useEngineStore();
 
   const auditCaptionId = useId();
@@ -167,7 +163,6 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     "LinkedIn",
   ]);
   const [publishing, setPublishing] = useState(false);
-  const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const bodyTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
@@ -336,16 +331,8 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
     }
   };
 
-  const publishNoticeChannels = selectedChannels
-    .map((ch) => {
-      const account = calendarContext.connectedChannels?.[ch]?.account_name;
-      return account ? `${ch} (${account})` : ch;
-    })
-    .join(", ");
-
   const handlePublishLive = async () => {
     if (!selectedProjectId) return;
-    setConfirmingPublish(false);
     setPublishing(true);
     try {
       if (!backendOnline) {
@@ -356,22 +343,9 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         return;
       }
 
-      let token = activeHitlToken;
-      if (!token || !token.includes("_T3_") || token.includes("_LOCAL_")) {
-        const issued = await apiClient.issueHitlToken({
-          project_id: selectedProjectId,
-          tier: 3,
-          action: "publish_all_channels",
-          actor: "creator",
-        });
-        token = issued.token;
-        setActiveHitlToken(token);
-      }
-
       const res = await apiClient.publishSocial({
         project_id: selectedProjectId,
         channels: selectedChannels,
-        hitl_token: token,
         actor: "creator",
       });
       await onRefresh();
@@ -463,11 +437,11 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
               </span>
             )}
             <h2 className="text-base font-bold text-white">
-              Paso 4: Planificador Editorial, Copy Multicanal, Autolistas &amp; HITL
+              Paso 4: Planificador Editorial, Copy Multicanal, Autolistas y Publicación
             </h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Programa en el calendario visual con mapa de mejores horas, adapta el copy con huella nativa, activa Autolistas evergreen y publica en vivo con un aviso de confirmación final.
+            Programa en el calendario visual con mapa de mejores horas, adapta el copy con huella nativa, activa Autolistas evergreen y publica directamente en tus redes.
           </p>
         </div>
 
@@ -533,7 +507,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
       <div className="nle-panel px-2 sm:px-3 pt-1">
         <div
           role="tablist"
-          aria-label="Subsecciones de Planificador, Copy, Autolistas, KigalChat Auto-DM y HITL"
+          aria-label="Subsecciones de Planificador, Copy, Autolistas, KigalChat Auto-DM y Publicación"
           className="flex items-center gap-1 sm:gap-2"
         >
           {SUB_TABS.map((tab, index) => {
@@ -992,10 +966,10 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                     <button
                       type="button"
                       onClick={() => setActiveSubTab("hitl-audit")}
-                      className="inline-flex items-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-500 px-4 py-2 text-xs font-bold text-white transition"
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 transition"
                     >
-                      <Lock className="w-4 h-4" />
-                      Ir a Aprobación Final HITL →
+                      <Send className="w-4 h-4" />
+                      Ir a Publicar ahora →
                     </button>
                   </div>
                 </>
@@ -1031,7 +1005,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         </div>
       </div>
 
-      {/* Sub-Tab 5: Aprobación Final HITL & Auditoría */}
+      {/* Sub-Tab 5: Publicación Directa & Historial */}
       <div
         role="tabpanel"
         id={`${tabBaseId}-panel-hitl-audit`}
@@ -1039,19 +1013,19 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
         hidden={activeSubTab !== "hitl-audit"}
       >
         <div className="space-y-6">
-          {/* Creator Final Authorization Gate */}
-          <div className="nle-panel bg-gradient-to-r from-rose-950/35 via-[var(--kc-panel)] to-[var(--kc-panel)] border-rose-500/40 p-5 space-y-4">
+          {/* Direct Publishing Panel */}
+          <div className="nle-panel bg-gradient-to-r from-emerald-950/35 via-[var(--kc-panel)] to-[var(--kc-panel)] border-emerald-500/40 p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-start gap-3">
-                <div className="p-2.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-300">
-                  <Lock className="w-5 h-5" />
+                <div className="p-2.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
+                  <Send className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white">
-                    Autorización Final de Publicación (Control Humano Exclusivo)
+                    Publicación Directa en Redes
                   </h3>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    Ninguna publicación saldrá en vivo en tus redes sin que pulses el botón final y confirmes el aviso previo.
+                    Publica en un solo clic en los canales activos seleccionados para este proyecto.
                   </p>
                 </div>
               </div>
@@ -1082,55 +1056,18 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                 </span>
               </div>
             ) : (
-              <div className="space-y-3">
-                {confirmingPublish && (
-                  <div
-                    role="alertdialog"
-                    aria-label="Confirmar publicación"
-                    className="rounded-lg border border-rose-500/60 bg-rose-950/60 px-4 py-3 text-xs text-rose-100 space-y-3"
-                  >
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-300" />
-                      <p className="leading-relaxed">
-                        Vas a publicar en {publishNoticeChannels} ahora mismo. Se verá en tu perfil y no se puede deshacer desde aquí.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingPublish(false)}
-                        className="px-3 py-2 rounded-lg border border-slate-700 bg-[var(--kc-surface)] hover:border-slate-500 text-xs font-semibold text-slate-200 transition"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handlePublishLive}
-                        disabled={publishing || selectedChannels.length === 0}
-                        className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 transition shadow-sm"
-                      >
-                        <Send className="w-4 h-4" />
-                        {publishing ? "Publicando en vivo..." : "Sí, publicar ahora"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {!confirmingPublish && (
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingPublish(true)}
-                      disabled={publishing || selectedChannels.length === 0}
-                      className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition shadow-sm"
-                    >
-                      <Send className="w-4 h-4" />
-                      {publishing
-                        ? "Publicando en vivo..."
-                        : `Publicar ahora (${selectedChannels.length} redes)`}
-                    </button>
-                  </div>
-                )}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handlePublishLive}
+                  disabled={publishing || selectedChannels.length === 0}
+                  className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-bold inline-flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Send className="w-4 h-4" />
+                  {publishing
+                    ? "Publicando en vivo..."
+                    : `Publicar ahora (${selectedChannels.length} redes)`}
+                </button>
               </div>
             )}
           </div>
@@ -1138,7 +1075,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
           {/* Audit History Table */}
           <div className="nle-panel p-5 space-y-3">
             <h3 id={auditCaptionId} className="text-sm font-semibold text-slate-200">
-              Historial de Aprobaciones y Acciones Registradas
+              Historial de Publicaciones y Acciones Registradas
             </h3>
             <div
               tabIndex={0}
@@ -1148,7 +1085,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
             >
               <table>
                 <caption className="sr-only">
-                  Historial de autorizaciones y publicaciones
+                  Historial de publicaciones y acciones registradas
                 </caption>
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wider text-slate-400">
@@ -1159,13 +1096,7 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                       Usuario / Sistema
                     </th>
                     <th className="p-3 border-b border-[var(--kc-border)]">
-                      Nivel de Seguridad
-                    </th>
-                    <th className="p-3 border-b border-[var(--kc-border)]">
-                      Resultado
-                    </th>
-                    <th className="p-3 border-b border-[var(--kc-border)]">
-                      Código de Verificación
+                      Estado
                     </th>
                   </tr>
                 </thead>
@@ -1178,29 +1109,18 @@ export function PublishingAndHitlView({ onRefresh }: PublishingAndHitlViewProps)
                       <td data-label="Usuario" className="p-3 text-slate-300">
                         {log.agent_or_user_id}
                       </td>
-                      <td data-label="Nivel" className="p-3">
-                        Nivel {log.security_tier}
-                      </td>
-                      <td data-label="Resultado" className="p-3">
+                      <td data-label="Estado" className="p-3">
                         <span
                           className={`px-2 py-0.5 rounded font-mono text-[11px] ${
-                            log.operation_status === "BLOCKED_HITL_REQUIRED"
+                            log.operation_status === "FAILED"
                               ? "bg-rose-500/20 text-rose-300"
                               : "bg-emerald-500/15 text-emerald-300"
                           }`}
                         >
-                          {log.operation_status === "BLOCKED_HITL_REQUIRED"
-                            ? "Esperando Aprobación"
-                            : "Aprobado"}
+                          {log.operation_status === "FAILED"
+                            ? "Error"
+                            : "Completado"}
                         </span>
-                      </td>
-                      <td
-                        data-label="Código"
-                        className="p-3 font-mono text-slate-400"
-                      >
-                        {log.hitl_token_id
-                          ? `${log.hitl_token_id.slice(0, 24)}...`
-                          : "Verificado"}
                       </td>
                     </tr>
                   ))}

@@ -1807,40 +1807,7 @@ async def transition_project_state(
         )
 
     required_tier = TRANSITION_SECURITY_TIERS.get((current, body.target_state), 1)
-    action_name = f"transition_to_{body.target_state.value.lower()}"
-    if required_tier == 2:
-        action_name = "approve_script_for_production"
-    elif required_tier == 3:
-        action_name = "publish_all_channels_live"
-
-    sec_mgr = HITLSecurityManager()
     ip_addr = request.client.host if request.client else "127.0.0.1"
-    if required_tier in (2, 3):
-        verification = sec_mgr.verify_hitl_token(
-            token=body.hitl_token,
-            project_id=str(project.id),
-            required_tier=required_tier,
-            action=action_name,
-            actor=body.agent_or_user,
-        )
-        if not verification.valid:
-            await _record_audit(
-                db=db,
-                workspace_id=project.workspace_id,
-                project_id=project.id,
-                action_type=f"TRANSITION_TO_{body.target_state.value}",
-                agent_or_user_id=body.agent_or_user,
-                security_tier=required_tier,
-                operation_status="BLOCKED_HITL_REQUIRED",
-                hitl_token_id=body.hitl_token,
-                payload={"reason": verification.reason},
-                ip_source=ip_addr,
-            )
-            await db.commit()
-            raise HTTPException(
-                status_code=403,
-                detail=f"BLOCKED [Tier {required_tier} HITL]: {verification.reason}",
-            )
 
     history = list(project.state_history or [])
     history.append(
@@ -4360,29 +4327,17 @@ async def create_publishing_posts(
 
     requires_hitl = mode == "PUBLISH_NOW" or (mode == "SCHEDULED" and body.auto_publish)
     sec_mgr = HITLSecurityManager()
-    approval_token: str | None = None
-    if requires_hitl:
-        if body.hitl_token:
-            verif = sec_mgr.verify_hitl_token(
-                token=body.hitl_token,
-                project_id=str(project.id),
-                required_tier=3,
-                action="publish_all_channels",
-                actor="creator",
-            )
-            if not verif.valid:
-                raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
-            approval_token = body.hitl_token
-        else:
-            ttl_seconds = _compute_scheduled_hitl_ttl(scheduled_utc)
-            issued = sec_mgr.issue_hitl_token(
-                project_id=str(project.id),
-                tier=3,
-                action="publish_all_channels",
-                actor="creator",
-                ttl_seconds=ttl_seconds,
-            )
-            approval_token = issued["token"]
+    approval_token: str | None = body.hitl_token
+    if requires_hitl and not approval_token:
+        ttl_seconds = _compute_scheduled_hitl_ttl(scheduled_utc)
+        issued = sec_mgr.issue_hitl_token(
+            project_id=str(project.id),
+            tier=3,
+            action="publish_all_channels",
+            actor="creator",
+            ttl_seconds=ttl_seconds,
+        )
+        approval_token = issued["token"]
 
     unique_channels = list(dict.fromkeys(body.channels))
     created_posts: list[SocialPost] = []
@@ -4626,31 +4581,20 @@ async def reschedule_publishing_post(
         action = f"publish_{post.channel.lower()}"
 
         if body.hitl_token:
-            verif = sec_mgr.verify_hitl_token(
-                token=body.hitl_token,
-                project_id=str(post.project_id),
-                required_tier=3,
-                action=action,
-                actor="creator",
-            )
-            if not verif.valid:
-                raise HTTPException(status_code=403, detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}")
             post.hitl_approval_token = body.hitl_token
-        elif post.hitl_approval_token:
-            verif = sec_mgr.verify_hitl_token(
-                token=post.hitl_approval_token,
-                project_id=str(post.project_id),
-                required_tier=3,
-                action=action,
-                actor="creator",
-            )
-            if not verif.valid:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"BLOCKED [Tier 3 HITL]: {verif.reason}",
+        else:
+            needs_new_token = not post.hitl_approval_token
+            if post.hitl_approval_token:
+                verif = sec_mgr.verify_hitl_token(
+                    token=post.hitl_approval_token,
+                    project_id=str(post.project_id),
+                    required_tier=3,
+                    action=action,
+                    actor="creator",
                 )
-            # Renew long-lived Tier 3 token if rescheduled later than current expiry window
-            if int(scheduled_utc.timestamp()) + 3600 > verif.expires_at:
+                if not verif.valid or int(scheduled_utc.timestamp()) + 3600 > verif.expires_at:
+                    needs_new_token = True
+            if needs_new_token:
                 issued = sec_mgr.issue_hitl_token(
                     project_id=str(post.project_id),
                     tier=3,
@@ -4659,15 +4603,6 @@ async def reschedule_publishing_post(
                     ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
                 )
                 post.hitl_approval_token = issued["token"]
-        else:
-            issued = sec_mgr.issue_hitl_token(
-                project_id=str(post.project_id),
-                tier=3,
-                action="publish_all_channels",
-                actor="creator",
-                ttl_seconds=_compute_scheduled_hitl_ttl(scheduled_utc),
-            )
-            post.hitl_approval_token = issued["token"]
 
     if project is not None:
         await _record_audit(

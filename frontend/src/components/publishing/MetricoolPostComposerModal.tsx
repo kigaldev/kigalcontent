@@ -142,8 +142,6 @@ export function MetricoolPostComposerModal({
   const {
     backendOnline,
     showToast,
-    activeHitlToken,
-    setActiveHitlToken,
   } = useEngineStore();
 
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -189,7 +187,6 @@ export function MetricoolPostComposerModal({
   const [findingBestSlot, setFindingBestSlot] = useState(false);
   const [bestSlotScore, setBestSlotScore] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Native <dialog> open/close sync (modern-web-guidance: dialog)
@@ -345,11 +342,6 @@ export function MetricoolPostComposerModal({
     open,
     propTimezone,
   ]);
-
-  // Any change to what/where/when invalidates a pending publish confirmation.
-  useEffect(() => {
-    setConfirmingPublish(false);
-  }, [open, publishMode, autoPublish, selectedChannels, dateStr, timeStr]);
 
   const handleDialogClose = () => {
     const dialog = dialogRef.current;
@@ -541,16 +533,6 @@ export function MetricoolPostComposerModal({
         ? true
         : autoPublish;
 
-    const publishesToNetworks =
-      (publishMode === "SCHEDULED" && effectiveAutoPublish) ||
-      publishMode === "PUBLISH_NOW";
-
-    // Last step before anything goes out to the networks: show a clear notice first.
-    if (publishesToNetworks && !confirmingPublish) {
-      setConfirmingPublish(true);
-      return;
-    }
-
     const scheduledUtc =
       publishMode === "DRAFT"
         ? null
@@ -589,25 +571,12 @@ export function MetricoolPostComposerModal({
           auto_publish: effectiveAutoPublish,
           publish_status:
             publishMode === "PUBLISH_NOW" ? "SCHEDULED" : publishMode,
-          hitl_token: activeHitlToken || null,
         });
 
         if (publishMode === "PUBLISH_NOW" && editingPost.project_id) {
-          let tokenToUse = activeHitlToken;
-          if (!tokenToUse || !tokenToUse.includes("_T3_")) {
-            const issued = await apiClient.issueHitlToken({
-              project_id: editingPost.project_id,
-              tier: 3,
-              action: "publish_all_channels",
-              actor: "creator",
-            });
-            tokenToUse = issued.token;
-            setActiveHitlToken(tokenToUse);
-          }
           await apiClient.publishSocial({
             project_id: editingPost.project_id,
             channels: [editingPost.channel],
-            hitl_token: tokenToUse,
             actor: "creator",
           });
         }
@@ -655,7 +624,6 @@ export function MetricoolPostComposerModal({
           scheduled_at: scheduledUtc,
           timezone,
           auto_publish: effectiveAutoPublish,
-          hitl_token: activeHitlToken || null,
         });
 
         showToast(
@@ -678,7 +646,6 @@ export function MetricoolPostComposerModal({
       );
     } finally {
       setSubmitting(false);
-      setConfirmingPublish(false);
     }
   };
 
@@ -699,17 +666,6 @@ export function MetricoolPostComposerModal({
     }
     return b;
   }, [previewValues.post_body, previewValues.title]);
-
-  const noticeChannels = (editingPost ? [editingPost.channel] : selectedChannels)
-    .map((ch) => {
-      const account = connectedChannels?.[ch]?.account_name;
-      return account ? `${ch} (${account})` : ch;
-    })
-    .join(", ");
-  const confirmNotice =
-    publishMode === "PUBLISH_NOW"
-      ? `Vas a publicar en ${noticeChannels} ahora mismo. Se verá en tu perfil y no se puede deshacer desde aquí.`
-      : `Se publicará automáticamente el ${formatFriendlyDateEs(dateStr)} a las ${timeStr} en ${noticeChannels}. Puedes cancelarlo antes desde el calendario.`;
 
   const submitLabel =
     publishMode === "DRAFT"
@@ -753,7 +709,7 @@ export function MetricoolPostComposerModal({
                 <p className="text-[11px] text-slate-400 truncate">
                   {editingPost
                     ? "Edita el copy, primer comentario o reprograma la fecha de salida."
-                    : "Redacta una vez o personaliza por red con vista previa en vivo y protección HITL."}
+                    : "Redacta una vez o personaliza por red con vista previa en vivo y publicación directa."}
                 </p>
               </div>
               {activeProjectId && (
@@ -1107,7 +1063,7 @@ export function MetricoolPostComposerModal({
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--kc-border)] pt-3">
                   <AstryxSwitch
                     label="Auto-publicar en API"
-                    description="Despacho automático firmado con token HITL Tier 3"
+                    description="Publicación automática en la fecha y hora programadas"
                     value={autoPublish}
                     onChange={(val) => {
                       setAutoPublish(val);
@@ -1127,44 +1083,19 @@ export function MetricoolPostComposerModal({
                   </div>
                 )}
 
-                {confirmingPublish && (
-                  <div
-                    role="alertdialog"
-                    aria-label="Confirmar publicación"
-                    className="rounded-lg border border-rose-500/60 bg-rose-950/60 px-3 py-2.5 text-xs text-rose-100"
-                  >
-                    <p className="font-bold text-rose-200">
-                      {publishMode === "PUBLISH_NOW"
-                        ? "Última confirmación antes de publicar"
-                        : "Última confirmación antes de programar"}
-                    </p>
-                    <p className="mt-1 leading-relaxed">{confirmNotice}</p>
-                  </div>
-                )}
-
                 <div className="flex items-center justify-end gap-2 pt-1">
                   <AstryxButton
                     variant="ghost"
                     size="md"
                     label="Cancelar"
-                    onClick={() =>
-                      confirmingPublish
-                        ? setConfirmingPublish(false)
-                        : dialogRef.current?.close("cancel")
-                    }
+                    onClick={() => dialogRef.current?.close("cancel")}
                   />
                   <AstryxButton
                     type="submit"
                     variant="primary"
                     size="md"
                     isLoading={submitting}
-                    label={
-                      confirmingPublish
-                        ? publishMode === "PUBLISH_NOW"
-                          ? "Sí, publicar ahora"
-                          : "Sí, programar"
-                        : submitLabel
-                    }
+                    label={submitLabel}
                   />
                 </div>
               </div>

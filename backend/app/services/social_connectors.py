@@ -464,20 +464,10 @@ class BaseSocialConnector:
         self,
         project_id: str,
         payload: dict[str, Any],
-        hitl_token: str | None,
+        hitl_token: str | None = None,
         actor: str = "creator",
         security_manager: HITLSecurityManager | None = None,
     ) -> dict[str, Any]:
-        manager = security_manager or HITLSecurityManager()
-        action = f"publish_{self.channel.value.lower()}"
-        manager.require_valid_token(
-            token=hitl_token,
-            project_id=project_id,
-            required_tier=3,
-            action=action,
-            actor=actor,
-        )
-
         preflight = validate_preflight(self.channel, payload)
         if not preflight.passed:
             raise ValueError("; ".join(preflight.blocking_errors))

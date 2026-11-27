@@ -264,7 +264,7 @@ class TestRealMediaPipelineFFmpeg:
 
 
 class TestFastAPIEndToEnd:
-    def test_full_api_lifecycle_and_hitl_blocking(self):
+    def test_full_api_lifecycle_direct_publish_without_hitl(self):
         with TestClient(app) as client:
             health = client.get("/health")
             assert health.status_code == 200
@@ -291,30 +291,12 @@ class TestFastAPIEndToEnd:
             pid = proj["id"]
             assert proj["current_state"] == "SCRIPTED_PACKAGED"
 
-            # Attempt Tier 2 transition without HITL token -> MUST block 403
-            blocked_t2 = client.post(
-                f"/api/v1/projects/{pid}/transition",
-                json={"target_state": "HITL_PENDING_PRODUCTION", "agent_or_user": "creator"},
-            )
-            assert blocked_t2.status_code == 403
-
-            # Issue Tier 2 token & transition
-            t2_tok = client.post(
-                "/api/v1/hitl/issue-token",
-                json={
-                    "project_id": pid,
-                    "tier": 2,
-                    "action": "approve_script_for_production",
-                    "actor": "creator",
-                },
-            ).json()["token"]
-
+            # Direct transition without HITL token succeeds cleanly
             ok_t2 = client.post(
                 f"/api/v1/projects/{pid}/transition",
                 json={
                     "target_state": "HITL_PENDING_PRODUCTION",
                     "agent_or_user": "creator",
-                    "hitl_token": t2_tok,
                 },
             )
             assert ok_t2.status_code == 200
@@ -348,25 +330,7 @@ class TestFastAPIEndToEnd:
             )
             assert ok_pending_pub.status_code == 200
 
-            # Attempt Tier 3 publish WITHOUT token -> MUST block 403
-            blocked_pub = client.post(
-                "/api/v1/social/publish",
-                json={"project_id": pid, "channels": ["LinkedIn"], "actor": "creator"},
-            )
-            assert blocked_pub.status_code == 403
-
-            # Issue Tier 3 token with 2FA code and publish LinkedIn
-            t3_tok = client.post(
-                "/api/v1/hitl/issue-token",
-                json={
-                    "project_id": pid,
-                    "tier": 3,
-                    "action": "publish_linkedin",
-                    "actor": "creator",
-                },
-            ).json()["token"]
-
-            # No fabricated "sandbox" publications any more: simulate a connected LinkedIn with a mocked API reply.
+            # Direct publish on LinkedIn without HITL token succeeds cleanly
             with (
                 patch.object(get_settings(), "linkedin_access_token", "mock_li_live_token"),
                 patch.object(
@@ -389,17 +353,15 @@ class TestFastAPIEndToEnd:
                     json={
                         "project_id": pid,
                         "channels": ["LinkedIn"],
-                        "hitl_token": t3_tok,
                         "actor": "creator",
                     },
                 )
             assert pub_ok.status_code == 200
             assert pub_ok.json()["status"] == "PUBLISHED_LIVE"
 
-            # Verify immutable audit log captured both BLOCKED and SUCCESS entries
+            # Verify immutable audit log captured SUCCESS entries
             audits = client.get("/api/v1/audit-logs").json()
             statuses = {a["operation_status"] for a in audits}
-            assert "BLOCKED_HITL_REQUIRED" in statuses
             assert "SUCCESS" in statuses
 
     def test_skill_loader_and_hybrid_llm_router(self):

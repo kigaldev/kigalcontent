@@ -81,7 +81,7 @@ export function LinkedInB2BAdsPanel({
 
     showToast(
       "success",
-      "Copy Thought Leader copiado. Pega y programa tu post orgánico en Planificador & HITL antes de patrocinarlo."
+      "Copy Thought Leader copiado. Pega y programa tu post orgánico en Publicar / Planificador antes de patrocinarlo."
     );
     setActiveTab("publishing-hitl");
   };

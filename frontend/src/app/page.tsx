@@ -43,7 +43,6 @@ import { MobileSafeZoneSimulator } from "@/components/MobileSafeZoneSimulator";
 import { PublishingAndHitlView } from "@/components/PublishingAndHitlView";
 import { AdsCampaignStudioView } from "@/components/AdsCampaignStudioView";
 import { ClosedLoopAnalyticsView } from "@/components/ClosedLoopAnalyticsView";
-import { HITLApprovalDialog } from "@/components/HITLApprovalDialog";
 import { CreatorProfileModal } from "@/components/CreatorProfileModal";
 import { ProfileBubbleMenu, type CreatorModalTab } from "@/components/ProfileBubbleMenu";
 import { BackendStatusModal } from "@/components/BackendStatusModal";
@@ -94,7 +93,7 @@ const PIPELINE_STEPS: TabDefinition[] = [
     label: "Publicar",
     shortLabel: "Publicar",
     stepName: "Publicar",
-    summary: "Planificador visual estilo Metricool (Calendario, Mejores Horas, Autolistas), KigalChat Auto-DM y autorización HITL.",
+    summary: "Planificador visual estilo Metricool (Calendario, Mejores Horas, Autolistas), KigalChat Auto-DM y publicación directa.",
     icon: Send,
   },
 ];
@@ -906,11 +905,6 @@ export default function KigalContentStudioPage() {
           </div>
         </details>
       </main>
-
-      {/* Global HITL Approval Native Dialog */}
-      <HITLApprovalDialog
-        onSuccessRefresh={() => loadWorkspaceData(selectedProjectId ?? undefined)}
-      />
 
       {/* Creator Context Engine Profile Modal (Paso 0) */}
       <CreatorProfileModal

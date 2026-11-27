@@ -19,7 +19,6 @@ import {
   PlusCircle,
   Radio,
   Send,
-  Shield,
   Sparkles,
   Target,
   Trash2,
@@ -119,7 +118,6 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
     selectedProjectId,
     setSelectedProjectId,
     setActiveTab,
-    openHitlModal,
     showToast,
     backendOnline,
     setProjects,
@@ -425,40 +423,6 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
   const handleAdvanceState = async (proj: ContentProject) => {
     const nextState = NEXT_STATE_MAP[proj.current_state];
     if (!nextState) return;
-
-    if (
-      proj.current_state === "SCRIPTED_PACKAGED" &&
-      nextState === "HITL_PENDING_PRODUCTION"
-    ) {
-      openHitlModal({
-        open: true,
-        projectId: proj.id,
-        assetCode: proj.asset_code,
-        targetState: nextState,
-        tier: 2,
-        action: "approve_script_for_production",
-        description:
-          "Revisión antes de grabar: Confirmas que el guión y los textos están listos para pasar a grabación y edición.",
-      });
-      return;
-    }
-
-    if (
-      proj.current_state === "HITL_PENDING_PUBLISH" &&
-      nextState === "PUBLISHED_LIVE"
-    ) {
-      openHitlModal({
-        open: true,
-        projectId: proj.id,
-        assetCode: proj.asset_code,
-        targetState: nextState,
-        tier: 3,
-        action: "publish_all_channels_live",
-        description:
-          "Autorización de publicación en redes sociales: Estás autorizando publicar este video de forma definitiva en tus canales.",
-      });
-      return;
-    }
 
     try {
       if (backendOnline) {
@@ -1320,12 +1284,7 @@ export function KanbanPipelineBoard({ onRefresh }: KanbanPipelineBoardProps) {
                               }}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-[11px] font-medium text-slate-200 transition"
                             >
-                              {next === "HITL_PENDING_PRODUCTION" ||
-                              next === "PUBLISHED_LIVE" ? (
-                                <Shield className="w-3 h-3 text-amber-400" />
-                              ) : (
-                                <ArrowRight className="w-3 h-3" />
-                              )}
+                              <ArrowRight className="w-3 h-3" />
                               Avanzar
                             </button>
                           )}

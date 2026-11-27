@@ -525,7 +525,7 @@ export const apiClient = {
   publishSocial: (payload: {
     project_id: string;
     channels: SocialChannel[];
-    hitl_token: string;
+    hitl_token?: string;
     actor: string;
   }) =>
     requestJson<{
