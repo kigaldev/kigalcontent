@@ -406,6 +406,30 @@ export interface N8nWorkflowTemplate {
   workflow_json: Record<string, unknown>;
 }
 
+export interface N8nLiveWorkflowStatus {
+  n8n_workflow_id: string;
+  matched_catalog_id: string | null;
+  name: string;
+  active: boolean;
+  last_execution_id: string | null;
+  last_execution_status: "success" | "error" | "running" | "waiting" | "none" | string;
+  last_execution_at: string | null;
+  last_error_node: string | null;
+  last_error_message: string | null;
+  editor_url: string;
+}
+
+export interface N8nLiveStatusResponse {
+  configured: boolean;
+  reachable: boolean;
+  n8n_base_url: string;
+  api_key_configured: boolean;
+  active_count: number;
+  error_count: number;
+  message: string;
+  workflows: N8nLiveWorkflowStatus[];
+}
+
 export interface KigalChatInteraction {
   id: string;
   timestamp: string;

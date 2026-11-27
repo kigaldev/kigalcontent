@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -13,8 +14,10 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text as sa_text
@@ -3542,6 +3545,229 @@ async def list_n8n_workflows() -> list[N8nWorkflowTemplateResponse]:
         )
 
     return results
+
+
+class N8nConnectionPayload(BaseModel):
+    base_url: str = Field(..., min_length=4, max_length=300)
+    api_key: str | None = Field(default=None, max_length=2000)
+
+
+def _match_n8n_catalog_id(wf_name: str) -> str | None:
+    low = (wf_name or "").strip().lower()
+    for meta in N8N_WORKFLOW_CATALOG:
+        prefix = meta["name"].split("-")[0].strip().lower()
+        if prefix and (low.startswith(f"{prefix} -") or low.startswith(f"{prefix}-")):
+            return meta["workflow_id"]
+        if low == meta["name"].strip().lower():
+            return meta["workflow_id"]
+    return None
+
+
+def _extract_n8n_execution_error(exec_obj: dict[str, Any]) -> tuple[str | None, str | None]:
+    data = exec_obj.get("data")
+    if not isinstance(data, dict):
+        return None, None
+    result_data = data.get("resultData")
+    if not isinstance(result_data, dict):
+        return None, None
+
+    last_node = result_data.get("lastNodeExecuted")
+    err = result_data.get("error")
+    err_msg: str | None = None
+    if isinstance(err, dict):
+        node_info = err.get("node")
+        if not last_node and isinstance(node_info, dict):
+            last_node = node_info.get("name")
+        err_msg = err.get("message") or err.get("description")
+        if err.get("name") and err_msg and not str(err_msg).startswith(str(err.get("name"))):
+            err_msg = f"{err['name']}: {err_msg}"
+    if not err_msg:
+        run_data = result_data.get("runData")
+        if isinstance(run_data, dict):
+            for node_name, runs in run_data.items():
+                if isinstance(runs, list):
+                    for run_item in runs:
+                        if isinstance(run_item, dict) and isinstance(run_item.get("error"), dict):
+                            node_err = run_item["error"]
+                            last_node = last_node or node_name
+                            err_msg = node_err.get("message") or node_err.get("description")
+                            break
+                if err_msg:
+                    break
+    return (str(last_node) if last_node else None, str(err_msg)[:320] if err_msg else None)
+
+
+async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
+    row = (
+        await db.execute(select(SocialCredential).where(SocialCredential.channel == "n8n_server"))
+    ).scalar_one_or_none()
+    extra = (row.extra_metadata or {}) if row else {}
+    base_url = str(
+        extra.get("base_url")
+        or os.environ.get("N8N_BASE_URL")
+        or "http://127.0.0.1:5678"
+    ).strip().rstrip("/")
+    api_key = str((row.access_token if row else "") or os.environ.get("N8N_API_KEY") or "").strip()
+
+    if not api_key:
+        return {
+            "configured": False,
+            "reachable": False,
+            "n8n_base_url": base_url,
+            "api_key_configured": False,
+            "active_count": 0,
+            "error_count": 0,
+            "message": "Añade tu N8N API Key (en n8n → Settings → n8n API) para ver qué flujos están activos y detectar errores en vivo.",
+            "workflows": [],
+        }
+
+    headers = {"X-N8N-API-KEY": api_key, "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            wf_resp, ex_resp = await asyncio.gather(
+                client.get(f"{base_url}/api/v1/workflows?limit=100", headers=headers),
+                client.get(f"{base_url}/api/v1/executions?limit=40&includeData=true", headers=headers),
+            )
+            if wf_resp.status_code in (401, 403):
+                return {
+                    "configured": True,
+                    "reachable": False,
+                    "n8n_base_url": base_url,
+                    "api_key_configured": True,
+                    "active_count": 0,
+                    "error_count": 0,
+                    "message": f"n8n rechazó la API Key (HTTP {wf_resp.status_code}). Genera una nueva en n8n → Settings → n8n API.",
+                    "workflows": [],
+                }
+            wf_resp.raise_for_status()
+            wf_payload = wf_resp.json()
+            raw_wfs = wf_payload.get("data", wf_payload) if isinstance(wf_payload, dict) else wf_payload
+            if not isinstance(raw_wfs, list):
+                raw_wfs = []
+
+            raw_execs: list[dict[str, Any]] = []
+            if ex_resp.status_code == 200:
+                ex_payload = ex_resp.json()
+                ex_list = ex_payload.get("data", ex_payload) if isinstance(ex_payload, dict) else ex_payload
+                if isinstance(ex_list, list):
+                    raw_execs = ex_list
+    except Exception as exc:
+        return {
+            "configured": True,
+            "reachable": False,
+            "n8n_base_url": base_url,
+            "api_key_configured": True,
+            "active_count": 0,
+            "error_count": 0,
+            "message": f"No se pudo conectar con n8n en {base_url}: {str(exc)[:180]}",
+            "workflows": [],
+        }
+
+    latest_exec_by_wf: dict[str, dict[str, Any]] = {}
+    for ex in raw_execs:
+        if not isinstance(ex, dict):
+            continue
+        wf_id = str(ex.get("workflowId") or "")
+        if wf_id and wf_id not in latest_exec_by_wf:
+            latest_exec_by_wf[wf_id] = ex
+
+    workflows_out: list[dict[str, Any]] = []
+    active_count = 0
+    error_count = 0
+    for wf in raw_wfs:
+        if not isinstance(wf, dict):
+            continue
+        wf_id = str(wf.get("id") or "")
+        wf_name = str(wf.get("name") or "")
+        is_active = bool(wf.get("active"))
+        matched_id = _match_n8n_catalog_id(wf_name)
+        last_ex = latest_exec_by_wf.get(wf_id)
+        last_status = "none"
+        last_at: str | None = None
+        last_exec_id: str | None = None
+        err_node: str | None = None
+        err_msg: str | None = None
+        if last_ex:
+            last_exec_id = str(last_ex.get("id") or "")
+            raw_status = str(last_ex.get("status") or "").lower()
+            if not raw_status:
+                raw_status = "success" if last_ex.get("finished") else "running"
+            last_status = raw_status
+            last_at = last_ex.get("stoppedAt") or last_ex.get("startedAt")
+            if last_status == "error":
+                err_node, err_msg = _extract_n8n_execution_error(last_ex)
+
+        if matched_id:
+            if is_active:
+                active_count += 1
+            if last_status == "error":
+                error_count += 1
+
+        workflows_out.append(
+            {
+                "n8n_workflow_id": wf_id,
+                "matched_catalog_id": matched_id,
+                "name": wf_name,
+                "active": is_active,
+                "last_execution_id": last_exec_id,
+                "last_execution_status": last_status,
+                "last_execution_at": last_at,
+                "last_error_node": err_node,
+                "last_error_message": err_msg,
+                "editor_url": f"{base_url}/workflow/{wf_id}",
+            }
+        )
+
+    return {
+        "configured": True,
+        "reachable": True,
+        "n8n_base_url": base_url,
+        "api_key_configured": True,
+        "active_count": active_count,
+        "error_count": error_count,
+        "message": f"Conectado a n8n ({len(workflows_out)} flujos totales · {active_count} de KigalContent activos · {error_count} con error).",
+        "workflows": workflows_out,
+    }
+
+
+@router.get("/n8n/live-status")
+async def get_n8n_live_status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Query the connected n8n server API for live active/inactive state and execution errors."""
+    return await _fetch_n8n_live_status_impl(db)
+
+
+@router.put("/n8n/connection")
+async def save_n8n_connection(
+    body: N8nConnectionPayload,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Save n8n server base URL and Public API key and return fresh live status."""
+    ws = await _get_default_workspace(db)
+    clean_url = body.base_url.strip().rstrip("/")
+    if not clean_url.startswith(("http://", "https://")):
+        clean_url = f"https://{clean_url}"
+
+    row = (
+        await db.execute(select(SocialCredential).where(SocialCredential.channel == "n8n_server"))
+    ).scalar_one_or_none()
+    if row is None:
+        row = SocialCredential(
+            workspace_id=ws.id,
+            channel="n8n_server",
+            access_token=(body.api_key or "").strip(),
+            account_name=clean_url,
+            extra_metadata={"base_url": clean_url},
+        )
+        db.add(row)
+    else:
+        if body.api_key is not None and body.api_key.strip():
+            row.access_token = body.api_key.strip()
+        row.account_name = clean_url
+        extra = dict(row.extra_metadata or {})
+        extra["base_url"] = clean_url
+        row.extra_metadata = extra
+    await db.commit()
+    return await _fetch_n8n_live_status_impl(db)
 
 
 # --- 11. Paid Ads Campaign Engine (Meta Ads, Google Ads Search/YouTube & Remotion) ---

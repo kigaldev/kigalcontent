@@ -17,7 +17,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/media/google-drive/scan",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/media/google-drive/scan",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"folder_url_or_id\": \"{{ $json.body.folder_url_or_id || 'TU_FOLDER_ID_AQUI' }}\"\n}",
@@ -32,7 +32,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/media/google-drive/import",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/media/google-drive/import",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"project_id\": \"{{ $('Webhook Nueva Grabación').item.json.body.project_id }}\",\n  \"file_url_or_id\": \"{{ $json.files[0].file_id }}\",\n  \"auto_process\": true\n}",

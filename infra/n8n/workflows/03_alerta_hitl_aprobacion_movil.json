@@ -36,7 +36,7 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_CHAT_ID || 'TU_CHAT_ID' }}",
+        "chatId": "={{ $json.body.telegram_chat_id || 'TU_CHAT_ID' }}",
         "text": "={{ $json.telegram_message }}",
         "additionalFields": {
           "parse_mode": "Markdown"

@@ -25,6 +25,7 @@ import type {
   LinkedInAdLibrarySearchResponse,
   LinkedInAdLibraryStatusResponse,
   MediaQCReport,
+  N8nLiveStatusResponse,
   N8nWorkflowTemplate,
   ProjectDetail,
   PublishingCalendarResponse,
@@ -625,6 +626,14 @@ export const apiClient = {
   mcpHealthcheck: () => requestJson<Record<string, unknown>>("/mcp/healthcheck"),
 
   listN8nWorkflows: () => requestJson<N8nWorkflowTemplate[]>("/n8n/workflows"),
+
+  getN8nLiveStatus: () => requestJson<N8nLiveStatusResponse>("/n8n/live-status"),
+
+  saveN8nConnection: (payload: { base_url: string; api_key?: string }) =>
+    requestJson<N8nLiveStatusResponse>("/n8n/connection", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 
   listKigalChatInteractions: () =>
     requestJson<KigalChatInteraction[]>("/kigalchat/interactions"),

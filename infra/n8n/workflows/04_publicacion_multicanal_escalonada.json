@@ -17,7 +17,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/hitl/issue-token",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/hitl/issue-token",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"project_id\": \"{{ $json.body.project_id }}\",\n  \"tier\": 3,\n  \"action\": \"publish_all_channels\",\n  \"actor\": \"creator\"\n}",
@@ -32,7 +32,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/social/publish",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/social/publish",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"project_id\": \"{{ $('Webhook Publicación Autorizada').item.json.body.project_id }}\",\n  \"channels\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\"],\n  \"hitl_token\": \"{{ $json.token }}\",\n  \"actor\": \"creator\"\n}",

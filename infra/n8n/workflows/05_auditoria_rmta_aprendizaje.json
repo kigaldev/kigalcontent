@@ -23,7 +23,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.ACE_BACKEND_API || 'https://autonomous-content-engine-backend-production.up.railway.app/api/v1' }}/analytics/diagnose-rmta",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/analytics/diagnose-rmta",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "{\n  \"window_type\": \"7d\",\n  \"views\": 4500,\n  \"baseline_views\": 2000,\n  \"hold_rate_3s\": 41.5,\n  \"completion_rate\": 58.0,\n  \"sends_per_reach\": 2.4,\n  \"dwell_time_seconds\": 34.0,\n  \"watch_time_share\": 62.0,\n  \"persist_rule\": true\n}",
