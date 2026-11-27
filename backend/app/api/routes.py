@@ -3601,9 +3601,8 @@ async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
     row = (
         await db.execute(select(SocialCredential).where(SocialCredential.channel == "n8n_server"))
     ).scalar_one_or_none()
-    extra = (row.extra_metadata or {}) if row else {}
     base_url = str(
-        extra.get("base_url")
+        (row.account_name if row and row.account_name else "")
         or os.environ.get("N8N_BASE_URL")
         or "http://127.0.0.1:5678"
     ).strip().rstrip("/")
@@ -3623,7 +3622,7 @@ async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
 
     headers = {"X-N8N-API-KEY": api_key, "Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=6.0) as client:
             wf_resp, ex_resp = await asyncio.gather(
                 client.get(f"{base_url}/api/v1/workflows?limit=100", headers=headers),
                 client.get(f"{base_url}/api/v1/executions?limit=40&includeData=true", headers=headers),
@@ -3742,30 +3741,25 @@ async def save_n8n_connection(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Save n8n server base URL and Public API key and return fresh live status."""
-    ws = await _get_default_workspace(db)
     clean_url = body.base_url.strip().rstrip("/")
     if not clean_url.startswith(("http://", "https://")):
-        clean_url = f"https://{clean_url}"
+        is_local = clean_url.startswith(("localhost", "127.0.0.1"))
+        clean_url = f"{'http' if is_local else 'https'}://{clean_url}"
 
     row = (
         await db.execute(select(SocialCredential).where(SocialCredential.channel == "n8n_server"))
     ).scalar_one_or_none()
     if row is None:
         row = SocialCredential(
-            workspace_id=ws.id,
             channel="n8n_server",
             access_token=(body.api_key or "").strip(),
             account_name=clean_url,
-            extra_metadata={"base_url": clean_url},
         )
         db.add(row)
     else:
         if body.api_key is not None and body.api_key.strip():
             row.access_token = body.api_key.strip()
         row.account_name = clean_url
-        extra = dict(row.extra_metadata or {})
-        extra["base_url"] = clean_url
-        row.extra_metadata = extra
     await db.commit()
     return await _fetch_n8n_live_status_impl(db)
 
