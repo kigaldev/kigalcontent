@@ -404,7 +404,7 @@ class TestFastAPIEndToEnd:
             resp = client.get("/api/v1/n8n/workflows")
             assert resp.status_code == 200
             workflows = resp.json()
-            assert len(workflows) == 5
+            assert len(workflows) >= 6
             filenames = {wf["filename"] for wf in workflows}
             assert "01_radar_ideas_ice_matutino.json" in filenames
             assert "05_auditoria_rmta_aprendizaje.json" in filenames

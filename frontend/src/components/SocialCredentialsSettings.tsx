@@ -337,6 +337,14 @@ const VISUAL_AI_PROVIDERS = [
     portalUrl: "https://www.canva.dev/",
     portalLabel: "Abrir Canva Developers",
   },
+  {
+    channel: "apify" as const,
+    title: "🎬 Apify (Radar Diario de Reels Virales · Flujo 06)",
+    subtitle: "Busca cada día los Reels con más reproducciones y engagement sobre los temas del Flujo 01 (plan gratuito incluye 5 $/mes)",
+    placeholder: "apify_api_... (Personal API Token de Apify)",
+    portalUrl: "https://console.apify.com/settings/integrations",
+    portalLabel: "Obtener API Token en Apify",
+  },
 ];
 
 export const SocialCredentialsSettings: React.FC = () => {
@@ -384,6 +392,7 @@ export const SocialCredentialsSettings: React.FC = () => {
     openai_gpt_images: "",
     gemini_nano_banana: "",
     canva: "",
+    apify: "",
   });
   const [savingVisualKey, setSavingVisualKey] = useState<string | null>(null);
   const [testingVisualKey, setTestingVisualKey] = useState<string | null>(null);
@@ -458,7 +467,7 @@ export const SocialCredentialsSettings: React.FC = () => {
   }, [ollamaDetectedModels]);
 
   const handleSaveVisualKey = async (
-    channel: "openai_gpt_images" | "gemini_nano_banana" | "canva"
+    channel: "openai_gpt_images" | "gemini_nano_banana" | "canva" | "apify"
   ) => {
     const rawKey = (visualApiKeys[channel] || "").trim();
     if (!rawKey) {
@@ -497,7 +506,7 @@ export const SocialCredentialsSettings: React.FC = () => {
   };
 
   const handleTestVisualKey = async (
-    channel: "openai_gpt_images" | "gemini_nano_banana" | "canva"
+    channel: "openai_gpt_images" | "gemini_nano_banana" | "canva" | "apify"
   ) => {
     setTestingVisualKey(channel);
     try {

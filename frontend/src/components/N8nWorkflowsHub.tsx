@@ -89,6 +89,20 @@ const FALLBACK_WORKFLOWS: N8nWorkflowTemplate[] = [
     endpoints_used: ["POST /api/v1/analytics/diagnose-rmta"],
     workflow_json: {},
   },
+  {
+    workflow_id: "06-radar-reels-virales",
+    filename: "06_radar_reels_virales_inspiracion.json",
+    name: "06 - Radar Diario de Reels Virales (Inspiración del Tema del Día)",
+    trigger_type: "Schedule / Cron",
+    schedule_or_webhook: "Todos los días 08:15 AM",
+    description:
+      "Toma las temáticas recién capturadas por el Flujo 01, busca los Reels con más reproducciones y engagement vía Apify y adjunta los mejores enlaces y ganchos a cada proyecto del Kanban.",
+    endpoints_used: [
+      "GET /api/v1/projects",
+      "POST /api/v1/radar/reels-inspiration",
+    ],
+    workflow_json: {},
+  },
 ];
 
 function formatRelativeTime(iso: string | null): string {
@@ -238,12 +252,12 @@ export function N8nWorkflowsHub() {
               {liveStatus?.reachable ? (
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/40">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  Conectado · {liveStatus.active_count}/5 activas
+                  Conectado · {liveStatus.active_count}/{workflows.length} activas
                   {liveStatus.error_count > 0 && ` · ${liveStatus.error_count} con error`}
                 </span>
               ) : (
                 <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/35">
-                  5 Flujos Oficiales
+                  {workflows.length} Flujos Oficiales
                 </span>
               )}
             </h3>

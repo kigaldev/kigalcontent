@@ -2524,6 +2524,7 @@ SUPPORTED_CREDENTIAL_CHANNELS = (
     "openai_gpt_images",
     "anthropic_claude",
     "canva",
+    "apify",
 )
 
 
@@ -2632,6 +2633,31 @@ async def test_social_credential(
             "channel": ch,
             "message": f"No hay ninguna clave/token de {ch} guardada ni introducida. Pégala y pulsa Guardar.",
         }
+
+    if ch == "apify":
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(f"https://api.apify.com/v2/users/me?token={token}")
+            if r.status_code == 200:
+                u_data = r.json().get("data") or {}
+                uname = str(u_data.get("username") or u_data.get("email") or "Apify Account")
+                row = (await db.execute(select(SocialCredential).where(SocialCredential.channel == ch))).scalar_one_or_none()
+                if row is None:
+                    db.add(SocialCredential(channel=ch, access_token=token, account_name=f"Apify (@{uname})"))
+                else:
+                    row.access_token = token
+                    row.account_name = f"Apify (@{uname})"
+                await db.commit()
+                return {
+                    "ok": True,
+                    "channel": ch,
+                    "account_name": f"Apify (@{uname})",
+                    "message": f"✅ API Token de Apify verificado (@{uname}) y guardado. El Radar Diario de Reels Virales (Flujo 06) ya está listo.",
+                }
+            return {
+                "ok": False,
+                "channel": ch,
+                "message": f"Apify rechazó el token (HTTP {r.status_code}). Cópialo desde console.apify.com/settings/integrations.",
+            }
 
     if ch == "gemini_nano_banana":
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -3553,6 +3579,18 @@ N8N_WORKFLOW_CATALOG: list[dict[str, Any]] = [
             "POST /api/v1/analytics/diagnose-rmta",
         ],
     },
+    {
+        "workflow_id": "06-radar-reels-virales",
+        "filename": "06_radar_reels_virales_inspiracion.json",
+        "name": "06 - Radar Diario de Reels Virales (Inspiración del Tema del Día)",
+        "trigger_type": "Schedule / Cron",
+        "schedule_or_webhook": "Todos los días 08:15 AM",
+        "description": "Toma las temáticas recién capturadas por el Flujo 01, busca los Reels con más reproducciones y engagement vía Apify y adjunta los mejores enlaces y ganchos a cada proyecto del Kanban.",
+        "endpoints_used": [
+            "GET /api/v1/projects",
+            "POST /api/v1/radar/reels-inspiration",
+        ],
+    },
 ]
 
 
@@ -3839,6 +3877,179 @@ async def save_n8n_connection(
         row.account_name = clean_url
     await db.commit()
     return await _fetch_n8n_live_status_impl(db)
+
+
+class ReelsInspirationRequest(BaseModel):
+    project_id: str | None = None
+    topic: str | None = None
+    hashtags: list[str] = Field(default_factory=list)
+    limit: int = Field(default=5, ge=1, le=12)
+
+
+_TOPIC_HASHTAG_MAP: list[tuple[tuple[str, ...], str]] = [
+    (("automatiz", "n8n", "workflow", "flujo"), "automatizacion"),
+    (("ecommerce", "e-commerce", "tienda online", "shopify"), "ecommerce"),
+    (("pyme", "pymes", "empresa", "negocio", "autonomo"), "pymes"),
+    (("marketing", "ventas", "cliente", "leads", "seo"), "marketingdigital"),
+    (("claude", "chatgpt", "openai", "gemini", "agente", "llm"), "herramientasia"),
+    (("digitaliz", "web", "transformacion"), "transformaciondigital"),
+]
+
+
+def _derive_reels_hashtags(topic: str, explicit: list[str]) -> list[str]:
+    clean_explicit = [
+        re.sub(r"[^a-z0-9]", "", h.lower().lstrip("#"))
+        for h in explicit
+        if h and h.strip()
+    ]
+    clean_explicit = [h for h in clean_explicit if len(h) >= 3]
+    if clean_explicit:
+        return list(dict.fromkeys(clean_explicit))[:3]
+
+    norm = unicodedata.normalize("NFD", (topic or "").lower())
+    norm = "".join(ch for ch in norm if unicodedata.category(ch) != "Mn")
+    picked: list[str] = ["inteligenciaartificial"]
+    for keys, tag in _TOPIC_HASHTAG_MAP:
+        if any(k in norm for k in keys) and tag not in picked:
+            picked.append(tag)
+        if len(picked) >= 3:
+            break
+    if len(picked) < 2:
+        picked.append("automatizacion")
+    return picked[:3]
+
+
+@router.post("/radar/reels-inspiration")
+async def radar_reels_inspiration(
+    body: ReelsInspirationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Find top-performing Instagram Reels matching a Radar Matutino project topic via Apify and attach them to context_notes."""
+    apify_token, _, _, _ = await _get_effective_social_credential(db, "apify")
+    apify_token = (apify_token or os.environ.get("APIFY_API_TOKEN") or "").strip()
+    if not apify_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta APIFY_API_TOKEN. Consigue tu token gratuito en console.apify.com/settings/integrations y guárdalo en Conexiones Oficiales → Motores Visuales → Apify.",
+        )
+
+    project: ContentProject | None = None
+    if body.project_id:
+        try:
+            pid = uuid.UUID(body.project_id)
+            project = (
+                await db.execute(select(ContentProject).where(ContentProject.id == pid))
+            ).scalar_one_or_none()
+        except ValueError:
+            project = None
+    elif not body.topic:
+        project = (
+            await db.execute(
+                select(ContentProject)
+                .where(ContentProject.source_origin == "radar_matutino")
+                .order_by(desc(ContentProject.created_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    topic = (body.topic or (project.working_title if project else "") or "inteligencia artificial para pymes").strip()
+    hashtags = _derive_reels_hashtags(topic, body.hashtags)
+
+    apify_url = (
+        f"https://api.apify.com/v2/acts/apify~instagram-hashtag-scraper/"
+        f"run-sync-get-dataset-items?token={apify_token}"
+    )
+    apify_payload = {
+        "hashtags": hashtags,
+        "resultsType": "reels",
+        "resultsLimit": 12,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(apify_url, json=apify_payload)
+            if resp.status_code in (401, 403):
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"Apify rechazó el token (HTTP {resp.status_code}). Revísalo en Conexiones Oficiales → Motores Visuales.",
+                )
+            resp.raise_for_status()
+            raw_items = resp.json()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error consultando Apify Reels Scraper: {str(exc)[:220]}",
+        ) from exc
+
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    ranked: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url and item.get("shortCode"):
+            url = f"https://www.instagram.com/reel/{item['shortCode']}/"
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        views = int(item.get("videoPlayCount") or item.get("videoViewCount") or item.get("playCount") or 0)
+        likes = int(item.get("likesCount") or 0)
+        comments = int(item.get("commentsCount") or 0)
+        duration = item.get("videoDuration")
+        caption = " ".join(str(item.get("caption") or "").split())
+        hook = caption[:140] + ("…" if len(caption) > 140 else "")
+        owner = str(item.get("ownerUsername") or item.get("ownerFullName") or "creador")
+        score = views + likes * 15 + comments * 40
+
+        ranked.append(
+            {
+                "url": url,
+                "owner_username": owner,
+                "views": views,
+                "likes": likes,
+                "comments": comments,
+                "duration_seconds": round(float(duration), 1) if isinstance(duration, (int, float)) else None,
+                "hook_excerpt": hook,
+                "engagement_score": score,
+                "timestamp": item.get("timestamp"),
+            }
+        )
+
+    ranked.sort(key=lambda r: r["engagement_score"], reverse=True)
+    top_reels = ranked[: body.limit]
+
+    attached_to_project = False
+    if project is not None and top_reels:
+        lines = [f"🎬 REELS VIRALES DE INSPIRACIÓN (#{', #'.join(hashtags)}):"]
+        for idx, r in enumerate(top_reels, start=1):
+            dur_txt = f" · {r['duration_seconds']}s" if r["duration_seconds"] else ""
+            lines.append(
+                f"{idx}. @{r['owner_username']} ({r['views']:,} views · {r['likes']:,} likes{dur_txt}) — {r['url']}\n   Gancho: \"{r['hook_excerpt']}\""
+            )
+        block = "\n".join(lines)
+        existing_notes = (project.context_notes or "").strip()
+        if "🎬 REELS VIRALES DE INSPIRACIÓN" in existing_notes:
+            existing_notes = existing_notes.split("🎬 REELS VIRALES DE INSPIRACIÓN")[0].strip()
+        project.context_notes = f"{existing_notes}\n\n{block}".strip() if existing_notes else block
+        await db.commit()
+        attached_to_project = True
+
+    return {
+        "ok": True,
+        "topic": topic,
+        "hashtags_used": hashtags,
+        "total_scanned": len(raw_items),
+        "top_reels": top_reels,
+        "project_id": str(project.id) if project else None,
+        "asset_code": project.asset_code if project else None,
+        "attached_to_project": attached_to_project,
+    }
 
 
 # --- 11. Paid Ads Campaign Engine (Meta Ads, Google Ads Search/YouTube & Remotion) ---
