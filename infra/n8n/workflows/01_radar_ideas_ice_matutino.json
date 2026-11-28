@@ -97,7 +97,13 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 240000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
         }
       },
       "id": "http-eval-ice",
@@ -142,7 +148,13 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ project_id: $json.project_id, duration_preset: 'STANDARD_SHORT', conversion_goal: 'EMAIL_LEAD_CAPTURE', wpm_rate: 140 }) }}",
         "options": {
-          "timeout": 120000
+          "timeout": 240000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
         }
       },
       "id": "http-generate-script",
