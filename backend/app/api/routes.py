@@ -2331,7 +2331,7 @@ async def generate_social_visual(
     gemini_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
 
     if provider == "z_image":
-        llm_cfg = get_llm_router()._effective_config()
+        llm_cfg = get_llm_router()._effective_settings()
         default_w = 768
         default_h = 960 if visual_type == "INFOGRAPHIC" else 768
         req_w = int(payload.get("width") or default_w)
@@ -2542,7 +2542,7 @@ async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[st
             "account_name": account_name or "",
             "masked_token": masked,
         }
-    llm_cfg = get_llm_router()._effective_config()
+    llm_cfg = get_llm_router()._effective_settings()
     z_status = await get_zimage_status(
         ollama_base_url=str(llm_cfg.get("ollama_base_url") or ""),
         ollama_api_key=str(llm_cfg.get("ollama_api_key") or ""),
@@ -2561,7 +2561,7 @@ async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[st
 @router.get("/zimage/status")
 async def zimage_status_endpoint() -> dict[str, Any]:
     """Return availability and hardware details for local/tunneled Z-Image-Turbo."""
-    llm_cfg = get_llm_router()._effective_config()
+    llm_cfg = get_llm_router()._effective_settings()
     return await get_zimage_status(
         ollama_base_url=str(llm_cfg.get("ollama_base_url") or ""),
         ollama_api_key=str(llm_cfg.get("ollama_api_key") or ""),
