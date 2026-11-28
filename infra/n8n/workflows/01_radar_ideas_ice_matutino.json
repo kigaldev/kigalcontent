@@ -17,7 +17,77 @@
       "name": "Cada Mañana 08:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [220, 300]
+      "position": [140, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=inteligencia+artificial+pymes+OR+automatizacion+empresas+when:2d&hl=es&gl=ES&ceid=ES:es"
+      },
+      "id": "rss-ia-pymes",
+      "name": "Google News ES · IA & Pymes",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [360, 300],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=ecommerce+OR+digitalizacion+pymes+OR+herramientas+IA+negocios+when:2d&hl=es&gl=ES&ceid=ES:es"
+      },
+      "id": "rss-ecommerce-dig",
+      "name": "Google News ES · E-commerce & Digitalización",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [580, 300],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://hn.algolia.com/api/v1/search_by_date?tags=story&query=AI+automation+OR+Claude+OR+LLM+OR+workflow&numericFilters=points>25&hitsPerPage=8",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "http-hackernews",
+      "name": "Hacker News · IA & Automatización",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 300],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/projects",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "http-existing-projects",
+      "name": "Proyectos Actuales KigalContent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1020, 300],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const normalize = (s) =>\n  String(s || '')\n    .toLowerCase()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9\\s]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\nconst cleanNewsTitle = (raw) => {\n  const t = String(raw || '').replace(/\\s+/g, ' ').trim();\n  const idx = t.lastIndexOf(' - ');\n  return idx > 25 ? t.slice(0, idx).trim() : t;\n};\n\n// 1. Collect existing titles in KigalContent to avoid duplicates\nconst existingTitles = new Set();\ntry {\n  for (const item of $('Proyectos Actuales KigalContent').all()) {\n    const j = item.json || {};\n    if (j.working_title) existingTitles.add(normalize(j.working_title));\n  }\n} catch (_) {}\n\nconst isDuplicate = (titleNorm) => {\n  if (!titleNorm || titleNorm.length < 12) return true;\n  if (existingTitles.has(titleNorm)) return true;\n  const words = new Set(titleNorm.split(' ').filter((w) => w.length > 4));\n  for (const ex of existingTitles) {\n    let overlap = 0;\n    for (const w of words) {\n      if (ex.includes(w)) overlap++;\n    }\n    if (words.size >= 3 && overlap >= Math.ceil(words.size * 0.65)) return true;\n  }\n  return false;\n};\n\n// 2. Niche relevance keywords (Kike Gallego: IA, automatizacion, pymes, ecommerce, web, digitalizacion)\nconst NICHE_KEYWORDS = [\n  ['pyme', 4], ['pymes', 4], ['empresa', 3], ['negocio', 3], ['automatiz', 4],\n  ['inteligencia artificial', 4], [' ia ', 3], ['agente', 3], ['agent', 3],\n  ['claude', 3], ['openai', 2], ['gemini', 2], ['ollama', 4], ['n8n', 4],\n  ['ecommerce', 4], ['e-commerce', 4], ['tienda online', 4], ['shopify', 3],\n  ['seo', 3], ['marketing', 2], ['clientes', 3], ['ventas', 3], ['productividad', 3],\n  ['digitalizacion', 4], ['transformacion digital', 4], ['workflow', 3], ['llm', 2]\n];\n\nconst scoreCandidate = (title, snippet, isSpanish, bonusPoints = 0) => {\n  const hay = ' ' + normalize(`${title} ${snippet}`) + ' ';\n  let score = isSpanish ? 4 : 1;\n  for (const [kw, pts] of NICHE_KEYWORDS) {\n    if (hay.includes(kw)) score += pts;\n  }\n  score += Math.min(4, Math.floor(bonusPoints / 40));\n  return score;\n};\n\nconst candidates = [];\nconst seen = new Set();\n\nconst pushCandidate = (rawTitle, link, snippet, sourceLabel, isSpanish, bonusPoints = 0) => {\n  const title = cleanNewsTitle(rawTitle);\n  const norm = normalize(title);\n  if (!title || seen.has(norm) || isDuplicate(norm)) return;\n  seen.add(norm);\n  const relevance = scoreCandidate(title, snippet, isSpanish, bonusPoints);\n  candidates.push({\n    title,\n    link: String(link || '').trim(),\n    snippet: String(snippet || '').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 360),\n    sourceLabel,\n    isSpanish,\n    relevance,\n  });\n};\n\n// 3. Gather Google News ES · IA & Pymes\ntry {\n  for (const item of $('Google News ES · IA & Pymes').all().slice(0, 12)) {\n    const j = item.json || {};\n    if (j.title) {\n      pushCandidate(j.title, j.link, j.contentSnippet || j.content || '', 'Google News ES · IA & Pymes', true);\n    }\n  }\n} catch (_) {}\n\n// 4. Gather Google News ES · E-commerce & Digitalización\ntry {\n  for (const item of $('Google News ES · E-commerce & Digitalización').all().slice(0, 12)) {\n    const j = item.json || {};\n    if (j.title) {\n      pushCandidate(j.title, j.link, j.contentSnippet || j.content || '', 'Google News ES · E-commerce & Digitalización', true);\n    }\n  }\n} catch (_) {}\n\n// 5. Gather Hacker News · IA & Automatización\ntry {\n  for (const item of $('Hacker News · IA & Automatización').all()) {\n    const hits = Array.isArray(item.json?.hits) ? item.json.hits : [];\n    for (const h of hits.slice(0, 8)) {\n      if (h.title) {\n        const url = h.url || `https://news.ycombinator.com/item?id=${h.objectID}`;\n        pushCandidate(h.title, url, `Tendencia tech en Hacker News (${h.points || 0} puntos, ${h.num_comments || 0} comentarios).`, 'Hacker News · Tech/IA', false, Number(h.points || 0));\n      }\n    }\n  }\n} catch (_) {}\n\ncandidates.sort((a, b) => b.relevance - a.relevance);\n\n// Pick top 2 (at most 1 English HN item so Spanish business news always leads)\nconst picked = [];\nlet enCount = 0;\nfor (const c of candidates) {\n  if (!c.isSpanish && enCount >= 1) continue;\n  picked.push(c);\n  if (!c.isSpanish) enCount++;\n  if (picked.length >= 2) break;\n}\n\nreturn picked.map((c) => ({\n  json: {\n    concept_title: c.title.slice(0, 180),\n    context_notes: `Radar Matutino (${c.sourceLabel}): ${c.snippet || c.title} | Enfoque para pymes españolas: traducir esta novedad en impacto práctico, ahorro de tiempo o captación de clientes. Fuente: ${c.link}`,\n    source_origin: 'radar_matutino',\n    source_url: c.link || 'https://news.google.com',\n    target_platforms: ['LinkedIn', 'Instagram', 'YouTube'],\n    target_duration: 'STANDARD_SHORT',\n    conversion_goal: 'EMAIL_LEAD_CAPTURE',\n    auto_evaluate_ai: true,\n    auto_create_project: true,\n  },\n}));\n"
+      },
+      "id": "code-filter-top2",
+      "name": "Seleccionar Top 2 Noticias Reales",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 300]
     },
     {
       "parameters": {
@@ -25,47 +95,44 @@
         "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/ideas/radar-matutino",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"concept_title\": \"Cómo automatizar la creación de contenido con IA local en MiniPC\",\n  \"context_notes\": \"Radar Matutino: Modelos abiertos Qwen3 y DeepSeek optimizados para MiniPCs de 24GB. Permite orquestar guiones, voces y edición sin cuotas de suscripción mensuales.\",\n  \"source_origin\": \"radar_matutino\",\n  \"source_url\": \"https://news.ycombinator.com\",\n  \"target_platforms\": [\"YouTube\", \"Instagram\", \"TikTok\", \"LinkedIn\", \"X\"],\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"auto_evaluate_ai\": true,\n  \"auto_create_project\": false\n}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "http-eval-ice",
       "name": "Radar Matutino Ingest & AI ICE",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [440, 300]
+      "position": [1460, 300]
     },
     {
       "parameters": {
         "conditions": {
-          "number": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
             {
-              "value1": "={{ $json.ice_score }}",
-              "operation": "largerEqual",
-              "value2": 7
+              "id": "cond-project-created",
+              "leftValue": "={{ $json.project_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
-      "id": "if-ice-alto",
-      "name": "¿ICE >= 7.0?",
+      "id": "if-project-created",
+      "name": "¿Proyecto Creado (ICE >= 7.0)?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [660, 300]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/projects",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"working_title\": \"{{ $json.concept_title || 'Idea Automática IA Local' }}\",\n  \"target_duration\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\"\n}",
-        "options": {}
-      },
-      "id": "http-create-project",
-      "name": "Crear Proyecto en Studio",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [900, 220]
+      "position": [1680, 300]
     },
     {
       "parameters": {
@@ -73,18 +140,75 @@
         "url": "https://autonomous-content-engine-backend-production.up.railway.app/api/v1/scripts/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"project_id\": \"{{ $json.id }}\",\n  \"duration_preset\": \"STANDARD_SHORT\",\n  \"conversion_goal\": \"EMAIL_LEAD_CAPTURE\",\n  \"wpm_rate\": 140\n}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify({ project_id: $json.project_id, duration_preset: 'STANDARD_SHORT', conversion_goal: 'EMAIL_LEAD_CAPTURE', wpm_rate: 140 }) }}",
+        "options": {
+          "timeout": 120000
+        }
       },
       "id": "http-generate-script",
       "name": "Generar Guión AV con Ollama",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1140, 220]
+      "position": [1900, 220]
     }
   ],
   "connections": {
     "Cada Mañana 08:00": {
+      "main": [
+        [
+          {
+            "node": "Google News ES · IA & Pymes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News ES · IA & Pymes": {
+      "main": [
+        [
+          {
+            "node": "Google News ES · E-commerce & Digitalización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News ES · E-commerce & Digitalización": {
+      "main": [
+        [
+          {
+            "node": "Hacker News · IA & Automatización",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hacker News · IA & Automatización": {
+      "main": [
+        [
+          {
+            "node": "Proyectos Actuales KigalContent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proyectos Actuales KigalContent": {
+      "main": [
+        [
+          {
+            "node": "Seleccionar Top 2 Noticias Reales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seleccionar Top 2 Noticias Reales": {
       "main": [
         [
           {
@@ -99,25 +223,14 @@
       "main": [
         [
           {
-            "node": "¿ICE >= 7.0?",
+            "node": "¿Proyecto Creado (ICE >= 7.0)?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "¿ICE >= 7.0?": {
-      "main": [
-        [
-          {
-            "node": "Crear Proyecto en Studio",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Crear Proyecto en Studio": {
+    "¿Proyecto Creado (ICE >= 7.0)?": {
       "main": [
         [
           {
