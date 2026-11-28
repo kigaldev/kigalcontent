@@ -712,9 +712,25 @@ export interface SocialVisualGenerateRequest {
   title: string;
   body: string;
   visual_type: "INFOGRAPHIC" | "IMAGE";
-  provider: "nano_banana" | "gpt_images" | "svg_local";
+  provider: "z_image" | "nano_banana" | "gpt_images" | "svg_local";
   prompt?: string;
   author_name?: string;
+  width?: number;
+  height?: number;
+  steps?: number;
+  seed?: number;
+}
+
+export interface ZImageStatusResponse {
+  available: boolean;
+  mode: "local_gpu" | "tunnel_gpu" | "unavailable" | string;
+  engine: string;
+  model: string;
+  text_encoder: string;
+  vae: string;
+  output_dir: string;
+  recent_outputs: string[];
+  message: string;
 }
 
 export interface SocialVisualGenerateResponse {

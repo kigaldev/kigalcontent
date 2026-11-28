@@ -121,7 +121,7 @@ export function LinkedInPlatformVisor({
 }: LinkedInPlatformVisorProps) {
   const hookInputRef = useRef<HTMLInputElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [visualProvider, setVisualProvider] = useState<"svg_local" | "nano_banana" | "gpt_images">("svg_local");
+  const [visualProvider, setVisualProvider] = useState<"z_image" | "svg_local" | "nano_banana" | "gpt_images">("z_image");
   const [visualType, setVisualType] = useState<"INFOGRAPHIC" | "IMAGE">("INFOGRAPHIC");
   const [visualPrompt, setVisualPrompt] = useState("");
   const [generatingVisual, setGeneratingVisual] = useState(false);
@@ -733,6 +733,15 @@ export function LinkedInPlatformVisor({
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       <span
                         className={`px-2 py-0.5 rounded-full border font-medium ${
+                          providerCreds.z_image?.configured
+                            ? "border-cyan-400/50 bg-cyan-500/15 text-cyan-200"
+                            : "border-slate-700 bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        ⚡ Z-Image: {providerCreds.z_image?.configured ? "✓ GPU Local 0 €" : "Offline"}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border font-medium ${
                           ollamaStatus.reachable
                             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
                             : "border-slate-700 bg-slate-900 text-slate-400"
@@ -906,10 +915,13 @@ export function LinkedInPlatformVisor({
                     Motor / Conector Visual
                     <select
                       value={visualProvider}
-                      onChange={(e) => setVisualProvider(e.target.value as "svg_local" | "nano_banana" | "gpt_images")}
+                      onChange={(e) => setVisualProvider(e.target.value as "z_image" | "svg_local" | "nano_banana" | "gpt_images")}
                       className="mt-1 w-full rounded-lg bg-[#020306] border border-slate-700 px-2.5 py-1.5 text-xs text-white"
                     >
-                      <option value="svg_local">⚡ Infografía Instantánea (Nativa SVG)</option>
+                      <option value="z_image">
+                        ⚡ Z-Image-Turbo (GPU Local MiniPC · 0 €){providerCreds.z_image?.configured ? " · ✓ Listo" : " · Offline"}
+                      </option>
+                      <option value="svg_local">📊 Infografía Instantánea (Nativa SVG)</option>
                       <option value="nano_banana">
                         🍌 Nano Banana (Google Gemini){providerCreds.gemini_nano_banana?.configured ? " · ✓ Conectado" : " · Sin Key"}
                       </option>

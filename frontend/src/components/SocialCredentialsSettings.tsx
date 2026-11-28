@@ -27,7 +27,7 @@ import {
 import { AstryxBadge, AstryxButton } from "@/components/ui/AstryxPrimitives";
 import { apiClient } from "@/lib/api";
 import { useEngineStore } from "@/store/useEngineStore";
-import type { LinkedInAdLibraryStatusResponse } from "@/types/engine";
+import type { LinkedInAdLibraryStatusResponse, ZImageStatusResponse } from "@/types/engine";
 
 interface SocialChannelGuide {
   id: "youtube" | "instagram" | "tiktok" | "linkedin";
@@ -404,6 +404,16 @@ export const SocialCredentialsSettings: React.FC = () => {
     message: null,
   });
 
+  // Local / Tunneled Z-Image-Turbo state
+  const [zImageStatus, setZImageStatus] = useState<ZImageStatusResponse | null>(null);
+  const [checkingZImage, setCheckingZImage] = useState(false);
+  const [zImagePrompt, setZImagePrompt] = useState(
+    "Minimalist dark glassmorphism tech studio workspace, dramatic cyan rim light, editorial photography"
+  );
+  const [generatingZImage, setGeneratingZImage] = useState(false);
+  const [zImagePreviewUrl, setZImagePreviewUrl] = useState<string | null>(null);
+  const [zImageFeedback, setZImageFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+
   // Hybrid Skill-Aware LLM Router state (MiniPC Ollama + OpenRouter optional)
   const [llmProvider, setLlmProvider] = useState<LLMProviderMode>("auto");
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState("http://127.0.0.1:11434");
@@ -545,11 +555,55 @@ export const SocialCredentialsSettings: React.FC = () => {
     }
   };
 
+  const handleCheckZImage = async () => {
+    setCheckingZImage(true);
+    try {
+      const st = await apiClient.getZImageStatus();
+      setZImageStatus(st);
+    } catch {
+      setZImageStatus(null);
+    } finally {
+      setCheckingZImage(false);
+    }
+  };
+
+  const handleTestGenerateZImage = async () => {
+    if (!zImagePrompt.trim()) return;
+    setGeneratingZImage(true);
+    setZImageFeedback(null);
+    try {
+      const res = await apiClient.generateSocialVisual({
+        title: "Prueba Z-Image-Turbo",
+        body: zImagePrompt.trim(),
+        visual_type: "IMAGE",
+        provider: "z_image",
+        prompt: zImagePrompt.trim(),
+        width: 768,
+        height: 768,
+        steps: 8,
+      });
+      setZImagePreviewUrl(res.image_url);
+      setZImageFeedback({
+        ok: res.provider === "z_image",
+        message: res.note,
+      });
+      await handleCheckZImage();
+    } catch (err) {
+      setZImageFeedback({
+        ok: false,
+        message: err instanceof Error ? err.message : "Error generando imagen con Z-Image-Turbo.",
+      });
+    } finally {
+      setGeneratingZImage(false);
+    }
+  };
+
   const loadSocialCredentials = async () => {
     try {
-      const [data, llmCfg] = await Promise.allSettled([
+      const [data, llmCfg, zStatus] = await Promise.allSettled([
         apiClient.getSocialCredentials(),
         apiClient.getLLMConfig(),
+        apiClient.getZImageStatus(),
       ]);
       if (data.status === "fulfilled" && data.value?.channels) {
         setServerCreds(data.value.channels);
@@ -570,6 +624,9 @@ export const SocialCredentialsSettings: React.FC = () => {
           models: detected,
           baseUrl: llmCfg.value.ollama_base_url || prev.baseUrl,
         }));
+      }
+      if (zStatus.status === "fulfilled" && zStatus.value) {
+        setZImageStatus(zStatus.value);
       }
     } catch {
       // silent offline fallback
@@ -1670,6 +1727,102 @@ export const SocialCredentialsSettings: React.FC = () => {
               </div>
             </div>
             <AstryxBadge label="Guardado seguro en servidor" variant="info" />
+          </div>
+
+          {/* Z-Image-Turbo Local GPU Image Generator Card */}
+          <div className="rounded-xl border-2 border-cyan-400/55 bg-gradient-to-br from-cyan-950/55 via-slate-950/85 to-fuchsia-950/35 p-4 space-y-3.5 shadow-lg shadow-cyan-950/30">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-cyan-300" />
+                    ⚡ Z-Image-Turbo (Generador de Imágenes IA Local · 0,00 €)
+                  </h4>
+                  {zImageStatus?.available ? (
+                    <AstryxBadge
+                      label={
+                        zImageStatus.mode === "local_gpu"
+                          ? "Conectado · GPU Local MiniPC"
+                          : "Conectado · Túnel GPU MiniPC"
+                      }
+                      variant="success"
+                    />
+                  ) : (
+                    <AstryxBadge label="No detectado" variant="neutral" />
+                  )}
+                </div>
+                <p className="text-xs text-slate-200 leading-relaxed">
+                  Genera imágenes editoriales, fondos de portadas y visuales PNG reales en tu{" "}
+                  <strong className="text-cyan-200">
+                    {zImageStatus?.engine || "stable-diffusion.cpp (Vulkan Radeon 780M)"}
+                  </strong>{" "}
+                  sin pagar APIs externas. Disponible también en el Estudio de Portadas y en el Visor de LinkedIn.
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[10px] font-mono">
+                  <span className="px-2 py-0.5 rounded-md bg-cyan-500/15 border border-cyan-400/35 text-cyan-200">
+                    Modelo: {zImageStatus?.model || "z_image_turbo-Q8_0.gguf"}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/15 text-slate-200">
+                    Encoder: {zImageStatus?.text_encoder || "Qwen3-4B-Instruct-2507-Q8_0.gguf"}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/15 text-slate-300">
+                    Auto-libera VRAM de Ollama antes de renderizar
+                  </span>
+                </div>
+              </div>
+              <AstryxButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                label={checkingZImage ? "Comprobando..." : "Comprobar Z-Image"}
+                icon={<RefreshCw className={`w-3.5 h-3.5 ${checkingZImage ? "animate-spin" : ""}`} />}
+                isLoading={checkingZImage}
+                onClick={() => void handleCheckZImage()}
+              />
+            </div>
+
+            {zImageStatus?.available && (
+              <div className="pt-2 border-t border-white/10 space-y-2.5">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={zImagePrompt}
+                    onChange={(e) => setZImagePrompt(e.target.value)}
+                    placeholder="Describe la imagen que quieres probar con Z-Image-Turbo..."
+                    className="flex-1 min-w-[240px] bg-slate-950 border-2 border-cyan-400/35 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-300"
+                  />
+                  <AstryxButton
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    label={generatingZImage ? "Generando (~90s)..." : "Probar Generación (768×768)"}
+                    icon={<Sparkles className="w-3.5 h-3.5" />}
+                    isLoading={generatingZImage}
+                    onClick={() => void handleTestGenerateZImage()}
+                  />
+                </div>
+                {zImageFeedback && (
+                  <div
+                    className={`rounded-xl border-2 px-3.5 py-2 text-xs ${
+                      zImageFeedback.ok
+                        ? "border-emerald-400/50 bg-emerald-950/40 text-emerald-200"
+                        : "border-amber-400/50 bg-amber-950/40 text-amber-200"
+                    }`}
+                  >
+                    {zImageFeedback.message}
+                  </div>
+                )}
+                {zImagePreviewUrl && (
+                  <div className="rounded-xl border border-cyan-400/35 bg-black/50 p-2 inline-block">
+                    <img
+                      src={zImagePreviewUrl}
+                      alt="Prueba Z-Image-Turbo"
+                      className="max-h-64 rounded-lg object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Local IA (Ollama) Visual Capability Matrix */}

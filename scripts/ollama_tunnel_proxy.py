@@ -1,23 +1,39 @@
-"""Authenticated local reverse proxy for exposing MiniPC Ollama safely via Cloudflare Tunnel.
+"""Authenticated local reverse proxy for exposing MiniPC Ollama and Z-Image-Turbo safely via Cloudflare Tunnel.
 
-Listens on 127.0.0.1:11435 (by default) and forwards only safe Ollama read/inference endpoints
-to http://127.0.0.1:11434 after verifying `Authorization: Bearer <OLLAMA_TUNNEL_TOKEN>`.
+Listens on 127.0.0.1:11435 (by default) and forwards safe Ollama read/inference endpoints
+to http://127.0.0.1:11434, plus local Z-Image-Turbo endpoints (`/zimage/status`, `/zimage/generate`),
+after verifying `Authorization: Bearer <OLLAMA_TUNNEL_TOKEN>`.
 """
 
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import os
+import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 LISTEN_HOST = os.environ.get("OLLAMA_PROXY_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("OLLAMA_PROXY_PORT", "11435"))
 UPSTREAM_BASE = os.environ.get("OLLAMA_UPSTREAM_URL", "http://127.0.0.1:11434").rstrip("/")
 REQUIRED_TOKEN = os.environ.get("OLLAMA_TUNNEL_TOKEN", "").strip()
+
+ZIMAGE_DIR = Path(os.environ.get("ZIMAGE_DIR", r"C:\ai\stable-diffusion"))
+ZIMAGE_CLI = ZIMAGE_DIR / "bin" / "sd-cli.exe"
+ZIMAGE_MODELS_DIR = ZIMAGE_DIR / "models"
+ZIMAGE_DIFFUSION = ZIMAGE_MODELS_DIR / "z_image_turbo-Q8_0.gguf"
+ZIMAGE_VAE = ZIMAGE_MODELS_DIR / "ae.safetensors"
+ZIMAGE_LLM = ZIMAGE_MODELS_DIR / "Qwen3-4B-Instruct-2507-Q8_0.gguf"
+ZIMAGE_OUTPUT_DIR = ZIMAGE_DIR / "salidas"
+_ZIMAGE_LOCK = threading.Lock()
 
 ALLOWED_PATHS = {
     "/api/tags",
@@ -28,6 +44,123 @@ ALLOWED_PATHS = {
     "/api/embeddings",
     "/api/embed",
 }
+
+
+def _zimage_status_payload() -> dict[str, object]:
+    missing: list[str] = []
+    for label, p in (
+        ("sd-cli.exe", ZIMAGE_CLI),
+        ("z_image_turbo-Q8_0.gguf", ZIMAGE_DIFFUSION),
+        ("ae.safetensors", ZIMAGE_VAE),
+        ("Qwen3-4B-Instruct-2507-Q8_0.gguf", ZIMAGE_LLM),
+    ):
+        if not p.is_file():
+            missing.append(label)
+    recent: list[str] = []
+    if ZIMAGE_OUTPUT_DIR.is_dir():
+        pngs = sorted(ZIMAGE_OUTPUT_DIR.glob("*.png"), key=lambda x: x.stat().st_mtime, reverse=True)
+        recent = [p.name for p in pngs[:5]]
+    return {
+        "available": len(missing) == 0,
+        "engine": "stable-diffusion.cpp (Vulkan Radeon 780M)",
+        "model": ZIMAGE_DIFFUSION.name,
+        "text_encoder": ZIMAGE_LLM.name,
+        "vae": ZIMAGE_VAE.name,
+        "output_dir": str(ZIMAGE_OUTPUT_DIR),
+        "missing_files": missing,
+        "recent_outputs": recent,
+    }
+
+
+def _unload_ollama_models() -> None:
+    """Unload any resident Ollama models so unified iGPU memory is free for Vulkan."""
+    try:
+        req = urllib.request.Request(f"{UPSTREAM_BASE}/api/ps", method="GET")
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for item in data.get("models", []):
+            name = item.get("name") or item.get("model")
+            if not name:
+                continue
+            unload_body = json.dumps({"model": name, "prompt": "", "keep_alive": 0}).encode("utf-8")
+            ureq = urllib.request.Request(
+                f"{UPSTREAM_BASE}/api/generate",
+                data=unload_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(ureq, timeout=10):
+                    pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _run_zimage_generation(prompt: str, width: int, height: int, steps: int, seed: int) -> dict[str, object]:
+    status = _zimage_status_payload()
+    if not status["available"]:
+        raise RuntimeError(f"Z-Image no disponible (faltan archivos: {status['missing_files']})")
+
+    ZIMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = ZIMAGE_OUTPUT_DIR / f"zimage_kc_{ts}.png"
+
+    width = max(512, min(1280, (int(width) // 64) * 64))
+    height = max(512, min(1280, (int(height) // 64) * 64))
+    steps = max(4, min(20, int(steps)))
+
+    with _ZIMAGE_LOCK:
+        _unload_ollama_models()
+        t0 = time.perf_counter()
+        cmd = [
+            str(ZIMAGE_CLI),
+            "--diffusion-model",
+            str(ZIMAGE_DIFFUSION),
+            "--vae",
+            str(ZIMAGE_VAE),
+            "--llm",
+            str(ZIMAGE_LLM),
+            "-p",
+            prompt,
+            "--cfg-scale",
+            "1.0",
+            "--steps",
+            str(steps),
+            "-W",
+            str(width),
+            "-H",
+            str(height),
+            "--seed",
+            str(int(seed)),
+            "-o",
+            str(out_path),
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=360,
+            check=False,
+        )
+        elapsed = round(time.perf_counter() - t0, 1)
+        if not out_path.is_file():
+            stderr_tail = (proc.stderr or proc.stdout or "").strip()[-400:]
+            raise RuntimeError(f"sd-cli no generó la imagen (exit {proc.returncode}): {stderr_tail}")
+
+        b64 = base64.b64encode(out_path.read_bytes()).decode("ascii")
+        return {
+            "ok": True,
+            "mime_type": "image/png",
+            "image_b64": b64,
+            "output_path": str(out_path),
+            "elapsed_seconds": elapsed,
+            "width": width,
+            "height": height,
+            "steps": steps,
+            "model": ZIMAGE_DIFFUSION.name,
+        }
 
 
 class OllamaAuthProxyHandler(BaseHTTPRequestHandler):
@@ -57,11 +190,43 @@ class OllamaAuthProxyHandler(BaseHTTPRequestHandler):
     def _proxy(self, method: str) -> None:
         path_only = self.path.split("?", 1)[0]
         if path_only == "/proxy-health":
-            self._send_json(200, {"status": "ok", "upstream": UPSTREAM_BASE})
+            self._send_json(
+                200,
+                {
+                    "status": "ok",
+                    "upstream": UPSTREAM_BASE,
+                    "zimage_available": bool(_zimage_status_payload()["available"]),
+                },
+            )
             return
 
         if not self._check_auth():
             self._send_json(401, {"error": "Unauthorized: valid Bearer token required"})
+            return
+
+        if path_only == "/zimage/status" and method == "GET":
+            self._send_json(200, _zimage_status_payload())
+            return
+
+        if path_only == "/zimage/generate" and method == "POST":
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                req_data = json.loads(raw.decode("utf-8") or "{}")
+                prompt = str(req_data.get("prompt") or "").strip()
+                if not prompt:
+                    self._send_json(400, {"error": "Prompt is required"})
+                    return
+                res = _run_zimage_generation(
+                    prompt=prompt,
+                    width=int(req_data.get("width") or 768),
+                    height=int(req_data.get("height") or 768),
+                    steps=int(req_data.get("steps") or 8),
+                    seed=int(req_data.get("seed") if req_data.get("seed") is not None else -1),
+                )
+                self._send_json(200, res)
+            except Exception as exc:
+                self._send_json(500, {"ok": False, "error": str(exc)})
             return
 
         if path_only not in ALLOWED_PATHS:

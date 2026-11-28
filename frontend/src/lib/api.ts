@@ -39,6 +39,7 @@ import type {
   SocialPost,
   TwoColumnScriptBlock,
   WatchTimeShareResponse,
+  ZImageStatusResponse,
 } from "@/types/engine";
 
 export const DEFAULT_PRODUCTION_BACKEND_URL =
@@ -420,13 +421,19 @@ export const apiClient = {
       body: JSON.stringify(payload),
     }),
 
+  getZImageStatus: () => requestJson<ZImageStatusResponse>("/zimage/status"),
+
   generateSocialVisual: (payload: {
     title: string;
     body: string;
     visual_type: "INFOGRAPHIC" | "IMAGE";
-    provider: "nano_banana" | "gpt_images" | "svg_local";
+    provider: "z_image" | "nano_banana" | "gpt_images" | "svg_local";
     prompt?: string;
     author_name?: string;
+    width?: number;
+    height?: number;
+    steps?: number;
+    seed?: number;
   }) =>
     requestJson<{
       image_url: string;

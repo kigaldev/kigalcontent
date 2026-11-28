@@ -167,6 +167,7 @@ from app.services.social_connectors import (
 from app.services.storage_s3 import ObjectStorageService
 from app.services.google_drive import GoogleDriveService
 from app.services.skill_llm_router import get_llm_router
+from app.services.zimage_service import generate_image_with_zimage, get_zimage_status
 from app.workers.media_pipeline import run_full_media_pipeline
 
 
@@ -2329,7 +2330,38 @@ async def generate_social_visual(
     openai_key, _, _, _ = await _get_effective_social_credential(db, "openai_gpt_images")
     gemini_key, _, _, _ = await _get_effective_social_credential(db, "gemini_nano_banana")
 
-    if provider == "gpt_images":
+    if provider == "z_image":
+        llm_cfg = get_llm_router()._effective_config()
+        default_w = 768
+        default_h = 960 if visual_type == "INFOGRAPHIC" else 768
+        req_w = int(payload.get("width") or default_w)
+        req_h = int(payload.get("height") or default_h)
+        req_steps = int(payload.get("steps") or 8)
+        req_seed = int(payload.get("seed") if payload.get("seed") is not None else -1)
+        try:
+            z_res = await generate_image_with_zimage(
+                prompt=ai_prompt,
+                width=req_w,
+                height=req_h,
+                steps=req_steps,
+                seed=req_seed,
+                ollama_base_url=str(llm_cfg.get("ollama_base_url") or ""),
+                ollama_api_key=str(llm_cfg.get("ollama_api_key") or ""),
+            )
+            image_url = z_res["image_url"]
+            used_provider = "z_image"
+            secs = z_res.get("elapsed_seconds")
+            secs_txt = f" en {secs}s" if secs is not None else ""
+            mode_txt = "GPU local del MiniPC" if z_res.get("mode") == "local_gpu" else "túnel GPU MiniPC"
+            provider_note = (
+                f"✅ Imagen {z_res.get('width', req_w)}×{z_res.get('height', req_h)} generada con "
+                f"Z-Image-Turbo ({mode_txt}{secs_txt} · 0,00 €)."
+            )
+        except Exception as exc:
+            logger.warning("Z-Image fallback to SVG: %s", exc)
+            provider_note = f"⚠️ Error con Z-Image-Turbo ({exc}). Se generó infografía SVG nativa como respaldo."
+
+    if not image_url and provider == "gpt_images":
         if not openai_key:
             provider_note = (
                 "⚠️ No tienes guardada tu API Key de GPT Images (OpenAI). "
@@ -2510,7 +2542,30 @@ async def list_social_credentials(db: AsyncSession = Depends(get_db)) -> dict[st
             "account_name": account_name or "",
             "masked_token": masked,
         }
+    llm_cfg = get_llm_router()._effective_config()
+    z_status = await get_zimage_status(
+        ollama_base_url=str(llm_cfg.get("ollama_base_url") or ""),
+        ollama_api_key=str(llm_cfg.get("ollama_api_key") or ""),
+    )
+    result["z_image"] = {
+        "channel": "z_image",
+        "configured": bool(z_status.get("available")),
+        "source": str(z_status.get("mode") or "unavailable"),
+        "person_urn": "",
+        "account_name": str(z_status.get("model") or "z_image_turbo-Q8_0.gguf"),
+        "masked_token": "GPU Local 0 €" if z_status.get("available") else "",
+    }
     return {"channels": result}
+
+
+@router.get("/zimage/status")
+async def zimage_status_endpoint() -> dict[str, Any]:
+    """Return availability and hardware details for local/tunneled Z-Image-Turbo."""
+    llm_cfg = get_llm_router()._effective_config()
+    return await get_zimage_status(
+        ollama_base_url=str(llm_cfg.get("ollama_base_url") or ""),
+        ollama_api_key=str(llm_cfg.get("ollama_api_key") or ""),
+    )
 
 
 @router.put("/social/credentials")

@@ -5,12 +5,14 @@ import {
   Download,
   Image as ImageIcon,
   Layers,
+  Loader2,
   Monitor,
   Smartphone,
   Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
+import { apiClient } from "@/lib/api";
 import type { ABPackagingVariant } from "@/types/engine";
 
 interface ThumbnailCoverStudioProps {
@@ -115,6 +117,8 @@ export function ThumbnailCoverStudio({
   const [showInstagramFeedGuide, setShowInstagramFeedGuide] = useState(true);
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
   const [bgFileName, setBgFileName] = useState<string | null>(null);
+  const [generatingBg, setGeneratingBg] = useState(false);
+  const [bgGenNotice, setBgGenNotice] = useState<string | null>(null);
 
   const width = aspect === "9:16" ? 1080 : 1280;
   const height = aspect === "9:16" ? 1920 : 720;
@@ -143,6 +147,39 @@ export function ThumbnailCoverStudio({
       img.src = String(reader.result);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleGenerateZImageBg = async () => {
+    setGeneratingBg(true);
+    setBgGenNotice(null);
+    try {
+      const genW = aspect === "9:16" ? 576 : 960;
+      const genH = aspect === "9:16" ? 1024 : 576;
+      const prompt = `Cinematic editorial background image without any text, letters or watermarks, modern tech & business studio aesthetic, dramatic lighting, topic: ${headline}. ${subtitle}`;
+      const res = await apiClient.generateSocialVisual({
+        title: headline,
+        body: subtitle,
+        visual_type: "IMAGE",
+        provider: "z_image",
+        prompt,
+        width: genW,
+        height: genH,
+        steps: 8,
+      });
+      const img = new Image();
+      img.onload = () => {
+        setBgImage(img);
+        setBgFileName(`zimage_${assetCode}.png`);
+      };
+      img.src = res.image_url;
+      setBgGenNotice(res.note);
+    } catch (err) {
+      setBgGenNotice(
+        err instanceof Error ? err.message : "No se pudo generar el fondo con Z-Image-Turbo."
+      );
+    } finally {
+      setGeneratingBg(false);
+    }
   };
 
   const renderCanvas = useCallback(() => {
@@ -549,6 +586,20 @@ export function ThumbnailCoverStudio({
                   <Upload className="w-3.5 h-3.5" />
                   {bgFileName ? "Cambiar Imagen" : "Subir Foto"}
                 </button>
+                <button
+                  type="button"
+                  disabled={generatingBg}
+                  onClick={() => void handleGenerateZImageBg()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/45 text-xs font-bold text-cyan-200 transition disabled:opacity-50"
+                  title="Genera un fondo personalizado con Z-Image-Turbo en tu MiniPC (0 €)"
+                >
+                  {generatingBg ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  <span>{generatingBg ? "Generando fondo..." : "Fondo IA (Z-Image)"}</span>
+                </button>
                 {bgImage && (
                   <button
                     type="button"
@@ -563,6 +614,12 @@ export function ThumbnailCoverStudio({
                 )}
               </div>
             </div>
+
+            {bgGenNotice && (
+              <p className="text-[11px] text-cyan-200 bg-cyan-950/35 border border-cyan-400/30 rounded-lg px-2.5 py-1.5">
+                {bgGenNotice}
+              </p>
+            )}
 
             {bgImage && (
               <label className="block text-[11px] text-slate-400">
