@@ -335,10 +335,10 @@ export function N8nWorkflowsHub() {
                   URL del servidor n8n (local o Tailscale/dominio)
                 </label>
                 <input
-                  type="url"
+                  type="text"
                   value={n8nBaseUrl}
                   onChange={(e) => setN8nBaseUrl(e.target.value)}
-                  placeholder="http://127.0.0.1:5678 o https://desktop-12bicv3.taild7aefb.ts.net"
+                  placeholder="http://127.0.0.1:5678 o 192.168.x.x:5678"
                   className="w-full bg-slate-950 border-2 border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-amber-400"
                 />
               </div>

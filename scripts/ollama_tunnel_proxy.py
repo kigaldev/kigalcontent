@@ -24,6 +24,7 @@ from pathlib import Path
 LISTEN_HOST = os.environ.get("OLLAMA_PROXY_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("OLLAMA_PROXY_PORT", "11435"))
 UPSTREAM_BASE = os.environ.get("OLLAMA_UPSTREAM_URL", "http://127.0.0.1:11434").rstrip("/")
+N8N_UPSTREAM_BASE = os.environ.get("N8N_UPSTREAM_URL", "http://127.0.0.1:5678").rstrip("/")
 REQUIRED_TOKEN = os.environ.get("OLLAMA_TUNNEL_TOKEN", "").strip()
 
 ZIMAGE_DIR = Path(os.environ.get("ZIMAGE_DIR", r"C:\ai\stable-diffusion"))
@@ -227,6 +228,37 @@ class OllamaAuthProxyHandler(BaseHTTPRequestHandler):
                 self._send_json(200, res)
             except Exception as exc:
                 self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+
+        if path_only in ("/n8n-proxy/api/v1/workflows", "/n8n-proxy/api/v1/executions") and method == "GET":
+            n8n_key = self.headers.get("X-N8N-API-KEY", "").strip()
+            if not n8n_key:
+                self._send_json(401, {"error": "X-N8N-API-KEY header required"})
+                return
+            suffix = self.path[len("/n8n-proxy"):]
+            n8n_url = f"{N8N_UPSTREAM_BASE}{suffix}"
+            n8n_req = urllib.request.Request(
+                n8n_url,
+                headers={"Accept": "application/json", "X-N8N-API-KEY": n8n_key},
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(n8n_req, timeout=12) as resp:
+                    resp_body = resp.read()
+                    self.send_response(resp.status)
+                    self.send_header("Content-Type", resp.headers.get("Content-Type", "application/json"))
+                    self.send_header("Content-Length", str(len(resp_body)))
+                    self.end_headers()
+                    self.wfile.write(resp_body)
+            except urllib.error.HTTPError as err:
+                err_body = err.read()
+                self.send_response(err.code)
+                self.send_header("Content-Type", err.headers.get("Content-Type", "application/json"))
+                self.send_header("Content-Length", str(len(err_body)))
+                self.end_headers()
+                self.wfile.write(err_body)
+            except Exception as exc:
+                self._send_json(502, {"error": f"Upstream n8n error: {exc}"})
             return
 
         if path_only not in ALLOWED_PATHS:

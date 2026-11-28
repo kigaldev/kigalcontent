@@ -3676,35 +3676,56 @@ async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
         }
 
     headers = {"X-N8N-API-KEY": api_key, "Accept": "application/json"}
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            wf_resp, ex_resp = await asyncio.gather(
-                client.get(f"{base_url}/api/v1/workflows?limit=100", headers=headers),
-                client.get(f"{base_url}/api/v1/executions?limit=40&includeData=true", headers=headers),
-            )
-            if wf_resp.status_code in (401, 403):
-                return {
-                    "configured": True,
-                    "reachable": False,
-                    "n8n_base_url": base_url,
-                    "api_key_configured": True,
-                    "active_count": 0,
-                    "error_count": 0,
-                    "message": f"n8n rechazó la API Key (HTTP {wf_resp.status_code}). Genera una nueva en n8n → Settings → n8n API.",
-                    "workflows": [],
-                }
-            wf_resp.raise_for_status()
-            wf_payload = wf_resp.json()
-            raw_wfs = wf_payload.get("data", wf_payload) if isinstance(wf_payload, dict) else wf_payload
-            if not isinstance(raw_wfs, list):
-                raw_wfs = []
+    via_tunnel = False
 
-            raw_execs: list[dict[str, Any]] = []
-            if ex_resp.status_code == 200:
-                ex_payload = ex_resp.json()
-                ex_list = ex_payload.get("data", ex_payload) if isinstance(ex_payload, dict) else ex_payload
-                if isinstance(ex_list, list):
-                    raw_execs = ex_list
+    async def _query_n8n_pair(target_base: str, req_headers: dict[str, str]):
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            return await asyncio.gather(
+                client.get(f"{target_base}/api/v1/workflows?limit=100", headers=req_headers),
+                client.get(f"{target_base}/api/v1/executions?limit=40&includeData=true", headers=req_headers),
+            )
+
+    try:
+        try:
+            wf_resp, ex_resp = await _query_n8n_pair(base_url, headers)
+        except Exception as direct_exc:
+            # If backend runs in the cloud (Railway) and cannot reach local/LAN/Tailscale IP directly,
+            # automatically route through the authenticated MiniPC Cloudflare tunnel proxy.
+            llm_cfg = get_llm_router()._effective_settings()
+            tunnel_base = str(llm_cfg.get("ollama_base_url") or "").strip().rstrip("/")
+            tunnel_token = str(llm_cfg.get("ollama_api_key") or "").strip()
+            if tunnel_base and not any(h in tunnel_base for h in ("127.0.0.1", "localhost")):
+                tunnel_headers = dict(headers)
+                if tunnel_token:
+                    tunnel_headers["Authorization"] = f"Bearer {tunnel_token}"
+                wf_resp, ex_resp = await _query_n8n_pair(f"{tunnel_base}/n8n-proxy", tunnel_headers)
+                via_tunnel = True
+            else:
+                raise direct_exc
+
+        if wf_resp.status_code in (401, 403):
+            return {
+                "configured": True,
+                "reachable": False,
+                "n8n_base_url": base_url,
+                "api_key_configured": True,
+                "active_count": 0,
+                "error_count": 0,
+                "message": f"n8n rechazó la API Key (HTTP {wf_resp.status_code}). Genera una nueva en n8n → Settings → n8n API.",
+                "workflows": [],
+            }
+        wf_resp.raise_for_status()
+        wf_payload = wf_resp.json()
+        raw_wfs = wf_payload.get("data", wf_payload) if isinstance(wf_payload, dict) else wf_payload
+        if not isinstance(raw_wfs, list):
+            raw_wfs = []
+
+        raw_execs: list[dict[str, Any]] = []
+        if ex_resp.status_code == 200:
+            ex_payload = ex_resp.json()
+            ex_list = ex_payload.get("data", ex_payload) if isinstance(ex_payload, dict) else ex_payload
+            if isinstance(ex_list, list):
+                raw_execs = ex_list
     except Exception as exc:
         return {
             "configured": True,
@@ -3772,6 +3793,7 @@ async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
             }
         )
 
+    via_txt = " vía túnel MiniPC" if via_tunnel else ""
     return {
         "configured": True,
         "reachable": True,
@@ -3779,7 +3801,7 @@ async def _fetch_n8n_live_status_impl(db: AsyncSession) -> dict[str, Any]:
         "api_key_configured": True,
         "active_count": active_count,
         "error_count": error_count,
-        "message": f"Conectado a n8n ({len(workflows_out)} flujos totales · {active_count} de KigalContent activos · {error_count} con error).",
+        "message": f"Conectado a n8n{via_txt} ({len(workflows_out)} flujos totales · {active_count} de KigalContent activos · {error_count} con error).",
         "workflows": workflows_out,
     }
 
@@ -3798,7 +3820,7 @@ async def save_n8n_connection(
     """Save n8n server base URL and Public API key and return fresh live status."""
     clean_url = body.base_url.strip().rstrip("/")
     if not clean_url.startswith(("http://", "https://")):
-        is_local = clean_url.startswith(("localhost", "127.0.0.1"))
+        is_local = clean_url.startswith(("localhost", "127.", "192.168.", "10.", "172."))
         clean_url = f"{'http' if is_local else 'https'}://{clean_url}"
 
     row = (
