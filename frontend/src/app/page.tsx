@@ -493,7 +493,7 @@ export default function KigalContentStudioPage() {
 
             {activeTab === "connections-apis" && (
               <div
-                role="tablist"
+                role="group"
                 aria-label="Secciones de Conexiones Oficiales y LLM"
                 className="flex flex-wrap items-center gap-2"
               >
@@ -504,8 +504,7 @@ export default function KigalContentStudioPage() {
                     <button
                       key={sec.id}
                       type="button"
-                      role="tab"
-                      aria-selected={isSelected}
+                      aria-pressed={isSelected}
                       onClick={() => setConnectionsSubTab(sec.id)}
                       className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
                         isSelected ? sec.activeClass : sec.idleClass
@@ -520,34 +519,6 @@ export default function KigalContentStudioPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              {activeTab === "connections-apis" && (
-                <div
-                  role="tablist"
-                  aria-label="Secciones de Conexiones Oficiales y LLM"
-                  className="flex flex-wrap items-center gap-1.5"
-                >
-                  {CONNECTIONS_SECTIONS.map((sec) => {
-                    const SecIcon = sec.icon;
-                    const isSelected = connectionsSubTab === sec.id;
-                    return (
-                      <button
-                        key={sec.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={isSelected}
-                        onClick={() => setConnectionsSubTab(sec.id)}
-                        className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
-                          isSelected ? sec.activeClass : sec.idleClass
-                        }`}
-                      >
-                        <SecIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                        <span>{sec.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
               <button
                 type="button"
                 onClick={() => setCreationGuideOpen(true)}
